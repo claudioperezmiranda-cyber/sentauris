@@ -849,7 +849,15 @@ const NuevoRegistro = () => {
       return true;
     });
   })();
-  const availableLicitations = licitaciones.filter(l => l.cliente_id === formData.clienteId);
+  const selectedCliente = clientesEmpresa.find(c => c.id === formData.clienteId);
+  const availableLicitations = licitaciones.filter(l => {
+    if (l.cliente_id === formData.clienteId) return true;
+    if (selectedCliente) {
+      const licCliente = clientes.find(c => c.id === l.cliente_id);
+      return licCliente && normalizeKey(licCliente.rut) === normalizeKey(selectedCliente.rut);
+    }
+    return false;
+  });
   const availableEquipos = equipos.filter(e => e.licitacion_id === formData.licitacionId);
   const unique = (values) => Array.from(new Set(values.filter(Boolean).map(v => String(v).trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const tipoEquipoOptions = unique(availableEquipos.map(e => e.tipo_equipo));
@@ -3628,7 +3636,8 @@ const MIGRATION_SQL = `ALTER TABLE licitaciones
 const isSchemaError = (msg) => msg && (msg.includes('schema cache') || msg.includes('column'));
 
 const MantenedoresLicitaciones = () => {
-  const { clientes, licitaciones, setLicitaciones, equipos, setEquipos } = useContext(ERPContext);
+  const { clientes, licitaciones, setLicitaciones, equipos, setEquipos, activeEmpresaId } = useContext(ERPContext);
+  const clientesEmpresa = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [preview, setPreview] = useState([]);
@@ -4029,7 +4038,7 @@ const MantenedoresLicitaciones = () => {
             </div>
             <Input label="Nombre Licitación *" value={modal.data.name}
               onChange={e => setField('name', e.target.value)} placeholder="Contrato Mantención 2025" />
-            <Select label="Cliente *" options={clientes} value={modal.data.cliente_id}
+            <Select label="Cliente *" options={clientesEmpresa} value={modal.data.cliente_id}
               onChange={e => setField('cliente_id', e.target.value)} placeholder="Seleccionar cliente..." />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input label="Fecha Inicio" type="date" value={modal.data.fecha_inicio}
