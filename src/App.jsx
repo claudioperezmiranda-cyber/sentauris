@@ -585,7 +585,9 @@ const ComboInput = ({ label, value, onChange, options = [], disabled, placeholde
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const filtered = options.filter(o => o.toLowerCase().includes(query.toLowerCase()));
+  const filtered = query
+    ? options.filter(o => o.toLowerCase().includes(query.toLowerCase()))
+    : options;
 
   const handleInput = (e) => {
     setQuery(e.target.value);
@@ -599,27 +601,23 @@ const ComboInput = ({ label, value, onChange, options = [], disabled, placeholde
     onChange({ target: { value: opt } });
   };
 
+  const chevronSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`;
+
   return (
     <div ref={ref} className="flex flex-col gap-1.5 w-full relative">
       {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
-      <div className="relative">
-        <input
-          type="text" value={query} onChange={handleInput}
-          onFocus={() => setOpen(true)}
-          disabled={disabled} placeholder={placeholder}
-          className="w-full px-3 py-2 pr-8 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all text-sm"
-        />
-        <button type="button" tabIndex={-1} disabled={disabled}
-          onClick={() => !disabled && setOpen(o => !o)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 disabled:opacity-30">
-          <ChevronLeft size={14} className={`transition-transform ${open ? 'rotate-90' : '-rotate-90'}`} />
-        </button>
-      </div>
+      <input
+        type="text" value={query} onChange={handleInput}
+        onFocus={() => setOpen(true)}
+        disabled={disabled} placeholder={placeholder || 'Seleccionar...'}
+        className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all text-sm"
+        style={{ backgroundImage: chevronSvg, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1em 1em', paddingRight: '2rem' }}
+      />
       {open && !disabled && filtered.length > 0 && (
         <ul className="absolute z-50 top-full mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
           {filtered.map(opt => (
             <li key={opt} onMouseDown={() => select(opt)}
-              className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 ${opt === value ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700'}`}>
+              className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-600 hover:text-white ${opt === value ? 'bg-blue-600 text-white font-medium' : 'text-slate-700'}`}>
               {opt}
             </li>
           ))}
