@@ -8842,7 +8842,7 @@ const ConfigPlaceholder = ({ titulo, descripcion }) => (
 
 // --- AUTH: LOGIN ---
 const LoginPage = () => {
-  const { usuarios, setLoggedInUser, setActiveEmpresaId } = useContext(ERPContext);
+  const { usuarios, setLoggedInUser, setActiveEmpresaId, loading } = useContext(ERPContext);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -8858,6 +8858,7 @@ const LoginPage = () => {
   const handleLogin = (e) => {
     e?.preventDefault();
     setError('');
+    if (loading) return;
     // Superadmin hardcoded
     if (username.trim().toLowerCase() === 'admin' && password === 'admin123') {
       const session = { isSuperadmin: true, usuario: 'admin', nombre: 'Administrador', cargo: 'Superadmin', accesos: [] };
@@ -8865,11 +8866,6 @@ const LoginPage = () => {
       localStorage.removeItem('sentauris_active_empresa');
       setLoggedInUser(session);
       localStorage.setItem('sentauris_session', JSON.stringify(session));
-      return;
-    }
-    // Usuarios del mantenedor
-    if (usuarios.length === 0) {
-      setError('Usa el superusuario: admin / admin123');
       return;
     }
     const user = usuarios.find(u =>
@@ -8926,9 +8922,9 @@ const LoginPage = () => {
               <AlertCircle size={13} /> {error}
             </div>
           )}
-          <button type="submit"
-            className="w-full py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-700 active:scale-[.98] transition-all shadow-lg shadow-blue-900/30">
-            Ingresar
+          <button type="submit" disabled={loading}
+            className="w-full py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-700 active:scale-[.98] transition-all shadow-lg shadow-blue-900/30 disabled:opacity-60 disabled:cursor-not-allowed">
+            {loading ? 'Cargando...' : 'Ingresar'}
           </button>
         </form>
       </div>
