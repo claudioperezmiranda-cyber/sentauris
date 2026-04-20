@@ -572,16 +572,62 @@ const Select = ({ label, options, value, onChange, disabled, placeholder }) => (
   </div>
 );
 
-const ComboInput = ({ label, value, onChange, options = [], disabled, placeholder, listId }) => (
-  <div className="flex flex-col gap-1.5 w-full">
-    {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
-    <input type="text" value={value} onChange={onChange} disabled={disabled} placeholder={placeholder} list={listId}
-      className="px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all text-sm" />
-    <datalist id={listId}>
-      {options.map(opt => <option key={opt} value={opt} />)}
-    </datalist>
-  </div>
-);
+const ComboInput = ({ label, value, onChange, options = [], disabled, placeholder }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value || '');
+  const ref = useRef(null);
+
+  useEffect(() => { setQuery(value || ''); }, [value]);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = options.filter(o => o.toLowerCase().includes(query.toLowerCase()));
+
+  const handleInput = (e) => {
+    setQuery(e.target.value);
+    setOpen(true);
+    onChange(e);
+  };
+
+  const select = (opt) => {
+    setQuery(opt);
+    setOpen(false);
+    onChange({ target: { value: opt } });
+  };
+
+  return (
+    <div ref={ref} className="flex flex-col gap-1.5 w-full relative">
+      {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
+      <div className="relative">
+        <input
+          type="text" value={query} onChange={handleInput}
+          onFocus={() => setOpen(true)}
+          disabled={disabled} placeholder={placeholder}
+          className="w-full px-3 py-2 pr-8 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all text-sm"
+        />
+        <button type="button" tabIndex={-1} disabled={disabled}
+          onClick={() => !disabled && setOpen(o => !o)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+          <ChevronLeft size={14} className={`transition-transform ${open ? 'rotate-90' : '-rotate-90'}`} />
+        </button>
+      </div>
+      {open && !disabled && filtered.length > 0 && (
+        <ul className="absolute z-50 top-full mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
+          {filtered.map(opt => (
+            <li key={opt} onMouseDown={() => select(opt)}
+              className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 ${opt === value ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700'}`}>
+              {opt}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
 
 const SignaturePad = ({ signerName, onChange, initialValue = '' }) => {
   const canvasRef = useRef(null);
