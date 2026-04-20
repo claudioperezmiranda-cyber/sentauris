@@ -795,7 +795,16 @@ const Dashboard = () => {
 // --- NUEVO REGISTRO ---
 const NuevoRegistro = () => {
   const { formData, setFormData, setActiveModule, generateFolio, clientes, licitaciones, equipos, activeEmpresaId } = useContext(ERPContext);
-  const clientesEmpresa = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
+  const clientesEmpresa = (() => {
+    const base = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
+    const seen = new Set();
+    return base.filter(c => {
+      const key = (c.rut || c.id || '').toLowerCase().replace(/[\s.]/g, '');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
   const availableLicitations = licitaciones.filter(l => l.cliente_id === formData.clienteId);
   const availableEquipos = equipos.filter(e => e.licitacion_id === formData.licitacionId);
   const unique = (values) => Array.from(new Set(values.filter(Boolean).map(v => String(v).trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
