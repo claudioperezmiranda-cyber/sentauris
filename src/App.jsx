@@ -1348,7 +1348,6 @@ const MantencionCorrectiva = () => {
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Descripción</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">P/N</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Cant.</th>
-                <th className="px-4 py-3 font-bold uppercase text-[10px]">Precio Unit.</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Bodega</th>
                 <th className="px-4 py-3"></th>
               </tr>
@@ -1359,7 +1358,6 @@ const MantencionCorrectiva = () => {
                   <td className="px-4 py-3 font-medium text-slate-700">{r.name}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.part_number}</td>
                   <td className="px-4 py-3"><input type="number" min="1" value={r.qty || 1} onChange={e => updateRepuestoSeleccionado(r.tempId, { qty: Number(e.target.value) || 1 })} className="w-12 border rounded px-1 text-center text-sm" /></td>
-                  <td className="px-4 py-3 text-slate-700">${Number(r.valor_neto || 0).toLocaleString('es-CL')}</td>
                   <td className="px-4 py-3"><input type="checkbox" checked={Boolean(r.toBodega)} onChange={e => updateRepuestoSeleccionado(r.tempId, { toBodega: e.target.checked })} className="w-4 h-4 rounded" /></td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => setRepuestosSeleccionados(prev => prev.filter(x => x.tempId !== r.tempId))} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
@@ -1367,7 +1365,7 @@ const MantencionCorrectiva = () => {
                 </tr>
               ))}
               {repuestosSeleccionados.length === 0 && (
-                <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-400 italic">No hay repuestos seleccionados</td></tr>
+                <tr><td colSpan="5" className="px-4 py-10 text-center text-slate-400 italic">No hay repuestos seleccionados</td></tr>
               )}
             </tbody>
           </table>
