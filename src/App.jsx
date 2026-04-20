@@ -5062,6 +5062,7 @@ const MantenedoresUsuarios = () => {
   const [modal, setModal] = useState(null); // null | { mode:'new'|'edit', data:{...} }
   const [selectedEmpresaId, setSelectedEmpresaId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
 
   const normalizeText = (v) => String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const filtered = usuarios.filter(u =>
@@ -5188,7 +5189,20 @@ const MantenedoresUsuarios = () => {
   const handleDelete = (u) => {
     if (!window.confirm(`¿Eliminar el usuario "${u.usuario}"?`)) return;
     setUsuarios(prev => prev.filter(x => x.id !== u.id));
+    setSelectedIds(prev => prev.filter(id => id !== u.id));
   };
+
+  const handleBulkDelete = () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`¿Eliminar ${selectedIds.length} usuario(s) seleccionado(s)? Esta acción no se puede deshacer.`)) return;
+    setUsuarios(prev => prev.filter(u => !selectedIds.includes(u.id)));
+    setSelectedIds([]);
+  };
+
+  const filteredIds = filtered.map(u => u.id);
+  const allVisibleSelected = filteredIds.length > 0 && filteredIds.every(id => selectedIds.includes(id));
+  const toggleRow = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleAll = () => setSelectedIds(prev => allVisibleSelected ? prev.filter(id => !filteredIds.includes(id)) : Array.from(new Set([...prev, ...filteredIds])));
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
@@ -5210,10 +5224,20 @@ const MantenedoresUsuarios = () => {
             <Plus size={14} /> Nuevo Usuario
           </button>
         </div>
+        {selectedIds.length > 0 && (
+          <div className="flex items-center justify-between gap-3 px-6 py-3 bg-blue-50 border-b border-blue-100">
+            <span className="text-sm font-semibold text-blue-700">{selectedIds.length} usuario(s) seleccionado(s)</span>
+            <Button variant="danger" icon={Trash2} onClick={handleBulkDelete}>Eliminar seleccionados</Button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 text-left border-b">
+                <th className="p-3 w-10">
+                  <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                </th>
                 {['Usuario', 'Nombre', 'RUT', 'Cargo', 'Contraseña', 'Módulos con acceso', 'Acciones'].map(h => (
                   <th key={h} className="p-3 text-[10px] font-bold uppercase text-slate-500">{h}</th>
                 ))}
@@ -5221,9 +5245,13 @@ const MantenedoresUsuarios = () => {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-400 italic">No hay usuarios registrados.</td></tr>
+                <tr><td colSpan="8" className="px-6 py-12 text-center text-slate-400 italic">No hay usuarios registrados.</td></tr>
               ) : filtered.map(u => (
-                <tr key={u.id} className="border-b hover:bg-slate-50">
+                <tr key={u.id} className={`border-b hover:bg-slate-50 ${selectedIds.includes(u.id) ? 'bg-blue-50/40' : ''}`}>
+                  <td className="p-3">
+                    <input type="checkbox" checked={selectedIds.includes(u.id)} onChange={() => toggleRow(u.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                  </td>
                   <td className="p-3 font-mono text-xs font-bold text-slate-700">{u.usuario}</td>
                   <td className="p-3 font-medium">{u.nombre}</td>
                   <td className="p-3 text-slate-600">{u.rut}</td>
@@ -8810,7 +8838,7 @@ const LoginPage = () => {
     }
     // Usuarios del mantenedor
     if (usuarios.length === 0) {
-      setError('No hay usuarios registrados. Usa admin / admin123.');
+      setError('Usa el superusuario: admin / admin123');
       return;
     }
     const user = usuarios.find(u =>
