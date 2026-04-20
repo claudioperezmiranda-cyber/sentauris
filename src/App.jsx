@@ -369,7 +369,7 @@ const ERPProvider = ({ children }) => {
         } else {
           setClientes(prev => {
             const local = Array.isArray(prev) ? prev : [];
-            const remote = (clientesData || []).map(normalizeCliente);
+            const remote = (clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null }));
             const seen = new Set(remote.map(c => c.id || normalizeKey(c.rut)));
             return [...remote, ...local.filter(c => !seen.has(c.id || normalizeKey(c.rut)))];
           });
@@ -3364,21 +3364,30 @@ const MantenedoresClientesProveedores = () => {
   const updateSucursal = (id, key, value) => setModal(m => ({ ...m, data: { ...m.data, sucursales: (m.data.sucursales || []).map(s => s.id === id ? { ...s, [key]: value } : s) } }));
   const removeSucursal = (id) => setModal(m => ({ ...m, data: { ...m.data, sucursales: (m.data.sucursales || []).filter(s => s.id !== id) } }));
 
-  const saveRecord = () => {
+  const saveRecord = async () => {
     if (!activeEmpresaId) { alert('Selecciona una empresa activa antes de guardar.'); return; }
     const data = { ...modal.data, empresaId: activeEmpresaId, name: modal.data.razonSocial, email: modal.data.correoComercial || modal.data.correoSii };
     if (!data.rut || !data.razonSocial) { alert('RUT y Razón Social son obligatorios.'); return; }
     const duplicate = clientes.some(c => c.empresaId === activeEmpresaId && normalizeKey(c.rut) === normalizeKey(data.rut) && c.id !== data.id);
     if (duplicate) { alert('Ya existe un cliente/proveedor con ese RUT en la empresa activa.'); return; }
-    setClientes(prev => modal.mode === 'new'
-      ? [{ ...data, id: `cp-${Date.now()}` }, ...prev]
-      : prev.map(c => c.id === data.id ? data : c)
-    );
+    const payload = { name: data.razonSocial, Email: data.rut, empresa_id: activeEmpresaId };
+    if (modal.mode === 'new') {
+      const { data: row, error } = await supabase.from('clientes').insert([payload]).select().single();
+      if (error) { alert('Error al guardar: ' + error.message); return; }
+      const normalized = { ...normalizeCliente(row), ...data, id: row.id, empresaId: activeEmpresaId };
+      setClientes(prev => [normalized, ...prev]);
+    } else {
+      const { error } = await supabase.from('clientes').update(payload).eq('id', data.id);
+      if (error) { alert('Error al guardar: ' + error.message); return; }
+      setClientes(prev => prev.map(c => c.id === data.id ? { ...data } : c));
+    }
     closeModal();
   };
 
-  const deleteRecord = (record) => {
+  const deleteRecord = async (record) => {
     if (!window.confirm(`Eliminar "${record.razonSocial || record.name}"?`)) return;
+    const { error } = await supabase.from('clientes').delete().eq('id', record.id);
+    if (error) { alert('Error al eliminar: ' + error.message); return; }
     setClientes(prev => prev.filter(c => c.id !== record.id));
   };
 
