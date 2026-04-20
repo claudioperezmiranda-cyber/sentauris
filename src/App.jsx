@@ -354,11 +354,13 @@ const ERPProvider = ({ children }) => {
         const [{ data: clientesData, error: e1 },
                { data: licitData, error: e2 },
                { data: repData, error: e3 },
-               { data: equiposData, error: e4 }] = await Promise.all([
+               { data: equiposData, error: e4 },
+               { data: usuariosData, error: e5 }] = await Promise.all([
           supabase.from('clientes').select('*').order('name'),
           supabase.from('licitaciones').select('*').order('name'),
           supabase.from('repuestos').select('*'),
-          supabase.from('equipos').select('*')
+          supabase.from('equipos').select('*'),
+          supabase.from('usuarios').select('*'),
         ]);
 
         if (e1 || e2 || e3 || e4) {
@@ -374,6 +376,13 @@ const ERPProvider = ({ children }) => {
           setLicitaciones(licitData || []);
           setRepuestos(repData || []);
           setEquipos(equiposData || []);
+          if (!e5 && usuariosData) {
+            setUsuarios(usuariosData.map(u => ({
+              ...u,
+              accesos: u.accesos || [],
+              permisosEmpresas: u.permisos_empresas || {},
+            })));
+          }
           setDbStatus('ok');
         }
       } catch (err) {
@@ -410,9 +419,7 @@ const ERPProvider = ({ children }) => {
     localStorage.setItem('sentauris_registro_compras', JSON.stringify(registroCompras));
   }, [registroCompras]);
 
-  useEffect(() => {
-    localStorage.setItem('sentauris_usuarios', JSON.stringify(usuarios));
-  }, [usuarios]);
+  // usuarios se persisten en Supabase, no en localStorage
 
   useEffect(() => {
     localStorage.setItem('sentauris_empresas', JSON.stringify(empresas));
@@ -5167,7 +5174,18 @@ const MantenedoresUsuarios = () => {
         return parentAllowed ? mod : null;
       }).filter(Boolean);
 
-  const handleSave = () => {
+  const toSupabasePayload = (data) => ({
+    id: data.id || Date.now().toString(),
+    usuario: data.usuario.trim(),
+    nombre: data.nombre.trim(),
+    rut: data.rut.trim(),
+    cargo: data.cargo || '',
+    contrasena: data.contrasena || '',
+    accesos: buildAccessUnion(data),
+    permisos_empresas: data.permisosEmpresas || {},
+  });
+
+  const handleSave = async () => {
     const { mode, data } = modal;
     if (!data.usuario.trim() || !data.nombre.trim() || !data.rut.trim()) {
       alert('Usuario, nombre y RUT son requeridos.');
@@ -5176,25 +5194,38 @@ const MantenedoresUsuarios = () => {
     const rutDup = usuarios.some(u => normalizeText(u.rut) === normalizeText(data.rut) && u.id !== data.id);
     if (rutDup) { alert(`El RUT ${data.rut} ya está registrado.`); return; }
     setSaving(true);
-    const payload = { ...data, accesos: buildAccessUnion(data) };
-    if (mode === 'new') {
-      setUsuarios(prev => [{ ...payload, id: Date.now().toString() }, ...prev]);
-    } else {
-      setUsuarios(prev => prev.map(u => u.id === data.id ? { ...payload } : u));
+    try {
+      const payload = toSupabasePayload(data);
+      if (mode === 'new') {
+        const { data: row, error } = await supabase.from('usuarios').insert([payload]).select().single();
+        if (error) throw error;
+        setUsuarios(prev => [{ ...row, accesos: row.accesos || [], permisosEmpresas: row.permisos_empresas || {} }, ...prev]);
+      } else {
+        const { data: row, error } = await supabase.from('usuarios').update(payload).eq('id', data.id).select().single();
+        if (error) throw error;
+        setUsuarios(prev => prev.map(u => u.id === row.id ? { ...row, accesos: row.accesos || [], permisosEmpresas: row.permisos_empresas || {} } : u));
+      }
+      closeModal();
+    } catch (err) {
+      alert('Error al guardar usuario: ' + (err.message || err));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    closeModal();
   };
 
-  const handleDelete = (u) => {
+  const handleDelete = async (u) => {
     if (!window.confirm(`¿Eliminar el usuario "${u.usuario}"?`)) return;
+    const { error } = await supabase.from('usuarios').delete().eq('id', u.id);
+    if (error) { alert('Error al eliminar: ' + error.message); return; }
     setUsuarios(prev => prev.filter(x => x.id !== u.id));
     setSelectedIds(prev => prev.filter(id => id !== u.id));
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return;
     if (!window.confirm(`¿Eliminar ${selectedIds.length} usuario(s) seleccionado(s)? Esta acción no se puede deshacer.`)) return;
+    const { error } = await supabase.from('usuarios').delete().in('id', selectedIds);
+    if (error) { alert('Error al eliminar: ' + error.message); return; }
     setUsuarios(prev => prev.filter(u => !selectedIds.includes(u.id)));
     setSelectedIds([]);
   };
