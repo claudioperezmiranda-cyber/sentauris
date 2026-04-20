@@ -8842,45 +8842,59 @@ const ConfigPlaceholder = ({ titulo, descripcion }) => (
 
 // --- AUTH: LOGIN ---
 const LoginPage = () => {
-  const { usuarios, setLoggedInUser, setActiveEmpresaId, loading } = useContext(ERPContext);
+  const { setLoggedInUser, setActiveEmpresaId } = useContext(ERPContext);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
 
-  // Limpiar sesión corrupta al montar
   useEffect(() => {
     localStorage.removeItem('sentauris_session');
     localStorage.removeItem('sentauris_active_empresa');
     setActiveEmpresaId('');
   }, [setActiveEmpresaId]);
 
-  const handleLogin = (e) => {
+  const doLogin = (session) => {
+    setActiveEmpresaId('');
+    localStorage.removeItem('sentauris_active_empresa');
+    setLoggedInUser(session);
+    localStorage.setItem('sentauris_session', JSON.stringify(session));
+  };
+
+  const handleLogin = async (e) => {
     e?.preventDefault();
     setError('');
-    if (loading) return;
+    const user = username.trim().toLowerCase();
+    const pass = password.trim();
+
     // Superadmin hardcoded
-    if (username.trim().toLowerCase() === 'admin' && password === 'admin123') {
-      const session = { isSuperadmin: true, usuario: 'admin', nombre: 'Administrador', cargo: 'Superadmin', accesos: [] };
-      setActiveEmpresaId('');
-      localStorage.removeItem('sentauris_active_empresa');
-      setLoggedInUser(session);
-      localStorage.setItem('sentauris_session', JSON.stringify(session));
+    if (user === 'admin' && pass === 'admin123') {
+      doLogin({ isSuperadmin: true, usuario: 'admin', nombre: 'Administrador', cargo: 'Superadmin', accesos: [] });
       return;
     }
-    const user = usuarios.find(u =>
-      (u.usuario || '').trim().toLowerCase() === username.trim().toLowerCase() &&
-      (u.contrasena || '').trim() === password.trim()
-    );
-    if (user) {
-      const session = { ...user, isSuperadmin: false };
-      setActiveEmpresaId('');
-      localStorage.removeItem('sentauris_active_empresa');
-      setLoggedInUser(session);
-      localStorage.setItem('sentauris_session', JSON.stringify(session));
-    } else {
-      const userExists = usuarios.some(u => (u.usuario || '').trim().toLowerCase() === username.trim().toLowerCase());
-      setError(userExists ? 'Contraseña incorrecta.' : 'Usuario no encontrado.');
+
+    setChecking(true);
+    try {
+      const { data, error: dbError } = await supabase
+        .from('usuarios')
+        .select('*')
+        .ilike('usuario', user)
+        .single();
+
+      if (dbError || !data) {
+        setError('Usuario no encontrado.');
+        return;
+      }
+      if ((data.contrasena || '').trim() !== pass) {
+        setError('Contraseña incorrecta.');
+        return;
+      }
+      doLogin({ ...data, accesos: data.accesos || [], permisosEmpresas: data.permisos_empresas || {}, isSuperadmin: false });
+    } catch {
+      setError('Error al conectar con el servidor.');
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -8922,9 +8936,9 @@ const LoginPage = () => {
               <AlertCircle size={13} /> {error}
             </div>
           )}
-          <button type="submit" disabled={loading}
+          <button type="submit" disabled={checking}
             className="w-full py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-700 active:scale-[.98] transition-all shadow-lg shadow-blue-900/30 disabled:opacity-60 disabled:cursor-not-allowed">
-            {loading ? 'Cargando...' : 'Ingresar'}
+            {checking ? 'Verificando...' : 'Ingresar'}
           </button>
         </form>
       </div>
