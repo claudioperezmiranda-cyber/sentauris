@@ -794,7 +794,8 @@ const Dashboard = () => {
 
 // --- NUEVO REGISTRO ---
 const NuevoRegistro = () => {
-  const { formData, setFormData, setActiveModule, generateFolio, clientes, licitaciones, equipos } = useContext(ERPContext);
+  const { formData, setFormData, setActiveModule, generateFolio, clientes, licitaciones, equipos, activeEmpresaId } = useContext(ERPContext);
+  const clientesEmpresa = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
   const availableLicitations = licitaciones.filter(l => l.cliente_id === formData.clienteId);
   const availableEquipos = equipos.filter(e => e.licitacion_id === formData.licitacionId);
   const unique = (values) => Array.from(new Set(values.filter(Boolean).map(v => String(v).trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
@@ -831,7 +832,7 @@ const NuevoRegistro = () => {
   const handleChange = (field, value) => {
     const newData = { ...formData, [field]: value };
     if (field === 'clienteId') {
-      const client = clientes.find(c => c.id === value);
+      const client = clientesEmpresa.find(c => c.id === value);
       newData.rut = client?.rut || '';
       newData.clienteNombre = client?.name || '';
       newData.licitacionId = '';
@@ -902,7 +903,7 @@ const NuevoRegistro = () => {
     if (!newCliente.name || !newCliente.rut) return;
     setSaving(true);
 
-    const rutExists = clientes.some(c => c.rut?.toLowerCase().replace(/[\s.]/g, '') === newCliente.rut.toLowerCase().replace(/[\s.]/g, ''));
+    const rutExists = clientesEmpresa.some(c => c.rut?.toLowerCase().replace(/[\s.]/g, '') === newCliente.rut.toLowerCase().replace(/[\s.]/g, ''));
     if (rutExists) {
       alert(`Error: El RUT ${newCliente.rut} ya se encuentra registrado.`);
       setSaving(false);
@@ -942,7 +943,7 @@ const NuevoRegistro = () => {
       <Card>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <Select label="Cliente" options={clientes} value={formData.clienteId} onChange={(e) => handleChange('clienteId', e.target.value)} />
+            <Select label="Cliente" options={clientesEmpresa} value={formData.clienteId} onChange={(e) => handleChange('clienteId', e.target.value)} />
             <button onClick={() => setShowNewCliente(!showNewCliente)} className="text-xs text-blue-600 hover:underline font-medium">
               {showNewCliente ? '— Cancelar nuevo cliente' : '+ Agregar nuevo cliente'}
             </button>
