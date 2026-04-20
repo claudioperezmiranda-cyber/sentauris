@@ -1218,7 +1218,15 @@ const MantencionCorrectiva = () => {
   const { formData, setActiveModule, repuestos, saveOrden, resetRegistrationForm, currentUser } = useContext(ERPContext);
   const defaultCondicionInicial = `Se recibe equipo ${formData.tipoEquipo || 'sin tipo definido'} ${formData.marca || ''} ${formData.modelo || ''}, serie ${formData.numeroSerie || 'sin serie'}, inventario ${formData.numeroInventario || 'sin inventario'}, ubicado en ${formData.ubicacionArea || 'area no informada'}, por solicitud de ${formData.solicitadoPor || 'solicitante no informado'}, reportando fallas o problemas en su funcionamiento.`;
   const isReopenedCorrectiva = Boolean(formData.ordenId);
-  const [repuestosSeleccionados, setRepuestosSeleccionados] = useState(Array.isArray(formData.correctivaRepuestos) ? formData.correctivaRepuestos : []);
+  const repuestoVisibleFields = (r = {}) => ({
+    id: r.id,
+    name: r.name || '',
+    part_number: r.part_number || '',
+    qty: r.qty || 1,
+    toBodega: Boolean(r.toBodega),
+    tempId: r.tempId || `${r.id || 'repuesto'}-${Date.now()}-${Math.random()}`
+  });
+  const [repuestosSeleccionados, setRepuestosSeleccionados] = useState(Array.isArray(formData.correctivaRepuestos) ? formData.correctivaRepuestos.map(repuestoVisibleFields) : []);
   const [condicionInicial, setCondicionInicial] = useState(formData.correctivaCondicionInicial || defaultCondicionInicial);
   const [diagnostico, setDiagnostico] = useState({
     text: formData.correctivaDiagnostico || '',
@@ -1246,7 +1254,7 @@ const MantencionCorrectiva = () => {
   const addRepuesto = (id) => {
     const r = availableRepuestos.find(rep => rep.id === id);
     if (!r) return;
-    setRepuestosSeleccionados(prev => [...prev, { ...r, qty: 1, toBodega: false, tempId: Date.now() }]);
+    setRepuestosSeleccionados(prev => [...prev, repuestoVisibleFields({ ...r, qty: 1, toBodega: false, tempId: Date.now() })]);
   };
   const updateRepuestoSeleccionado = (tempId, patch) => {
     setRepuestosSeleccionados(prev => prev.map(r => r.tempId === tempId ? { ...r, ...patch } : r));
