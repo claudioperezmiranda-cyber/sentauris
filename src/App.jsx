@@ -325,7 +325,7 @@ const ERPProvider = ({ children }) => {
     : MOCK_USER;
   const [activeModule, setActiveModule] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [clientes, setClientes] = useState(() => readLocalList('sentauris_clientes'));
+  const [clientes, setClientes] = useState([]);
   const [licitaciones, setLicitaciones] = useState([]);
   const [repuestos, setRepuestos] = useState([]);
   const [equipos, setEquipos] = useState([]);
@@ -368,9 +368,7 @@ const ERPProvider = ({ children }) => {
           console.error('Error Supabase:', e1 || e2 || e3 || e4 || e5);
           setDbStatus('error');
         } else {
-          const clientesRemote = (clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null }));
-          setClientes(clientesRemote);
-          localStorage.setItem('sentauris_clientes', JSON.stringify(clientesRemote));
+          setClientes((clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null })));
           setLicitaciones(licitData || []);
           setRepuestos(repData || []);
           setEquipos(equiposData || []);
@@ -404,8 +402,8 @@ const ERPProvider = ({ children }) => {
   }, [rendiciones]);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_clientes', JSON.stringify(clientes));
-  }, [clientes]);
+    localStorage.removeItem('sentauris_clientes');
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('sentauris_comprobantes', JSON.stringify(comprobantes));
