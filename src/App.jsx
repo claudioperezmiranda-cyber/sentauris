@@ -155,7 +155,8 @@ const normalizeCliente = (cliente) => cliente ? ({
 
 const clienteBasePayload = (data) => ({
   name: data.name,
-  Email: data.rut,
+  rut: data.rut || null,
+  empresa_id: data.empresaId || data.empresa_id || null,
 });
 
 const clienteFullPayload = (data) => ({
@@ -363,26 +364,21 @@ const ERPProvider = ({ children }) => {
           supabase.from('usuarios').select('*'),
         ]);
 
-        if (e1 || e2 || e3 || e4) {
-          console.error('Error Supabase:', e1 || e2 || e3 || e4);
+        if (e1 || e2 || e3 || e4 || e5) {
+          console.error('Error Supabase:', e1 || e2 || e3 || e4 || e5);
           setDbStatus('error');
         } else {
-          setClientes(prev => {
-            const local = Array.isArray(prev) ? prev : [];
-            const remote = (clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null }));
-            const seen = new Set(remote.map(c => c.id || normalizeKey(c.rut)));
-            return [...remote, ...local.filter(c => !seen.has(c.id || normalizeKey(c.rut)))];
-          });
+          const clientesRemote = (clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null }));
+          setClientes(clientesRemote);
+          localStorage.setItem('sentauris_clientes', JSON.stringify(clientesRemote));
           setLicitaciones(licitData || []);
           setRepuestos(repData || []);
           setEquipos(equiposData || []);
-          if (!e5 && usuariosData) {
-            setUsuarios(usuariosData.map(u => ({
-              ...u,
-              accesos: u.accesos || [],
-              permisosEmpresas: u.permisos_empresas || {},
-            })));
-          }
+          setUsuarios((usuariosData || []).map(u => ({
+            ...u,
+            accesos: u.accesos || [],
+            permisosEmpresas: u.permisos_empresas || {},
+          })));
           setDbStatus('ok');
         }
       } catch (err) {
@@ -475,9 +471,17 @@ const ERPProvider = ({ children }) => {
       const message = String(err?.message || err || '').toLowerCase();
       return message.includes('ordenes_trabajo_folio_key') || (message.includes('duplicate key') && message.includes('folio'));
     };
+    // Verificar si el cliente existe en Supabase antes de enviar el FK
+    let clienteIdFinal = null;
+    const candidateId = formData.clienteId || null;
+    if (candidateId) {
+      const { data: clienteDB } = await supabase.from('clientes').select('id_RUT').eq('id_RUT', candidateId).maybeSingle();
+      clienteIdFinal = clienteDB ? candidateId : null;
+      if (!clienteDB) console.warn('[saveOrden] cliente_id', candidateId, 'no existe en Supabase — se guardará sin cliente');
+    }
     const payload = {
       folio: formData.folio,
-      cliente_id: formData.clienteId,
+      cliente_id: clienteIdFinal,
       licitacion_id: formData.licitacionId,
       fecha: formData.fecha,
       tipo_equipo: formData.tipoEquipo,
@@ -977,10 +981,12 @@ const NuevoRegistro = () => {
     }
     if (!error && data) data = normalizeCliente(data);
     if (!error && data) {
-      clientes.push(data); // actualización local inmediata
-      handleChange('clienteId', normalizeCliente(data).id);
+      setClientes(prev => [...prev, { ...data, empresaId: data.empresa_id || null }]);
+      handleChange('clienteId', data.id);
       setShowNewCliente(false);
       setNewCliente({ name: '', rut: '', email: '' });
+    } else if (error) {
+      alert('❌ Error al crear cliente: ' + error.message);
     }
     setSaving(false);
   };
@@ -1114,8 +1120,10 @@ const MantencionPreventiva = () => {
         orden_id: orden.id, item, estado
       }));
       if (checkItems.length > 0) {
-        await supabase.from('orden_checklist').delete().eq('orden_id', orden.id);
-        await supabase.from('orden_checklist').insert(checkItems);
+        const { error: delErr } = await supabase.from('orden_checklist').delete().eq('orden_id', orden.id);
+        if (delErr) throw delErr;
+        const { error: insErr } = await supabase.from('orden_checklist').insert(checkItems);
+        if (insErr) throw insErr;
       }
 
       alert(`✅ Informe ${formData.folio} guardado en Supabase`);
@@ -1289,12 +1297,14 @@ const MantencionCorrectiva = () => {
       });
 
       // Guardar repuestos usados
-      await supabase.from('orden_repuestos').delete().eq('orden_id', orden.id);
+      const { error: delRepErr } = await supabase.from('orden_repuestos').delete().eq('orden_id', orden.id);
+      if (delRepErr) throw delRepErr;
       if (repuestosSeleccionados.length > 0) {
         const items = repuestosSeleccionados.map(r => ({
           orden_id: orden.id, repuesto_id: r.id, cantidad: r.qty || 1, desde_bodega: r.toBodega || false
         }));
-        await supabase.from('orden_repuestos').insert(items);
+        const { error: insRepErr } = await supabase.from('orden_repuestos').insert(items);
+        if (insRepErr) throw insRepErr;
       }
 
       alert(`✅ Correctiva ${formData.folio} guardada en Supabase`);
@@ -1440,7 +1450,7 @@ const MantencionCorrectiva = () => {
 // --- MODAL ---
 const Modal = ({ title, onClose, children, wide = false, fullScreen = false, workspaceFull = false, sidebarOpen = false }) => createPortal(
   <div className={`fixed flex justify-center overflow-hidden ${workspaceFull ? `top-16 bottom-0 right-0 z-[45] bg-slate-50 ${sidebarOpen ? 'left-64 max-lg:left-20' : 'left-20'}` : `inset-0 z-[120] ${fullScreen ? 'items-stretch bg-white p-0' : 'items-start bg-black/40 p-4 backdrop-blur-sm md:items-center'}`}`}>
-    <div className={`bg-white shadow-2xl w-full overflow-hidden flex flex-col ${workspaceFull ? 'h-full max-h-full rounded-none border-t border-slate-100' : fullScreen ? 'h-screen min-h-screen max-h-screen h-dvh min-h-dvh max-h-dvh max-w-none rounded-none' : `${wide ? 'max-w-5xl' : 'max-w-lg'} max-h-[calc(100vh-2rem)] rounded-2xl`}`}>
+    <div className={`bg-white shadow-2xl w-full overflow-hidden flex flex-col ${workspaceFull ? 'h-full max-h-full rounded-none border-t border-slate-100' : fullScreen ? 'h-dvh min-h-dvh max-h-dvh max-w-none rounded-none' : `${wide ? 'max-w-5xl' : 'max-w-lg'} max-h-[calc(100vh-2rem)] rounded-2xl`}`}>
       <div className="shrink-0 flex items-center justify-between px-6 py-3 border-b border-slate-100">
         <h3 className="font-bold text-slate-900 text-base">{title}</h3>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg transition-colors">
