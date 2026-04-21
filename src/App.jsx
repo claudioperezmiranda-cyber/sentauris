@@ -5260,18 +5260,16 @@ const MantenedoresUsuarios = () => {
         return parentAllowed ? mod : null;
       }).filter(Boolean);
 
-  const toSupabasePayload = (data) => {
-    const base = {
-      usuario: data.usuario.trim(),
-      nombre: data.nombre.trim(),
-      rut: data.rut.trim(),
-      cargo: data.cargo || '',
-      contrasena: data.contrasena || '',
-      accesos: buildAccessUnion(data),
-      permisos_empresas: data.permisosEmpresas || {},
-    };
-    return data.id ? { ...base, id: data.id } : base;
-  };
+  const toSupabasePayload = (data) => ({
+    id: data.id || crypto.randomUUID(),
+    usuario: data.usuario.trim(),
+    nombre: data.nombre.trim(),
+    rut: data.rut.trim(),
+    cargo: data.cargo || '',
+    contrasena: data.contrasena || '',
+    accesos: buildAccessUnion(data),
+    permisos_empresas: data.permisosEmpresas || {},
+  });
 
   const handleSave = async () => {
     const { mode, data } = modal;
