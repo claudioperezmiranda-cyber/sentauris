@@ -3445,16 +3445,16 @@ const MantenedoresClientesProveedores = () => {
     if (!data.rut || !data.razonSocial) { alert('RUT y Razón Social son obligatorios.'); return; }
     const duplicate = clientes.some(c => c.empresaId === activeEmpresaId && normalizeKey(c.rut) === normalizeKey(data.rut) && c.id !== data.id);
     if (duplicate) { alert('Ya existe un cliente/proveedor con ese RUT en la empresa activa.'); return; }
-    const payload = { name: data.razonSocial, Email: data.rut, empresa_id: activeEmpresaId };
+    const payload = { name: data.razonSocial, rut: data.rut, empresa_id: activeEmpresaId };
     if (modal.mode === 'new') {
       const { data: row, error } = await supabase.from('clientes').insert([payload]).select().single();
       if (error) { alert('Error al guardar: ' + error.message); return; }
-      const normalized = { ...normalizeCliente(row), ...data, id: row.id, empresaId: activeEmpresaId };
+      const normalized = { ...normalizeCliente(row), ...data, empresaId: activeEmpresaId };
       setClientes(prev => [normalized, ...prev]);
     } else {
-      const { error } = await supabase.from('clientes').update(payload).eq('id', data.id);
+      const { error } = await supabase.from('clientes').update(payload).eq('id_RUT', data.id);
       if (error) { alert('Error al guardar: ' + error.message); return; }
-      setClientes(prev => prev.map(c => c.id === data.id ? { ...data } : c));
+      setClientes(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
     }
     closeModal();
   };
@@ -5260,16 +5260,18 @@ const MantenedoresUsuarios = () => {
         return parentAllowed ? mod : null;
       }).filter(Boolean);
 
-  const toSupabasePayload = (data) => ({
-    id: data.id || Date.now().toString(),
-    usuario: data.usuario.trim(),
-    nombre: data.nombre.trim(),
-    rut: data.rut.trim(),
-    cargo: data.cargo || '',
-    contrasena: data.contrasena || '',
-    accesos: buildAccessUnion(data),
-    permisos_empresas: data.permisosEmpresas || {},
-  });
+  const toSupabasePayload = (data) => {
+    const base = {
+      usuario: data.usuario.trim(),
+      nombre: data.nombre.trim(),
+      rut: data.rut.trim(),
+      cargo: data.cargo || '',
+      contrasena: data.contrasena || '',
+      accesos: buildAccessUnion(data),
+      permisos_empresas: data.permisosEmpresas || {},
+    };
+    return data.id ? { ...base, id: data.id } : base;
+  };
 
   const handleSave = async () => {
     const { mode, data } = modal;
