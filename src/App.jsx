@@ -700,15 +700,29 @@ const clienteTelefono = (cliente = {}) => {
   return c.telefono || c.phone || c.fono || c.celular || '';
 };
 
-const empresaUnidadValue = (unidad = {}) =>
-  unidad.descripcion || unidad.nombre || unidad.codigo || '';
+const asArray = (value) => Array.isArray(value) ? value : [];
 
-const empresaCentroCostoValue = (centro = {}) =>
-  [centro.codigo, centro.nombre || centro.descripcion].filter(Boolean).join(' - ') || centro.codigo || centro.nombre || centro.descripcion || '';
+const getEmpresaUnidadesNegocio = (empresa = {}) =>
+  asArray(empresa.unidadesNegocio || empresa.unidades_negocio || empresa.unidades || empresa.unidadesDeNegocio);
+
+const getEmpresaCentrosCosto = (empresa = {}) =>
+  asArray(empresa.centrosCosto || empresa.centros_costo || empresa.centros || empresa.centrosDeCosto);
+
+const empresaUnidadValue = (unidad = {}) => {
+  if (typeof unidad === 'string') return unidad.trim();
+  return unidad.descripcion || unidad.nombre || unidad.name || unidad.codigo || unidad.code || '';
+};
+
+const empresaCentroCostoValue = (centro = {}) => {
+  if (typeof centro === 'string') return centro.trim();
+  const codigo = centro.codigo || centro.code || centro.cod || '';
+  const nombre = centro.nombre || centro.descripcion || centro.name || centro.detalle || '';
+  return [codigo, nombre].filter(Boolean).join(' - ') || codigo || nombre || '';
+};
 
 const emptyCotizacionDraft = (cotizaciones = [], currentEmpresa = null) => {
-  const unidadNegocio = (currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue).filter(Boolean)[0] || '';
-  const centroCosto = (currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue).filter(Boolean)[0] || '';
+  const unidadNegocio = getEmpresaUnidadesNegocio(currentEmpresa).map(empresaUnidadValue).filter(Boolean)[0] || '';
+  const centroCosto = getEmpresaCentrosCosto(currentEmpresa).map(empresaCentroCostoValue).filter(Boolean)[0] || '';
   return {
     numero: nextCotizacionNumero(cotizaciones),
     fecha: new Date().toISOString().split('T')[0],
@@ -8945,8 +8959,8 @@ const ComprobantesContables = () => {
     }
     return true;
   };
-  const unidadNegocioOptions = dedupeByNormalizedText((currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue));
-  const centroCostoOptions = dedupeByNormalizedText((currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue));
+  const unidadNegocioOptions = dedupeByNormalizedText(getEmpresaUnidadesNegocio(currentEmpresa).map(empresaUnidadValue));
+  const centroCostoOptions = dedupeByNormalizedText(getEmpresaCentrosCosto(currentEmpresa).map(empresaCentroCostoValue));
   const planCuentasEmpresa = planCuentas.filter(belongsToActiveEmpresa);
   const cuentaContableOptionsComprobante = cuentaContableOptions(planCuentasEmpresa.length ? planCuentasEmpresa : planCuentas);
   const auxiliarOptions = dedupeByNormalizedText(
@@ -9741,6 +9755,15 @@ const InformesTributarios = () => {
   );
 };
 
+const filterValueMatches = (value = '', selected = '') => {
+  const normalizedValue = normalizeKey(value);
+  const normalizedSelected = normalizeKey(selected);
+  if (!normalizedSelected || normalizedValue === normalizedSelected) return true;
+  const selectedParts = String(selected).split(' - ').map(normalizeKey).filter(Boolean);
+  const valueParts = String(value).split(' - ').map(normalizeKey).filter(Boolean);
+  return selectedParts.includes(normalizedValue) || valueParts.includes(normalizedSelected);
+};
+
 const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
   .filter(voucher => dateInRange(voucher.fecha, filters.fechaDesde, filters.fechaHasta))
   .filter(voucher => {
@@ -9749,11 +9772,11 @@ const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
     if (filters.documentos === 'Cancelados') return ['contabilizado', 'cancelado', 'pagado'].includes(estado);
     return true;
   })
-  .filter(voucher => !filters.unidadNegocio || filters.unidadNegocio === 'Todas' || voucher.unidadNegocio === filters.unidadNegocio)
+  .filter(voucher => !filters.unidadNegocio || filters.unidadNegocio === 'Todas' || filterValueMatches(voucher.unidadNegocio, filters.unidadNegocio))
   .flatMap(voucher => (voucher.detalles || []).map(line => ({ voucher, line, account: splitAccount(line.cuentaContable) })))
   .filter(item => !filters.cuentaContable || normalizeKey(item.line.cuentaContable) === normalizeKey(filters.cuentaContable))
   .filter(item => !filters.auxiliar || normalizeKey(item.line.auxiliar) === normalizeKey(filters.auxiliar))
-  .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || item.line.centroCosto === filters.centroCosto)
+  .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || filterValueMatches(item.line.centroCosto, filters.centroCosto))
   .sort((a, b) =>
     String(a.account.code || '').localeCompare(String(b.account.code || '')) ||
     String(a.voucher.fecha || '').localeCompare(String(b.voucher.fecha || '')) ||
@@ -9821,8 +9844,8 @@ const AnaliticosContables = () => {
     return true;
   };
   const accountOptions = dedupeByNormalizedText(planCuentas.filter(belongsToCurrentEmpresa).map(planCuentaLabel));
-  const centroOptions = dedupeByNormalizedText((currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue));
-  const unidadOptions = dedupeByNormalizedText((currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue));
+  const centroOptions = dedupeByNormalizedText(getEmpresaCentrosCosto(currentEmpresa).map(empresaCentroCostoValue));
+  const unidadOptions = dedupeByNormalizedText(getEmpresaUnidadesNegocio(currentEmpresa).map(empresaUnidadValue));
   const auxiliarOptions = dedupeByNormalizedText(
     clientes
       .filter(c => !activeEmpresaId || c.empresaId === activeEmpresaId)
