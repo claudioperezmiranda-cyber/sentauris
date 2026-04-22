@@ -273,10 +273,25 @@ const mergeClientesExtended = (baseClientes = [], extendedClientes = []) => {
     if (normalized.id) byId.set(String(normalized.id), normalized);
     if (normalized.rut) byRut.set(normalizeKey(normalized.rut), normalized);
   });
-  return baseClientes.map(cliente => {
+  const merged = baseClientes.map(cliente => {
     const ext = byId.get(String(cliente.id || cliente.id_RUT || '')) || byRut.get(normalizeKey(cliente.rut));
-    return ext ? { ...cliente, ...ext, id: cliente.id, id_RUT: cliente.id_RUT || cliente.id, empresaId: ext.empresaId || cliente.empresaId } : cliente;
+    if (!ext) return cliente;
+    byId.delete(String(ext.id || ext.id_RUT || ''));
+    byRut.delete(normalizeKey(ext.rut));
+    return { ...cliente, ...ext, id: cliente.id, id_RUT: cliente.id_RUT || cliente.id, empresaId: ext.empresaId || cliente.empresaId };
   });
+  const existingKeys = new Set(merged.flatMap(cliente => [
+    `id:${String(cliente.id || cliente.id_RUT || '')}`,
+    `rut:${normalizeKey(cliente.rut)}`,
+  ]));
+  const extendedOnly = (extendedClientes || [])
+    .map(item => normalizeCliente(clienteExtendedSnapshot(item)))
+    .filter(cliente => {
+      const idKey = `id:${String(cliente.id || cliente.id_RUT || '')}`;
+      const rutKey = `rut:${normalizeKey(cliente.rut)}`;
+      return !existingKeys.has(idKey) && !existingKeys.has(rutKey);
+    });
+  return [...merged, ...extendedOnly];
 };
 
 const clienteExtendedPayload = (data) => ({
