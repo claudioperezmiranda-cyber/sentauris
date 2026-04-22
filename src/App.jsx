@@ -7575,22 +7575,85 @@ const PC_TEMPLATE_HEADERS = [
   'Homologacion SII','Centro Costo','Presupuesto','Flujo Caja',
 ];
 
+const PLAN_CUENTAS_COLUMN_STORAGE_KEY = 'sentauris_plan_cuentas_visible_columns';
+const PLAN_CUENTAS_TABLE_COLUMNS = [
+  { id: 'numCuenta', label: 'N° Cuenta' },
+  { id: 'descripcion', label: 'Descripción' },
+  { id: 'naturaleza', label: 'Naturaleza' },
+  { id: 'tipoCuenta', label: 'Tipo' },
+  { id: 'nivel1', label: 'Nivel 1' },
+  { id: 'nivel2', label: 'Nivel 2' },
+  { id: 'centroCosto', label: 'Centro Costo' },
+  { id: 'presupuesto', label: 'Presupuesto' },
+  { id: 'flujoCaja', label: 'Flujo Caja' },
+];
+const DEFAULT_PLAN_CUENTAS_VISIBLE_COLUMNS = PLAN_CUENTAS_TABLE_COLUMNS.map(col => col.id);
+
 const ConfigPlanCuentas = () => {
   const { planCuentas, setPlanCuentas } = useContext(ERPContext);
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState(null);
   const [importModal, setImportModal] = useState(null);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [visibleColumnIds, setVisibleColumnIds] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(PLAN_CUENTAS_COLUMN_STORAGE_KEY) || 'null');
+      const valid = Array.isArray(stored)
+        ? stored.filter(id => PLAN_CUENTAS_TABLE_COLUMNS.some(col => col.id === id))
+        : [];
+      return valid.length ? valid : DEFAULT_PLAN_CUENTAS_VISIBLE_COLUMNS;
+    } catch {
+      return DEFAULT_PLAN_CUENTAS_VISIBLE_COLUMNS;
+    }
+  });
   const fileInputRef = useRef(null);
 
   const normalizeText = (v) => String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   const filtered = planCuentas.filter(c =>
     normalizeText([c.numCuenta, c.descripcion, c.tipoCuenta, c.centroCosto].join(' ')).includes(normalizeText(search))
   );
+  const visibleColumns = PLAN_CUENTAS_TABLE_COLUMNS.filter(col => visibleColumnIds.includes(col.id));
+
+  useEffect(() => {
+    localStorage.setItem(PLAN_CUENTAS_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumnIds));
+  }, [visibleColumnIds]);
 
   const openNew  = () => setModal({ mode:'new',  data: emptyPlanCuenta() });
   const openEdit = (c) => setModal({ mode:'edit', data: { ...c } });
   const closeModal = () => setModal(null);
   const setField = (k,v) => setModal(m => ({ ...m, data: { ...m.data, [k]: v } }));
+
+  const toggleColumn = (columnId) => {
+    setVisibleColumnIds(prev => {
+      if (prev.includes(columnId)) return prev.length === 1 ? prev : prev.filter(id => id !== columnId);
+      return [...prev, columnId];
+    });
+  };
+
+  const renderPlanCuentaCell = (c, columnId) => {
+    switch (columnId) {
+      case 'numCuenta':
+        return <span className="font-mono text-xs font-bold text-blue-700">{c.numCuenta}</span>;
+      case 'descripcion':
+        return <span className="font-medium block max-w-[180px] truncate">{c.descripcion}</span>;
+      case 'naturaleza':
+        return c.naturaleza || '—';
+      case 'tipoCuenta':
+        return c.tipoCuenta || '—';
+      case 'nivel1':
+        return c.nivel1 || '—';
+      case 'nivel2':
+        return c.nivel2 || '—';
+      case 'centroCosto':
+        return c.centroCosto || '—';
+      case 'presupuesto':
+        return c.presupuesto ? `$${Number(c.presupuesto).toLocaleString('es-CL')}` : '—';
+      case 'flujoCaja':
+        return c.flujoCaja || '—';
+      default:
+        return c[columnId] || '—';
+    }
+  };
 
   const handleDownloadTemplate = () => {
     const wb = XLSX.utils.book_new();
@@ -7677,34 +7740,64 @@ const ConfigPlanCuentas = () => {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-100">
+        <div className="p-4 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative w-full lg:max-w-md">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, descripción, tipo…"
               className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"/>
           </div>
+          <div className="relative self-start lg:self-auto">
+            <button
+              type="button"
+              onClick={() => setColumnsOpen(v => !v)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+              title="Configurar columnas visibles"
+            >
+              <Settings size={16}/>
+            </button>
+            {columnsOpen && (
+              <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-500">Columnas</p>
+                  <button type="button" onClick={() => setColumnsOpen(false)} className="p-1 rounded text-slate-400 hover:bg-slate-100"><X size={14}/></button>
+                </div>
+                <div className="space-y-1 max-h-72 overflow-y-auto">
+                  {PLAN_CUENTAS_TABLE_COLUMNS.map(col => {
+                    const checked = visibleColumnIds.includes(col.id);
+                    return (
+                      <label key={col.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={checked && visibleColumnIds.length === 1}
+                          onChange={() => toggleColumn(col.id)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>{col.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="bg-slate-50 border-b">
-              {['N° Cuenta','Descripción','Naturaleza','Tipo','Nivel 1','Nivel 2','Centro Costo','Presupuesto','Flujo Caja','Acciones'].map(h=>(
-                <th key={h} className="p-3 text-[10px] font-bold uppercase text-slate-500 text-left whitespace-nowrap">{h}</th>
+              {visibleColumns.map(col=>(
+                <th key={col.id} className="p-3 text-[10px] font-bold uppercase text-slate-500 text-left whitespace-nowrap">{col.label}</th>
               ))}
+              <th className="p-3 text-[10px] font-bold uppercase text-slate-500 text-right whitespace-nowrap">Acciones</th>
             </tr></thead>
             <tbody>
               {filtered.length === 0
-                ? <tr><td colSpan="10" className="px-6 py-12 text-center text-slate-400 italic">No hay cuentas registradas.</td></tr>
+                ? <tr><td colSpan={visibleColumns.length + 1} className="px-6 py-12 text-center text-slate-400 italic">No hay cuentas registradas.</td></tr>
                 : filtered.map(c=>(
                   <tr key={c.id} className="border-b hover:bg-slate-50">
-                    <td className="p-3 font-mono text-xs font-bold text-blue-700">{c.numCuenta}</td>
-                    <td className="p-3 font-medium max-w-[180px] truncate">{c.descripcion}</td>
-                    <td className="p-3 text-xs">{c.naturaleza}</td>
-                    <td className="p-3 text-xs">{c.tipoCuenta}</td>
-                    <td className="p-3 text-xs">{c.nivel1||'—'}</td>
-                    <td className="p-3 text-xs">{c.nivel2||'—'}</td>
-                    <td className="p-3 text-xs">{c.centroCosto||'—'}</td>
-                    <td className="p-3 text-xs">{c.presupuesto ? `$${Number(c.presupuesto).toLocaleString('es-CL')}` : '—'}</td>
-                    <td className="p-3 text-xs">{c.flujoCaja||'—'}</td>
+                    {visibleColumns.map(col => (
+                      <td key={col.id} className="p-3 text-xs">{renderPlanCuentaCell(c, col.id)}</td>
+                    ))}
                     <td className="p-3">
                       <div className="flex items-center justify-end gap-1">
                         <button onClick={()=>openEdit(c)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Pencil size={14}/></button>
