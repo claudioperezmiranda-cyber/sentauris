@@ -10155,6 +10155,25 @@ const accountFilterMatches = (value = '', selected = '') => {
   );
 };
 
+const ANALITICOS_COLUMN_STORAGE_KEY = 'sentauris_analiticos_visible_columns';
+const ANALITICOS_TABLE_COLUMNS = [
+  { id: 'Fecha', label: 'Fecha', align: 'left' },
+  { id: 'Comprobante', label: 'Comprobante', align: 'left' },
+  { id: 'Cuenta', label: 'Cuenta', align: 'left' },
+  { id: 'Documento', label: 'Documento', align: 'left' },
+  { id: 'Auxiliar', label: 'Auxiliar', align: 'left' },
+  { id: 'Centro de costo', label: 'Centro costo', align: 'left' },
+  { id: 'Unidad de negocio', label: 'Unidad', align: 'left' },
+  { id: 'Moneda', label: 'Moneda', align: 'left' },
+  { id: 'Tipo de cambio', label: 'T/C', align: 'right' },
+  { id: 'Valor en moneda extranjera', label: 'Valor ME', align: 'right' },
+  { id: 'Estado', label: 'Estado', align: 'left' },
+  { id: 'Debe', label: 'Debe', align: 'right' },
+  { id: 'Haber', label: 'Haber', align: 'right' },
+  { id: 'Saldo', label: 'Saldo', align: 'right' },
+];
+const DEFAULT_ANALITICOS_VISIBLE_COLUMNS = ANALITICOS_TABLE_COLUMNS.map(col => col.id);
+
 const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
   .filter(voucher => dateInRange(voucher.fecha, filters.fechaDesde, filters.fechaHasta))
   .filter(voucher => {
@@ -10169,6 +10188,9 @@ const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
   .filter(item => accountFilterMatches(item.line.cuentaContable, filters.cuentaContable))
   .filter(item => !filters.auxiliar || filterValueMatches(item.line.auxiliar, filters.auxiliar))
   .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || filterValueMatches(item.line.centroCosto, filters.centroCosto))
+  .filter(item => !filters.moneda || filters.moneda === 'Todas' || filterValueMatches(item.line.moneda, filters.moneda))
+  .filter(item => !filters.tipoCambio || String(item.line.tipoCambio || '').includes(String(filters.tipoCambio)))
+  .filter(item => !filters.valorMonedaExtranjera || String(item.line.valorMonedaExtranjera || '').includes(String(filters.valorMonedaExtranjera)))
   .sort((a, b) =>
     String(a.account.code || '').localeCompare(String(b.account.code || '')) ||
     String(a.voucher.fecha || '').localeCompare(String(b.voucher.fecha || '')) ||
@@ -10189,6 +10211,9 @@ const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
       Documento: [line.tipoDocumento, line.numeroDocumento].filter(Boolean).join(' - ') || voucher.documento || '',
       Auxiliar: line.auxiliar || '',
       'Centro de costo': line.centroCosto || '',
+      Moneda: line.moneda || '',
+      'Tipo de cambio': line.tipoCambio || '',
+      'Valor en moneda extranjera': line.valorMonedaExtranjera || '',
       Glosa: line.glosa || voucher.glosa || '',
       Debe: debe,
       Haber: haber,
@@ -10206,7 +10231,7 @@ const buildAnaliticoHtml = (rows = [], filters = {}, empresa = {}) => {
   const body = rows.map(row => `<tr>
     <td>${htmlText(row.Fecha)}</td><td>${htmlText(row.Comprobante)}</td><td>${htmlText(row['Cod. cuenta'])}</td><td>${htmlText(row['Cuenta contable'])}</td>
     <td>${htmlText(row.Documento)}</td><td>${htmlText(row.Auxiliar)}</td><td>${htmlText(row['Centro de costo'])}</td><td>${htmlText(row['Unidad de negocio'])}</td>
-    <td>${htmlText(row.Estado)}</td><td class="num">${money(row.Debe)}</td><td class="num">${money(row.Haber)}</td><td class="num">${money(row.Saldo)}</td>
+    <td>${htmlText(row.Moneda)}</td><td class="num">${htmlText(row['Tipo de cambio'])}</td><td class="num">${htmlText(row['Valor en moneda extranjera'])}</td><td>${htmlText(row.Estado)}</td><td class="num">${money(row.Debe)}</td><td class="num">${money(row.Haber)}</td><td class="num">${money(row.Saldo)}</td>
   </tr>`).join('');
   return `<html><head><title>Analitico contable</title><style>
     body{font-family:Arial,sans-serif;color:#111827;padding:24px}.top{display:flex;justify-content:space-between;border-bottom:2px solid #1f2937;padding-bottom:12px;margin-bottom:16px}
@@ -10216,12 +10241,24 @@ const buildAnaliticoHtml = (rows = [], filters = {}, empresa = {}) => {
   </style></head><body>
     <button onclick="window.print()" style="margin-bottom:14px;padding:8px 14px;border:0;background:#1f5b93;color:white;border-radius:8px;font-weight:700">Descargar PDF</button>
     <div class="top"><div><h1>Analitico contable</h1><div class="meta">${htmlText(empresa?.razonSocial || empresa?.nombreFantasia || 'Empresa')} | RUT ${htmlText(empresa?.rut || '')}</div><div class="meta">Periodo: ${formatJournalDate(filters.fechaDesde)} al ${formatJournalDate(filters.fechaHasta)} | Cuenta: ${htmlText(filters.cuentaContable || 'Todas')} | Documentos: ${htmlText(filters.documentos || 'Todos')}</div></div><div class="summary"><b>Debe:</b> ${money(totals.debe)}<br/><b>Haber:</b> ${money(totals.haber)}<br/><b>Saldo:</b> ${money(totals.saldo)}</div></div>
-    <table><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cod. cuenta</th><th>Cuenta</th><th>Documento</th><th>Auxiliar</th><th>Centro costo</th><th>Unidad</th><th>Estado</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead><tbody>${body}<tr class="total"><td colspan="9">Total</td><td class="num">${money(totals.debe)}</td><td class="num">${money(totals.haber)}</td><td class="num">${money(totals.saldo)}</td></tr></tbody></table>
+    <table><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cod. cuenta</th><th>Cuenta</th><th>Documento</th><th>Auxiliar</th><th>Centro costo</th><th>Unidad</th><th>Moneda</th><th>T/C</th><th>Valor ME</th><th>Estado</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead><tbody>${body}<tr class="total"><td colspan="12">Total</td><td class="num">${money(totals.debe)}</td><td class="num">${money(totals.haber)}</td><td class="num">${money(totals.saldo)}</td></tr></tbody></table>
   </body></html>`;
 };
 
 const AnaliticosContables = () => {
   const { comprobantes, currentEmpresa, planCuentas, clientes, activeEmpresaId } = useContext(ERPContext);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [visibleColumnIds, setVisibleColumnIds] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(ANALITICOS_COLUMN_STORAGE_KEY) || 'null');
+      const valid = Array.isArray(stored)
+        ? stored.filter(id => ANALITICOS_TABLE_COLUMNS.some(col => col.id === id))
+        : [];
+      return valid.length ? valid : DEFAULT_ANALITICOS_VISIBLE_COLUMNS;
+    } catch {
+      return DEFAULT_ANALITICOS_VISIBLE_COLUMNS;
+    }
+  });
   const currentEmpresaName = currentEmpresa?.razonSocial || currentEmpresa?.nombreFantasia || '';
   const belongsToCurrentEmpresa = (item = {}) => {
     if (!activeEmpresaId) return true;
@@ -10238,6 +10275,7 @@ const AnaliticosContables = () => {
   const accountOptions = dedupeByNormalizedText(planCuentas.filter(belongsToCurrentEmpresa).map(planCuentaLabel));
   const centroOptions = dedupeByNormalizedText(getEmpresaCentrosCosto(currentEmpresa).map(empresaCentroCostoValue));
   const unidadOptions = dedupeByNormalizedText(getEmpresaUnidadesNegocio(currentEmpresa).map(empresaUnidadValue));
+  const monedaOptions = dedupeByNormalizedText(comprobantes.flatMap(v => (v.detalles || []).map(line => line.moneda).filter(Boolean)));
   const auxiliarOptions = dedupeByNormalizedText(
     clientes
       .filter(c => !activeEmpresaId || c.empresaId === activeEmpresaId)
@@ -10251,12 +10289,33 @@ const AnaliticosContables = () => {
     auxiliar: '',
     centroCosto: 'Todos',
     unidadNegocio: 'Todas',
+    moneda: 'Todas',
+    tipoCambio: '',
+    valorMonedaExtranjera: '',
   });
   const [rows, setRows] = useState([]);
   const [generated, setGenerated] = useState(false);
   const [search, setSearch] = useState('');
   const updateFilter = (field, value) => setFilters(prev => ({ ...prev, [field]: value }));
   const previewRows = rows.filter(row => Object.values(row).join(' ').toLowerCase().includes(search.toLowerCase()));
+  const visibleColumns = ANALITICOS_TABLE_COLUMNS.filter(col => visibleColumnIds.includes(col.id));
+
+  useEffect(() => {
+    localStorage.setItem(ANALITICOS_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumnIds));
+  }, [visibleColumnIds]);
+
+  const toggleColumn = (columnId) => {
+    setVisibleColumnIds(prev => {
+      if (prev.includes(columnId)) return prev.length === 1 ? prev : prev.filter(id => id !== columnId);
+      return [...prev, columnId];
+    });
+  };
+
+  const renderAnaliticoCell = (row, columnId) => {
+    if (columnId === 'Cuenta') return [row['Cod. cuenta'], row['Cuenta contable']].filter(Boolean).join(' - ') || '-';
+    if (['Debe', 'Haber', 'Saldo'].includes(columnId)) return money(row[columnId]);
+    return row[columnId] || '-';
+  };
 
   const generate = () => {
     setRows(buildAnaliticoRows(comprobantes, filters));
@@ -10264,8 +10323,8 @@ const AnaliticosContables = () => {
   };
   const exportExcel = () => {
     const cleanRows = rows.map(({ voucherId, 'Cuenta completa': _cuentaCompleta, ...row }) => row);
-    const ws = XLSX.utils.json_to_sheet(cleanRows, { header: ['Fecha', 'Comprobante', 'Tipo comprobante', 'Estado', 'Unidad de negocio', 'Cod. cuenta', 'Cuenta contable', 'Documento', 'Auxiliar', 'Centro de costo', 'Glosa', 'Debe', 'Haber', 'Saldo'] });
-    ws['!cols'] = [{ wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 34 }, { wch: 22 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    const ws = XLSX.utils.json_to_sheet(cleanRows, { header: ['Fecha', 'Comprobante', 'Tipo comprobante', 'Estado', 'Unidad de negocio', 'Cod. cuenta', 'Cuenta contable', 'Documento', 'Auxiliar', 'Centro de costo', 'Moneda', 'Tipo de cambio', 'Valor en moneda extranjera', 'Glosa', 'Debe', 'Haber', 'Saldo'] });
+    ws['!cols'] = [{ wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 34 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Analitico');
     XLSX.writeFile(wb, `analitico_contable_${new Date().toISOString().replace(/\D/g, '').slice(0, 15)}.xlsx`);
@@ -10290,6 +10349,9 @@ const AnaliticosContables = () => {
           <ComboInput label="Auxiliar" value={filters.auxiliar} onChange={e => updateFilter('auxiliar', e.target.value)} options={auxiliarOptions} placeholder="Todos los auxiliares" />
           <ComboInput label="Centro de costo" value={filters.centroCosto} onChange={e => updateFilter('centroCosto', e.target.value)} options={['Todos', ...centroOptions]} placeholder="Todos" />
           <ComboInput label="Unidad de negocios" value={filters.unidadNegocio} onChange={e => updateFilter('unidadNegocio', e.target.value)} options={['Todas', ...unidadOptions]} placeholder="Todas" />
+          <ComboInput label="Moneda" value={filters.moneda} onChange={e => updateFilter('moneda', e.target.value)} options={['Todas', ...monedaOptions]} placeholder="Todas" />
+          <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo de cambio</span><input inputMode="decimal" value={filters.tipoCambio} onChange={e => updateFilter('tipoCambio', e.target.value)} placeholder="Todos" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Valor en moneda extranjera</span><input inputMode="decimal" value={filters.valorMonedaExtranjera} onChange={e => updateFilter('valorMonedaExtranjera', e.target.value)} placeholder="Todos" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="accent" icon={FileText} onClick={generate}>Generar informe</Button>
@@ -10298,10 +10360,34 @@ const AnaliticosContables = () => {
         </div>
       </div>
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-100"><div className="relative max-w-md"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar en informe generado" className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" /></div></div>
-        <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr><th className="p-3 text-left">Fecha</th><th className="p-3 text-left">Comprobante</th><th className="p-3 text-left">Cuenta</th><th className="p-3 text-left">Documento</th><th className="p-3 text-left">Auxiliar</th><th className="p-3 text-left">Centro costo</th><th className="p-3 text-left">Unidad</th><th className="p-3 text-left">Estado</th><th className="p-3 text-right">Debe</th><th className="p-3 text-right">Haber</th><th className="p-3 text-right">Saldo</th></tr></thead><tbody>
-          {previewRows.map((row, index) => (<tr key={`${row.voucherId}-${index}`} className="border-t border-slate-100 hover:bg-slate-50"><td className="p-3 font-mono">{row.Fecha}</td><td className="p-3">{row.Comprobante}</td><td className="p-3 min-w-52">{[row['Cod. cuenta'], row['Cuenta contable']].filter(Boolean).join(' - ')}</td><td className="p-3">{row.Documento || '-'}</td><td className="p-3 min-w-52">{row.Auxiliar || '-'}</td><td className="p-3">{row['Centro de costo'] || '-'}</td><td className="p-3">{row['Unidad de negocio'] || '-'}</td><td className="p-3">{row.Estado || '-'}</td><td className="p-3 text-right font-mono">{money(row.Debe)}</td><td className="p-3 text-right font-mono">{money(row.Haber)}</td><td className="p-3 text-right font-mono">{money(row.Saldo)}</td></tr>))}
-          {(!generated || previewRows.length === 0) && <tr><td colSpan="11" className="p-10 text-center text-sm text-slate-400">{generated ? 'No hay movimientos para los filtros seleccionados.' : 'Genera el informe para ver movimientos del libro diario.'}</td></tr>}
+        <div className="p-4 border-b border-slate-100 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="relative max-w-md w-full"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar en informe generado" className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" /></div>
+          <div className="relative">
+            <button type="button" onClick={() => setColumnsOpen(v => !v)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-blue-600" title="Configurar columnas visibles"><Settings size={16}/></button>
+            {columnsOpen && (
+              <div className="absolute right-0 z-40 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-500">Columnas</p>
+                  <button type="button" onClick={() => setColumnsOpen(false)} className="p-1 rounded text-slate-400 hover:bg-slate-100"><X size={14}/></button>
+                </div>
+                <div className="space-y-1 max-h-80 overflow-y-auto">
+                  {ANALITICOS_TABLE_COLUMNS.map(col => {
+                    const checked = visibleColumnIds.includes(col.id);
+                    return (
+                      <label key={col.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                        <input type="checkbox" checked={checked} disabled={checked && visibleColumnIds.length === 1} onChange={() => toggleColumn(col.id)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <span>{col.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{visibleColumns.map(col => <th key={col.id} className={`p-3 ${col.align === 'right' ? 'text-right' : 'text-left'}`}>{col.label}</th>)}</tr></thead><tbody>
+          {previewRows.map((row, index) => (<tr key={`${row.voucherId}-${index}`} className="border-t border-slate-100 hover:bg-slate-50">{visibleColumns.map(col => <td key={col.id} className={`p-3 ${col.align === 'right' ? 'text-right font-mono' : col.id === 'Fecha' ? 'font-mono' : ''} ${col.id === 'Cuenta' || col.id === 'Auxiliar' ? 'min-w-52' : ''}`}>{renderAnaliticoCell(row, col.id)}</td>)}</tr>))}
+          {(!generated || previewRows.length === 0) && <tr><td colSpan={visibleColumns.length} className="p-10 text-center text-sm text-slate-400">{generated ? 'No hay movimientos para los filtros seleccionados.' : 'Genera el informe para ver movimientos del libro diario.'}</td></tr>}
         </tbody></table></div>
         <div className="px-4 py-3 text-xs text-slate-400 border-t border-slate-100 flex justify-between"><span>Mostrando {previewRows.length} de {rows.length} movimientos</span><span>Origen: comprobantes contables / libro diario</span></div>
       </div>
