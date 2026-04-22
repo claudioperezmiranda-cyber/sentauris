@@ -1954,18 +1954,6 @@ const MantencionPreventiva = () => {
         <div><p className="text-[10px] uppercase font-bold text-slate-400">Ubicación</p><p className="text-sm font-bold text-slate-700">{formData.ubicacionArea}</p></div>
       </Card>
 
-      <Card className="grid grid-cols-1 gap-3 border-amber-100 bg-amber-50 md:grid-cols-[1fr_auto] md:items-center">
-        <div>
-          <p className="text-xs font-black uppercase text-amber-700">Criterio de criticidad</p>
-          <p className="text-sm text-amber-900">La criticidad identifica componentes sensibles del protocolo. Los estados se pueden marcar y desmarcar con un clic.</p>
-        </div>
-        <div className="flex flex-wrap gap-2 text-[10px] font-bold">
-          <span className="rounded border border-amber-300 bg-amber-100 px-2 py-1 text-amber-800">Critico</span>
-          <span className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-600">No critico</span>
-          <span className="rounded border border-red-300 bg-red-50 px-2 py-1 text-red-700">Critico + No + Falla = No Operativo</span>
-        </div>
-      </Card>
-
       <div className="space-y-6">
         {protocolo.sections.map((section, idx) => (
           <div key={idx} className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
