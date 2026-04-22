@@ -654,6 +654,7 @@ const APP_DATA_KEYS = {
   tipo_documentos: 'sentauris_tipo_docs',
   abastecimiento_documentos: 'sentauris_abastecimiento_documentos',
   protocolos_preventivos: 'sentauris_protocolos_preventivos',
+  monedas_indicadores: 'sentauris_monedas_indicadores',
 };
 
 const appDataParamId = (key) => `app_data:${key}`;
@@ -722,6 +723,26 @@ const getEmpresaUnidadesNegocio = (empresa = {}) =>
 
 const getEmpresaCentrosCosto = (empresa = {}) =>
   asArray(empresa.centrosCosto || empresa.centros_costo || empresa.centros || empresa.centrosDeCosto);
+
+const normalizeMonedasIndicadores = (value = {}) => ({
+  monedas: Array.isArray(value?.monedas) ? value.monedas : [],
+  tiposCambio: Array.isArray(value?.tiposCambio || value?.tipos_cambio) ? (value.tiposCambio || value.tipos_cambio) : [],
+});
+
+const monedaLabel = (moneda = {}) =>
+  [moneda.codigo || moneda.codigoMoneda || moneda.code, moneda.descripcion || moneda.descripcionMoneda || moneda.nombre || moneda.name].filter(Boolean).join(' - ');
+
+const monedaCodeFromLabel = (value = '') => String(value || '').split(' - ')[0].trim();
+
+const tipoCambioFor = (tiposCambio = [], moneda = '', fecha = '') => {
+  const codigo = normalizeKey(monedaCodeFromLabel(moneda));
+  const targetDate = String(fecha || '').slice(0, 10);
+  const matches = tiposCambio
+    .filter(item => normalizeKey(item.codigoMoneda || item.moneda || item.codigo) === codigo)
+    .filter(item => !targetDate || String(item.fecha || '').slice(0, 10) <= targetDate)
+    .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+  return matches[0]?.tipoCambio || matches[0]?.valor || '';
+};
 
 const empresaUnidadValue = (unidad = {}) => {
   if (typeof unidad === 'string') return unidad.trim();
@@ -831,6 +852,7 @@ const ERPProvider = ({ children }) => {
   const [activeEmpresaId, setActiveEmpresaId] = useState(() => localStorage.getItem('sentauris_active_empresa') || '');
   const [planCuentas, setPlanCuentas] = useState(() => readLocalList('sentauris_plan_cuentas'));
   const [tipoDocumentos, setTipoDocumentos] = useState(() => readLocalList('sentauris_tipo_docs'));
+  const [monedasIndicadores, setMonedasIndicadores] = useState(() => normalizeMonedasIndicadores(readLocalObj('sentauris_monedas_indicadores')));
   const [parametros, setParametrosState] = useState(() => readLocalObj('sentauris_parametros'));
   const [protocolosPreventivos, setProtocolosPreventivos] = useState(() => ({
     ...defaultPreventiveProtocolsConfig(),
@@ -896,6 +918,7 @@ const ERPProvider = ({ children }) => {
             empresas: setEmpresas,
             plan_cuentas: setPlanCuentas,
             tipo_documentos: setTipoDocumentos,
+            monedas_indicadores: setMonedasIndicadores,
             protocolos_preventivos: setProtocolosPreventivos,
           };
           const appDataResponse = await loadAppDataFromSupabase(Object.keys(appDataSetters));
@@ -907,11 +930,13 @@ const ERPProvider = ({ children }) => {
               if (remoteByKey.has(key)) {
                 const remoteValue = key === 'protocolos_preventivos'
                   ? { ...defaultPreventiveProtocolsConfig(), ...(remoteByKey.get(key) || {}) }
+                  : key === 'monedas_indicadores'
+                  ? normalizeMonedasIndicadores(remoteByKey.get(key) || {})
                   : (Array.isArray(remoteByKey.get(key)) ? remoteByKey.get(key) : []);
                 if (setter) setter(remoteValue);
                 localStorage.setItem(APP_DATA_KEYS[key], JSON.stringify(remoteValue));
               } else {
-                const localValue = key === 'protocolos_preventivos'
+                const localValue = key === 'protocolos_preventivos' || key === 'monedas_indicadores'
                   ? readLocalObj(APP_DATA_KEYS[key])
                   : readLocalList(APP_DATA_KEYS[key]);
                 if ((Array.isArray(localValue) && localValue.length > 0) || (localValue && typeof localValue === 'object' && Object.keys(localValue).length > 0)) {
@@ -993,6 +1018,10 @@ const ERPProvider = ({ children }) => {
   useEffect(() => {
     persistAppData('tipo_documentos', APP_DATA_KEYS.tipo_documentos, tipoDocumentos);
   }, [tipoDocumentos]);
+
+  useEffect(() => {
+    persistAppData('monedas_indicadores', APP_DATA_KEYS.monedas_indicadores, monedasIndicadores);
+  }, [monedasIndicadores]);
 
   useEffect(() => {
     persistAppData('protocolos_preventivos', APP_DATA_KEYS.protocolos_preventivos, protocolosPreventivos);
@@ -1105,6 +1134,7 @@ const ERPProvider = ({ children }) => {
       getAccessibleEmpresaIds,
       planCuentas, setPlanCuentas,
       tipoDocumentos, setTipoDocumentos,
+      monedasIndicadores, setMonedasIndicadores,
       protocolosPreventivos, setProtocolosPreventivos,
       parametros, setParametros,
       loading, dbStatus
@@ -6696,6 +6726,100 @@ const MantenedoresRepuestos = () => {
   );
 };
 
+const MantenedoresMonedasIndicadores = () => {
+  const { monedasIndicadores, setMonedasIndicadores } = useContext(ERPContext);
+  const data = normalizeMonedasIndicadores(monedasIndicadores);
+  const [activeTab, setActiveTab] = useState('monedas');
+  const [monedaForm, setMonedaForm] = useState({ codigo: '', descripcion: '' });
+  const [tipoForm, setTipoForm] = useState({ fecha: accountingDate(), codigoMoneda: '', tipoCambio: '' });
+
+  const monedaOptions = data.monedas.map(monedaLabel).filter(Boolean);
+  const setData = (next) => setMonedasIndicadores(normalizeMonedasIndicadores(next));
+
+  const saveMoneda = () => {
+    const codigo = String(monedaForm.codigo || '').trim().toUpperCase();
+    const descripcion = String(monedaForm.descripcion || '').trim();
+    if (!codigo || !descripcion) { alert('Codigo moneda y descripcion moneda son obligatorios.'); return; }
+    const next = data.monedas.some(item => normalizeKey(item.codigo) === normalizeKey(codigo))
+      ? data.monedas.map(item => normalizeKey(item.codigo) === normalizeKey(codigo) ? { ...item, codigo, descripcion } : item)
+      : [{ id: `moneda-${Date.now()}`, codigo, descripcion }, ...data.monedas];
+    setData({ ...data, monedas: next });
+    setMonedaForm({ codigo: '', descripcion: '' });
+  };
+
+  const deleteMoneda = (codigo) => {
+    if (!window.confirm(`Eliminar moneda ${codigo}?`)) return;
+    setData({
+      monedas: data.monedas.filter(item => normalizeKey(item.codigo) !== normalizeKey(codigo)),
+      tiposCambio: data.tiposCambio.filter(item => normalizeKey(item.codigoMoneda) !== normalizeKey(codigo)),
+    });
+  };
+
+  const saveTipoCambio = () => {
+    const codigoMoneda = monedaCodeFromLabel(tipoForm.codigoMoneda).toUpperCase();
+    const fecha = String(tipoForm.fecha || '').slice(0, 10);
+    const tipoCambio = toAmount(tipoForm.tipoCambio);
+    if (!fecha || !codigoMoneda || tipoCambio <= 0) { alert('Fecha, codigo moneda y tipo de cambio son obligatorios.'); return; }
+    const nextRow = { id: `tc-${fecha}-${codigoMoneda}`, fecha, codigoMoneda, tipoCambio };
+    const next = data.tiposCambio.some(item => item.fecha === fecha && normalizeKey(item.codigoMoneda) === normalizeKey(codigoMoneda))
+      ? data.tiposCambio.map(item => item.fecha === fecha && normalizeKey(item.codigoMoneda) === normalizeKey(codigoMoneda) ? nextRow : item)
+      : [nextRow, ...data.tiposCambio];
+    setData({ ...data, tiposCambio: next });
+    setTipoForm({ fecha: accountingDate(), codigoMoneda: '', tipoCambio: '' });
+  };
+
+  const deleteTipoCambio = (row) => {
+    if (!window.confirm(`Eliminar tipo de cambio ${row.codigoMoneda} ${row.fecha}?`)) return;
+    setData({ ...data, tiposCambio: data.tiposCambio.filter(item => !(item.fecha === row.fecha && normalizeKey(item.codigoMoneda) === normalizeKey(row.codigoMoneda))) });
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-2">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Mantenedores</p>
+        <h2 className="text-2xl font-bold text-slate-900">Monedas e Indicadores</h2>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="flex gap-2 border-b border-slate-100 px-4 pt-4">
+          <button onClick={() => setActiveTab('monedas')} className={`px-4 py-2 text-sm font-bold border-b-2 ${activeTab === 'monedas' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-400'}`}>Moneda</button>
+          <button onClick={() => setActiveTab('tipo-cambio')} className={`px-4 py-2 text-sm font-bold border-b-2 ${activeTab === 'tipo-cambio' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-400'}`}>Tipo de cambio</button>
+        </div>
+
+        {activeTab === 'monedas' ? (
+          <div className="p-4 md:p-6 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_auto] gap-3 items-end">
+              <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Codigo moneda</span><input value={monedaForm.codigo} onChange={e => setMonedaForm(f => ({ ...f, codigo: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm uppercase" /></label>
+              <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Descripcion moneda</span><input value={monedaForm.descripcion} onChange={e => setMonedaForm(f => ({ ...f, descripcion: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <Button variant="accent" icon={CheckCircle} onClick={saveMoneda}>Guardar</Button>
+            </div>
+            <div className="overflow-x-auto border border-slate-100 rounded-xl">
+              <table className="w-full text-sm"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr><th className="p-3 text-left">Codigo moneda</th><th className="p-3 text-left">Descripcion moneda</th><th className="p-3 text-right">Acciones</th></tr></thead><tbody>
+                {data.monedas.map(item => <tr key={item.id || item.codigo} className="border-t"><td className="p-3 font-mono font-bold">{item.codigo}</td><td className="p-3">{item.descripcion}</td><td className="p-3 text-right"><button onClick={() => setMonedaForm({ codigo: item.codigo, descripcion: item.descripcion })} className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"><Pencil size={14}/></button><button onClick={() => deleteMoneda(item.codigo)} className="p-2 rounded-lg text-red-500 hover:bg-red-50"><Trash2 size={14}/></button></td></tr>)}
+                {data.monedas.length === 0 && <tr><td colSpan="3" className="p-8 text-center text-slate-400">No hay monedas creadas.</td></tr>}
+              </tbody></table>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 md:p-6 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_180px_auto] gap-3 items-end">
+              <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha</span><input type="date" value={tipoForm.fecha} onChange={e => setTipoForm(f => ({ ...f, fecha: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <ComboInput label="Codigo moneda" value={tipoForm.codigoMoneda} onChange={e => setTipoForm(f => ({ ...f, codigoMoneda: e.target.value }))} options={monedaOptions} placeholder="Seleccionar moneda" />
+              <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo de cambio</span><input inputMode="decimal" value={tipoForm.tipoCambio} onChange={e => setTipoForm(f => ({ ...f, tipoCambio: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <Button variant="accent" icon={CheckCircle} onClick={saveTipoCambio}>Guardar</Button>
+            </div>
+            <div className="overflow-x-auto border border-slate-100 rounded-xl">
+              <table className="w-full text-sm"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr><th className="p-3 text-left">Fecha</th><th className="p-3 text-left">Codigo moneda</th><th className="p-3 text-right">Tipo de cambio</th><th className="p-3 text-right">Acciones</th></tr></thead><tbody>
+                {[...data.tiposCambio].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))).map(item => <tr key={`${item.fecha}-${item.codigoMoneda}`} className="border-t"><td className="p-3 font-mono">{item.fecha}</td><td className="p-3 font-mono font-bold">{item.codigoMoneda}</td><td className="p-3 text-right font-mono">{money(item.tipoCambio)}</td><td className="p-3 text-right"><button onClick={() => setTipoForm({ fecha: item.fecha, codigoMoneda: item.codigoMoneda, tipoCambio: item.tipoCambio })} className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"><Pencil size={14}/></button><button onClick={() => deleteTipoCambio(item)} className="p-2 rounded-lg text-red-500 hover:bg-red-50"><Trash2 size={14}/></button></td></tr>)}
+                {data.tiposCambio.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-400">No hay tipos de cambio creados.</td></tr>}
+              </tbody></table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- MANTENEDORES: USUARIOS ---
 const MODULES_TREE = [
   { id: 'dashboard', label: 'Dashboard', sub: [] },
@@ -6738,6 +6862,7 @@ const MODULES_TREE = [
       { id: 'mantenedores-equipos',     label: 'Equipos' },
       { id: 'mantenedores-repuestos',   label: 'Repuestos' },
       { id: 'mantenedores-productos-rendiciones', label: 'Productos/Servicios Rendiciones' },
+      { id: 'mantenedores-monedas-indicadores', label: 'Monedas e Indicadores' },
       { id: 'mantenedores-usuarios',    label: 'Usuarios' },
     ],
   },
@@ -9047,6 +9172,8 @@ const emptyVoucher = (nextNumber = 1) => ({
   tipoComprobante: 'Traspaso',
   numero: String(nextNumber).padStart(4, '0'),
   unidadNegocio: 'Casa Matriz',
+  moneda: 'CLP - Peso Chileno',
+  tipoCambio: 1,
   fecha: accountingDate(),
   documento: '',
   glosa: '',
@@ -9060,6 +9187,8 @@ const VOUCHER_BULK_TEMPLATE_HEADERS = [
   'Fecha',
   'Tipo Contabilidad',
   'Unidad de Negocio',
+  'Moneda',
+  'Tipo de Cambio',
   'Estado',
   'Glosa Comprobante',
   'Cod. Cta. Contable',
@@ -9095,7 +9224,7 @@ const excelDateToIso = (value, fallback = accountingDate()) => {
 };
 
 const ComprobantesContables = () => {
-  const { comprobantes, setComprobantes, planCuentas, tipoDocumentos, clientes, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
+  const { comprobantes, setComprobantes, planCuentas, tipoDocumentos, clientes, activeEmpresaId, currentEmpresa, monedasIndicadores } = useContext(ERPContext);
   const fileInputRef = useRef(null);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('Todos');
@@ -9132,6 +9261,18 @@ const ComprobantesContables = () => {
     (tipoDocumentosEmpresa.length ? tipoDocumentosEmpresa : tipoDocumentos)
       .map(d => [d.tipDoc || d.codigo, d.descripcion || d.nombre || d.name].filter(Boolean).join(' - '))
   );
+  const monedasData = normalizeMonedasIndicadores(monedasIndicadores);
+  const monedaOptions = dedupeByNormalizedText(monedasData.monedas.map(monedaLabel)).length
+    ? dedupeByNormalizedText(monedasData.monedas.map(monedaLabel))
+    : ['CLP - Peso Chileno'];
+  const lookupTipoCambio = (moneda, fecha) => tipoCambioFor(monedasData.tiposCambio, moneda, fecha) || (normalizeKey(monedaCodeFromLabel(moneda)) === 'clp' ? 1 : '');
+
+  useEffect(() => {
+    const nextTipoCambio = lookupTipoCambio(draft.moneda, draft.fecha);
+    if (nextTipoCambio !== '' && String(draft.tipoCambio || '') !== String(nextTipoCambio)) {
+      setDraft(prev => ({ ...prev, tipoCambio: nextTipoCambio }));
+    }
+  }, [draft.moneda, draft.fecha, monedasIndicadores]);
 
   const nextNumber = () => {
     const max = comprobantes.reduce((acc, item) => Math.max(acc, Number(item.numero) || 0), 0);
@@ -9152,6 +9293,8 @@ const ComprobantesContables = () => {
     const next = {
       ...emptyVoucher(nextNumber()),
       unidadNegocio: unidadNegocioOptions[0] || currentEmpresa?.razonSocial || 'Casa Matriz',
+      moneda: monedaOptions[0] || 'CLP - Peso Chileno',
+      tipoCambio: lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1,
     };
     setDraft(next);
     setLineDraft(emptyVoucherLine(1));
@@ -9261,8 +9404,8 @@ const ComprobantesContables = () => {
     const tipoDoc = tipoDocumentoOptions[0] || 'Factura';
     const auxiliar = auxiliarOptions[0] || '';
     const sampleRows = [
-      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(firstCuenta).code, firstCuenta, 'Linea debe ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 100000, 0],
-      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(secondCuenta).code, secondCuenta, 'Linea haber ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 0, 100000],
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, monedaOptions[0] || 'CLP - Peso Chileno', lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(firstCuenta).code, firstCuenta, 'Linea debe ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 100000, 0],
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, monedaOptions[0] || 'CLP - Peso Chileno', lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(secondCuenta).code, secondCuenta, 'Linea haber ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 0, 100000],
     ];
     const ws = XLSX.utils.aoa_to_sheet([VOUCHER_BULK_TEMPLATE_HEADERS, ...sampleRows]);
     ws['!cols'] = VOUCHER_BULK_TEMPLATE_HEADERS.map(header => ({ wch: Math.max(16, header.length + 2) }));
@@ -9318,6 +9461,8 @@ const ComprobantesContables = () => {
           tipoComprobante: tipo,
           numero: String(numero),
           unidadNegocio: keyFor(row, ['unidad de negocio', 'unidad negocio', 'unidad']) || unidadNegocioOptions[0] || 'Casa Matriz',
+          moneda: keyFor(row, ['moneda', 'codigo moneda']) || monedaOptions[0] || 'CLP - Peso Chileno',
+          tipoCambio: keyFor(row, ['tipo de cambio', 'tipo cambio']) || lookupTipoCambio(keyFor(row, ['moneda', 'codigo moneda']) || monedaOptions[0] || 'CLP - Peso Chileno', fecha) || 1,
           fecha,
           documento,
           glosa: glosaComprobante,
@@ -9389,6 +9534,15 @@ const ComprobantesContables = () => {
               options={unidadNegocioOptions}
               placeholder={unidadNegocioOptions.length ? 'Seleccionar unidad' : 'Sin unidades creadas'}
             />
+            <ComboInput
+              label="Moneda"
+              disabled={readOnly}
+              value={draft.moneda}
+              onChange={e => updateDraft('moneda', e.target.value)}
+              options={monedaOptions}
+              placeholder={monedaOptions.length ? 'Seleccionar moneda' : 'Sin monedas creadas'}
+            />
+            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo de cambio</span><input disabled={readOnly} inputMode="decimal" value={draft.tipoCambio} onChange={e => updateDraft('tipoCambio', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha contable</span><input type="date" disabled={readOnly} value={draft.fecha} onChange={e => updateDraft('fecha', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="md:col-span-2 xl:col-span-4 space-y-1"><span className="text-xs font-semibold text-slate-600">Glosa</span><textarea disabled={readOnly} value={draft.glosa} onChange={e => updateDraft('glosa', e.target.value)} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" /></label>
           </div>
@@ -11558,6 +11712,7 @@ const Sidebar = () => {
     'Equipos': 'mantenedores-equipos',
     'Repuestos': 'mantenedores-repuestos',
     'Productos/Servicios Rendiciones': 'mantenedores-productos-rendiciones',
+    'Monedas e Indicadores': 'mantenedores-monedas-indicadores',
     'Usuarios': 'mantenedores-usuarios',
   }[label] || 'mantenedores-clientes');
 
@@ -11591,7 +11746,7 @@ const Sidebar = () => {
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
   const menuBottom = [
-    { id: 'mantenedores-clientes',   label: 'Mantenedores',    icon: Database,  sub: ['Clientes y/o Proveedores', 'Licitaciones', 'Equipos', 'Repuestos', 'Productos/Servicios Rendiciones', 'Usuarios'] },
+    { id: 'mantenedores-clientes',   label: 'Mantenedores',    icon: Database,  sub: ['Clientes y/o Proveedores', 'Licitaciones', 'Equipos', 'Repuestos', 'Productos/Servicios Rendiciones', 'Monedas e Indicadores', 'Usuarios'] },
     { id: 'configuraciones-empresas',label: 'Configuraciones', icon: Settings,  sub: ['Empresas', 'Plan de Cuentas', 'Tipo de Documentos', 'Impuestos y Retenciones', 'Parámetros', 'Seguridad', 'Flujo de Aprobación'] },
   ];
 
@@ -11688,6 +11843,7 @@ const Header = () => {
     'mantenedores-equipos': 'Mantenedores / Equipos',
     'mantenedores-repuestos': 'Mantenedores / Repuestos',
     'mantenedores-productos-rendiciones': 'Mantenedores / Productos y Servicios Rendiciones',
+    'mantenedores-monedas-indicadores': 'Mantenedores / Monedas e Indicadores',
     'mantenedores-usuarios':                'Mantenedores / Usuarios',
     'configuraciones-empresas':             'Configuraciones / Empresas',
     'configuraciones-plan-cuentas':         'Configuraciones / Plan de Cuentas',
@@ -12018,6 +12174,7 @@ const ContentManager = () => {
     'contabilidad-informes-tributarios': 'contabilidad',
     'contabilidad-analiticos': 'contabilidad',
     'contabilidad-estados-financieros': 'contabilidad',
+    'mantenedores-monedas-indicadores': 'mantenedores-clientes',
   };
   const canAccess = (id) => {
     if (loggedInUser.isSuperadmin) return true;
@@ -12058,6 +12215,7 @@ const ContentManager = () => {
       case 'mantenedores-equipos': return <MantenedoresEquipos />;
       case 'mantenedores-repuestos': return <MantenedoresRepuestos />;
       case 'mantenedores-productos-rendiciones': return <MantenedoresProductosRendiciones />;
+      case 'mantenedores-monedas-indicadores': return <MantenedoresMonedasIndicadores />;
       case 'mantenedores-usuarios':             return <MantenedoresUsuarios />;
       case 'configuraciones-empresas':          return <ConfigEmpresas />;
       case 'configuraciones-plan-cuentas':      return <ConfigPlanCuentas />;
