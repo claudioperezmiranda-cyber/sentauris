@@ -8921,14 +8921,43 @@ const emptyVoucher = (nextNumber = 1) => ({
 });
 
 const ComprobantesContables = () => {
-  const { comprobantes, setComprobantes, planCuentas, tipoDocumentos } = useContext(ERPContext);
+  const { comprobantes, setComprobantes, planCuentas, tipoDocumentos, clientes, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
   const fileInputRef = useRef(null);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('Todos');
   const [mode, setMode] = useState('list');
   const [draft, setDraft] = useState(() => emptyVoucher());
   const [lineDraft, setLineDraft] = useState(() => emptyVoucherLine(1));
+  const [editingLineId, setEditingLineId] = useState('');
   const [notice, setNotice] = useState('');
+
+  const currentEmpresaName = currentEmpresa?.razonSocial || currentEmpresa?.nombreFantasia || '';
+  const belongsToActiveEmpresa = (item = {}) => {
+    if (!activeEmpresaId) return true;
+    if (item.empresaId || item.empresa_id) return String(item.empresaId || item.empresa_id) === String(activeEmpresaId);
+    if (Array.isArray(item.empresas)) return item.empresas.some(id => String(id) === String(activeEmpresaId));
+    if (Array.isArray(item.empresaConfig) && item.empresaConfig.length > 0) {
+      return item.empresaConfig.some(cfg =>
+        String(cfg.empresaId || cfg.empresa_id || '') === String(activeEmpresaId) ||
+        normalizeKey(cfg.empresa) === normalizeKey(currentEmpresaName)
+      );
+    }
+    return true;
+  };
+  const unidadNegocioOptions = dedupeByNormalizedText((currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue));
+  const centroCostoOptions = dedupeByNormalizedText((currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue));
+  const planCuentasEmpresa = planCuentas.filter(belongsToActiveEmpresa);
+  const cuentaContableOptionsComprobante = cuentaContableOptions(planCuentasEmpresa.length ? planCuentasEmpresa : planCuentas);
+  const auxiliarOptions = dedupeByNormalizedText(
+    clientes
+      .filter(c => !activeEmpresaId || c.empresaId === activeEmpresaId)
+      .map(c => [c.rut, c.razonSocial || c.name || c.nombreFantasia].filter(Boolean).join(' - '))
+  );
+  const tipoDocumentosEmpresa = tipoDocumentos.filter(belongsToActiveEmpresa);
+  const tipoDocumentoOptions = dedupeByNormalizedText(
+    (tipoDocumentosEmpresa.length ? tipoDocumentosEmpresa : tipoDocumentos)
+      .map(d => [d.tipDoc || d.codigo, d.descripcion || d.nombre || d.name].filter(Boolean).join(' - '))
+  );
 
   const nextNumber = () => {
     const max = comprobantes.reduce((acc, item) => Math.max(acc, Number(item.numero) || 0), 0);
@@ -8946,9 +8975,13 @@ const ComprobantesContables = () => {
   });
 
   const openNew = () => {
-    const next = emptyVoucher(nextNumber());
+    const next = {
+      ...emptyVoucher(nextNumber()),
+      unidadNegocio: unidadNegocioOptions[0] || currentEmpresa?.razonSocial || 'Casa Matriz',
+    };
     setDraft(next);
     setLineDraft(emptyVoucherLine(1));
+    setEditingLineId('');
     setMode('edit');
     setNotice('');
   };
@@ -8961,6 +8994,7 @@ const ComprobantesContables = () => {
     };
     setDraft(normalized);
     setLineDraft(emptyVoucherLine((normalized.detalles || []).length + 1));
+    setEditingLineId('');
     setMode(nextMode);
     setNotice('');
   };
@@ -8969,6 +9003,18 @@ const ComprobantesContables = () => {
   const updateLine = (field, value) => setLineDraft(prev => ({ ...prev, [field]: value }));
 
   const addLine = () => {
+    if (editingLineId) {
+      setDraft(prev => ({
+        ...prev,
+        detalles: (prev.detalles || []).map(item =>
+          item.id === editingLineId ? { ...lineDraft, id: editingLineId, glosa: lineDraft.glosa || draft.glosa } : item
+        ).map((item, index) => ({ ...item, numeroDetalle: index + 1 })),
+      }));
+      setLineDraft(emptyVoucherLine((draft.detalles || []).length + 1));
+      setEditingLineId('');
+      setNotice('Linea actualizada.');
+      return;
+    }
     const index = (draft.detalles || []).length + 1;
     const nextLine = { ...lineDraft, id: lineDraft.id || `line-${Date.now()}`, numeroDetalle: index, glosa: lineDraft.glosa || draft.glosa };
     setDraft(prev => ({ ...prev, detalles: [...(prev.detalles || []), nextLine] }));
@@ -8981,6 +9027,22 @@ const ComprobantesContables = () => {
       ...prev,
       detalles: (prev.detalles || []).filter(item => item.id !== lineId).map((item, index) => ({ ...item, numeroDetalle: index + 1 })),
     }));
+    if (editingLineId === lineId) {
+      setEditingLineId('');
+      setLineDraft(emptyVoucherLine((draft.detalles || []).length));
+    }
+  };
+
+  const editLine = (line) => {
+    setLineDraft({ ...emptyVoucherLine(line.numeroDetalle || 1), ...line });
+    setEditingLineId(line.id);
+    setNotice(`Editando linea ${line.numeroDetalle}.`);
+  };
+
+  const cancelLineEdit = () => {
+    setEditingLineId('');
+    setLineDraft(emptyVoucherLine((draft.detalles || []).length + 1));
+    setNotice('');
   };
 
   const saveVoucher = (nextState = draft.estado) => {
@@ -9085,7 +9147,14 @@ const ComprobantesContables = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo contabilidad</span><select disabled={readOnly} value={draft.tipoContabilidad} onChange={e => updateDraft('tipoContabilidad', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"><option>PCGA</option><option>IFRS</option><option>Ambas</option></select></label>
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo de comprobante</span><select disabled={readOnly} value={draft.tipoComprobante} onChange={e => updateDraft('tipoComprobante', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"><option>Apertura</option><option>Egreso</option><option>Ingreso</option><option>Traspaso</option></select></label>
-            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Unidad de negocio</span><input disabled={readOnly} value={draft.unidadNegocio} onChange={e => updateDraft('unidadNegocio', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+            <ComboInput
+              label="Unidad de negocio"
+              disabled={readOnly}
+              value={draft.unidadNegocio}
+              onChange={e => updateDraft('unidadNegocio', e.target.value)}
+              options={unidadNegocioOptions}
+              placeholder={unidadNegocioOptions.length ? 'Seleccionar unidad' : 'Sin unidades creadas'}
+            />
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha contable</span><input type="date" disabled={readOnly} value={draft.fecha} onChange={e => updateDraft('fecha', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="md:col-span-2 xl:col-span-4 space-y-1"><span className="text-xs font-semibold text-slate-600">Glosa</span><textarea disabled={readOnly} value={draft.glosa} onChange={e => updateDraft('glosa', e.target.value)} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" /></label>
           </div>
@@ -9093,21 +9162,56 @@ const ComprobantesContables = () => {
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 md:p-6 space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
-            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Numero de detalle</span><input disabled value={(draft.detalles || []).length + 1} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" /></label>
-            <label className="md:col-span-2 space-y-1"><span className="text-xs font-semibold text-slate-600">Cuenta contable</span><input disabled={readOnly} list="cuentas-contables" value={lineDraft.cuentaContable} onChange={e => updateLine('cuentaContable', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /><datalist id="cuentas-contables">{planCuentas.map(c => <option key={c.id || c.codigo || c.nombre} value={`${c.codigo || ''} ${c.nombre || c.name || ''}`} />)}</datalist></label>
-            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Centro de costo</span><select disabled={readOnly} value={lineDraft.centroCosto} onChange={e => updateLine('centroCosto', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="">Seleccionar</option><option>Administracion</option><option>Operaciones</option><option>Ventas</option><option>Casa Matriz</option></select></label>
+            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Numero de detalle</span><input disabled value={editingLineId ? (lineDraft.numeroDetalle || '') : (draft.detalles || []).length + 1} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" /></label>
+            <div className="md:col-span-2">
+              <ComboInput
+                label="Cuenta contable"
+                disabled={readOnly}
+                value={lineDraft.cuentaContable}
+                onChange={e => updateLine('cuentaContable', e.target.value)}
+                options={cuentaContableOptionsComprobante}
+                placeholder={cuentaContableOptionsComprobante.length ? 'Seleccionar cuenta' : 'Sin cuentas para empresa activa'}
+              />
+            </div>
+            <ComboInput
+              label="Centro de costo"
+              disabled={readOnly}
+              value={lineDraft.centroCosto}
+              onChange={e => updateLine('centroCosto', e.target.value)}
+              options={centroCostoOptions}
+              placeholder={centroCostoOptions.length ? 'Seleccionar centro' : 'Sin centros creados'}
+            />
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Debe</span><input disabled={readOnly} inputMode="numeric" value={lineDraft.debe} onChange={e => updateLine('debe', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Haber</span><input disabled={readOnly} inputMode="numeric" value={lineDraft.haber} onChange={e => updateLine('haber', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <label className="md:col-span-2 space-y-1"><span className="text-xs font-semibold text-slate-600">Glosa linea</span><input disabled={readOnly} value={lineDraft.glosa} onChange={e => updateLine('glosa', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
-            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Auxiliar</span><input disabled={readOnly} value={lineDraft.auxiliar} onChange={e => updateLine('auxiliar', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
-            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo documento</span><input disabled={readOnly} list="tipo-documentos-contables" value={lineDraft.tipoDocumento} onChange={e => updateLine('tipoDocumento', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /><datalist id="tipo-documentos-contables">{tipoDocumentos.map(d => <option key={d.id || d.codigo || d.nombre} value={d.nombre || d.name || d.codigo} />)}</datalist></label>
+            <ComboInput
+              label="Auxiliar"
+              disabled={readOnly}
+              value={lineDraft.auxiliar}
+              onChange={e => updateLine('auxiliar', e.target.value)}
+              options={auxiliarOptions}
+              placeholder={auxiliarOptions.length ? 'Seleccionar cliente/proveedor' : 'Sin auxiliares para empresa activa'}
+            />
+            <ComboInput
+              label="Tipo documento"
+              disabled={readOnly}
+              value={lineDraft.tipoDocumento}
+              onChange={e => updateLine('tipoDocumento', e.target.value)}
+              options={tipoDocumentoOptions}
+              placeholder={tipoDocumentoOptions.length ? 'Seleccionar tipo documento' : 'Sin tipos creados'}
+            />
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Numero documento</span><input disabled={readOnly} value={lineDraft.numeroDocumento} onChange={e => updateLine('numeroDocumento', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha documento</span><input type="date" disabled={readOnly} value={lineDraft.fechaDocumento} onChange={e => updateLine('fechaDocumento', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
           </div>
           <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-            <div className="flex flex-wrap gap-2">{!readOnly && <Button variant="accent" icon={CheckCircle2} onClick={addLine}>Guardar linea</Button>}{!readOnly && <Button variant="primary" icon={FileText} onClick={saveAndExit}>Guardar y salir</Button>}<Button variant="secondary" icon={ClipboardList} onClick={() => setNotice('No hay documentos pendientes asociados.')}>Docs. pendientes</Button></div>
+            <div className="flex flex-wrap gap-2">
+              {!readOnly && <Button variant="accent" icon={CheckCircle2} onClick={addLine}>{editingLineId ? 'Actualizar linea' : 'Guardar linea'}</Button>}
+              {!readOnly && editingLineId && <Button variant="secondary" icon={X} onClick={cancelLineEdit}>Cancelar edicion</Button>}
+              {!readOnly && <Button variant="primary" icon={FileText} onClick={saveAndExit}>Guardar y salir</Button>}
+              <Button variant="secondary" icon={ClipboardList} onClick={() => setNotice('No hay documentos pendientes asociados.')}>Docs. pendientes</Button>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-w-0">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-400">Debe</p><p className="text-lg font-black text-slate-900">{money(totals.debe)}</p></div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-400">Haber</p><p className="text-lg font-black text-slate-900">{money(totals.haber)}</p></div>
@@ -9119,7 +9223,7 @@ const ComprobantesContables = () => {
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr><th className="p-3 text-left">N</th><th className="p-3 text-left">Cuenta contable</th><th className="p-3 text-left">Centro costo</th><th className="p-3 text-left">Documento</th><th className="p-3 text-left">Auxiliar</th><th className="p-3 text-left">Glosa</th><th className="p-3 text-right">Debe</th><th className="p-3 text-right">Haber</th><th className="p-3"></th></tr></thead><tbody>
-            {(draft.detalles || []).map(item => (<tr key={item.id} className="border-t border-slate-100"><td className="p-3 font-mono">{item.numeroDetalle}</td><td className="p-3">{item.cuentaContable || '-'}</td><td className="p-3">{item.centroCosto || '-'}</td><td className="p-3">{[item.tipoDocumento, item.numeroDocumento].filter(Boolean).join(' ') || '-'}</td><td className="p-3">{item.auxiliar || '-'}</td><td className="p-3 max-w-xs truncate">{item.glosa || '-'}</td><td className="p-3 text-right font-mono">{money(item.debe)}</td><td className="p-3 text-right font-mono">{money(item.haber)}</td><td className="p-3 text-right">{!readOnly && <button onClick={() => removeLine(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Eliminar linea"><Trash2 size={15}/></button>}</td></tr>))}
+            {(draft.detalles || []).map(item => (<tr key={item.id} className={`border-t border-slate-100 ${editingLineId === item.id ? 'bg-blue-50/50' : ''}`}><td className="p-3 font-mono">{item.numeroDetalle}</td><td className="p-3">{item.cuentaContable || '-'}</td><td className="p-3">{item.centroCosto || '-'}</td><td className="p-3">{[item.tipoDocumento, item.numeroDocumento].filter(Boolean).join(' ') || '-'}</td><td className="p-3">{item.auxiliar || '-'}</td><td className="p-3 max-w-xs truncate">{item.glosa || '-'}</td><td className="p-3 text-right font-mono">{money(item.debe)}</td><td className="p-3 text-right font-mono">{money(item.haber)}</td><td className="p-3 text-right whitespace-nowrap">{!readOnly && <button onClick={() => editLine(item)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Modificar linea"><Pencil size={15}/></button>}{!readOnly && <button onClick={() => removeLine(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Eliminar linea"><Trash2 size={15}/></button>}</td></tr>))}
             {(!draft.detalles || draft.detalles.length === 0) && (<tr><td colSpan="9" className="p-8 text-center text-sm text-slate-400">Agrega lineas para construir el comprobante.</td></tr>)}
           </tbody></table></div>
         </div>
