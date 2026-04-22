@@ -1859,6 +1859,22 @@ const MantencionPreventiva = () => {
     });
   };
 
+  const toggleChecklistStatus = (itemKey, itemCriticidad, status, entry) => {
+    if (status === 'Falla') {
+      updateChecklistEntry(itemKey, {
+        criticidad: itemCriticidad,
+        falla: !entry.falla,
+      });
+      return;
+    }
+    const selected = preventiveEntryMatches(entry, status);
+    updateChecklistEntry(itemKey, {
+      criticidad: itemCriticidad,
+      estado: selected ? '' : status,
+      falla: false,
+    });
+  };
+
   const handleFinish = async () => {
     const missingRequired = protocolo.sections.flatMap(section =>
       section.items
@@ -1899,9 +1915,9 @@ const MantencionPreventiva = () => {
           estado: preventiveChecklistEstadoForDb(value)
         }))
         .filter(item => ['Si', 'No', 'N/A', 'Falla'].includes(item.estado));
+      const { error: delErr } = await supabase.from('orden_checklist').delete().eq('orden_id', orden.id);
+      if (delErr) throw delErr;
       if (checkItems.length > 0) {
-        const { error: delErr } = await supabase.from('orden_checklist').delete().eq('orden_id', orden.id);
-        if (delErr) throw delErr;
         const { error: insErr } = await supabase.from('orden_checklist').insert(checkItems);
         if (insErr) {
           console.warn('No se pudo guardar la copia resumida del checklist preventivo:', insErr);
@@ -1940,8 +1956,8 @@ const MantencionPreventiva = () => {
 
       <Card className="grid grid-cols-1 gap-3 border-amber-100 bg-amber-50 md:grid-cols-[1fr_auto] md:items-center">
         <div>
-          <p className="text-xs font-black uppercase text-amber-700">Leyenda de criticidad</p>
-          <p className="text-sm text-amber-900">La criticidad de cada componente viene definida desde Configuraciones / Tipo de Documentos / Protocolos.</p>
+          <p className="text-xs font-black uppercase text-amber-700">Criterio de criticidad</p>
+          <p className="text-sm text-amber-900">La criticidad identifica componentes sensibles del protocolo. Los estados se pueden marcar y desmarcar con un clic.</p>
         </div>
         <div className="flex flex-wrap gap-2 text-[10px] font-bold">
           <span className="rounded border border-amber-300 bg-amber-100 px-2 py-1 text-amber-800">Critico</span>
@@ -1956,6 +1972,13 @@ const MantencionPreventiva = () => {
             <div className="bg-slate-50 px-6 py-3 border-b border-slate-100">
               <h3 className="text-sm font-black text-slate-600 uppercase tracking-tight">{section.section}</h3>
             </div>
+            <div className="grid grid-cols-1 gap-2 border-b border-slate-100 px-6 py-2 text-[10px] font-black uppercase text-slate-400 lg:grid-cols-[1fr_auto] lg:items-center">
+              <span>Actividad</span>
+              <div className="grid grid-cols-[minmax(88px,auto)_repeat(4,minmax(44px,auto))] gap-2">
+                <span className="text-center">Criticidad</span>
+                <span className="col-span-4 text-center">Estados</span>
+              </div>
+            </div>
             <div className="divide-y divide-slate-50">
               {section.items.map((item, i) => {
                 const itemLabel = protocolItemLabel(item);
@@ -1965,23 +1988,23 @@ const MantencionPreventiva = () => {
                 const entry = { ...normalizePreventiveChecklistEntry(checklist[itemKey]), criticidad: itemCriticidad };
                 return (
                   <div key={i} className="flex flex-col gap-3 px-6 py-3 hover:bg-slate-50 transition-colors lg:flex-row lg:items-center lg:justify-between">
-                    <span className="text-sm text-slate-700 font-medium">{itemLabel}</span>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <div className="grid grid-cols-5 gap-2 md:flex md:items-center">
-                      <span className={`flex items-center justify-center rounded border px-3 py-1 text-[10px] font-bold uppercase ${itemCriticidad === 'Critico' ? 'border-amber-200 bg-amber-100 text-amber-800' : 'border-slate-200 bg-slate-100 text-slate-500'}`}>
-                        {itemCriticidad}
-                      </span>
+                    <span className="flex flex-wrap items-center gap-2 text-sm text-slate-700 font-medium">
+                      {itemLabel}
                       {itemRequired && (
-                        <span className="flex items-center justify-center rounded border border-blue-200 bg-blue-50 px-3 py-1 text-[10px] font-bold uppercase text-blue-700">
+                        <span className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-700">
                           Obligatorio
                         </span>
                       )}
+                    </span>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="grid grid-cols-[minmax(88px,auto)_repeat(4,minmax(44px,auto))] gap-2 md:items-center">
+                      <span className={`flex items-center justify-center rounded border px-3 py-1 text-[10px] font-bold uppercase ${itemCriticidad === 'Critico' ? 'border-amber-200 bg-amber-100 text-amber-800' : 'border-slate-200 bg-slate-100 text-slate-500'}`}>
+                        {itemCriticidad}
+                      </span>
                       {statusOptions.map(status => (
                         <button key={status}
                           disabled={status === 'Falla' && !(itemCriticidad === 'Critico' && entry.estado === 'No')}
-                          onClick={() => status === 'Falla'
-                            ? updateChecklistEntry(itemKey, { criticidad: itemCriticidad, falla: !entry.falla })
-                            : updateChecklistEntry(itemKey, { criticidad: itemCriticidad, estado: status })}
+                          onClick={() => toggleChecklistStatus(itemKey, itemCriticidad, status, entry)}
                           className={`px-3 py-1 rounded text-[10px] font-bold border transition-all ${
                             preventiveEntryMatches(entry, status)
                               ? status === 'Si' ? 'bg-green-600 border-green-600 text-white' : status === 'No' || status === 'Falla' ? 'bg-red-600 border-red-600 text-white' : 'bg-slate-500 border-slate-500 text-white'
@@ -2543,7 +2566,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
           <div class="cell"><b>Equipo</b>${orden.tipo_equipo || ''}</div><div class="cell"><b>Marca</b>${orden.marca || ''}</div><div class="cell"><b>Modelo</b>${orden.modelo || ''}</div>
           <div class="cell"><b>Serie</b>${orden.numero_serie || ''}</div><div class="cell"><b>Inventario</b>${orden.numero_inventario || ''}</div><div class="cell"><b>Servicio</b>${orden.ubicacion_area || ''}</div>
         </div>
-        <table><thead><tr><th>Accion</th><th>Criticidad</th><th>Si</th><th>No</th><th>N/A</th><th>Falla</th></tr></thead><tbody>
+        <table><thead><tr><th rowspan="2">Accion</th><th rowspan="2">Criticidad</th><th colspan="4">Estados</th></tr><tr><th>Si</th><th>No</th><th>N/A</th><th>Falla</th></tr></thead><tbody>
         ${protocolo.sections.flatMap(s => [`<tr><th colspan="6">${s.section}</th></tr>`, ...s.items.map(i => {
           const itemLabel = protocolItemLabel(i);
           const itemKey = `${s.section} - ${itemLabel}`;
@@ -11242,7 +11265,7 @@ const buildPreventivePublicReportHtml = ({ orden, cliente, lic, empresa, protoco
         <div class="cell"><b>Equipo</b>${htmlText(orden.tipo_equipo || '')}</div><div class="cell"><b>Marca</b>${htmlText(orden.marca || '')}</div><div class="cell"><b>Modelo</b>${htmlText(orden.modelo || '')}</div>
         <div class="cell"><b>Serie</b>${htmlText(orden.numero_serie || '')}</div><div class="cell"><b>Inventario</b>${htmlText(orden.numero_inventario || '')}</div><div class="cell"><b>Servicio</b>${htmlText(orden.ubicacion_area || '')}</div>
       </div>
-      <table><thead><tr><th>Accion</th><th>Criticidad</th><th>Si</th><th>No</th><th>N/A</th><th>Falla</th></tr></thead><tbody>
+      <table><thead><tr><th rowspan="2">Accion</th><th rowspan="2">Criticidad</th><th colspan="4">Estados</th></tr><tr><th>Si</th><th>No</th><th>N/A</th><th>Falla</th></tr></thead><tbody>
       ${protocolo.sections.flatMap(s => [`<tr><th colspan="6">${htmlText(s.section)}</th></tr>`, ...s.items.map(i => {
         const itemLabel = protocolItemLabel(i);
         const itemKey = `${s.section} - ${itemLabel}`;
