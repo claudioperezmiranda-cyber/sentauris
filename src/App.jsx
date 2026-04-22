@@ -9068,6 +9068,11 @@ const ComprobantesContables = () => {
     setMode('list');
   };
 
+  const accountAndExit = () => {
+    saveVoucher('Contabilizado');
+    setMode('list');
+  };
+
   const deleteVoucher = (voucher) => {
     if (!window.confirm(`Eliminar comprobante ${voucher.numero}?`)) return;
     setComprobantes(prev => prev.filter(item => item.id !== voucher.id));
@@ -9216,7 +9221,7 @@ const ComprobantesContables = () => {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-w-0">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-400">Debe</p><p className="text-lg font-black text-slate-900">{money(totals.debe)}</p></div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-400">Haber</p><p className="text-lg font-black text-slate-900">{money(totals.haber)}</p></div>
-              <Button disabled={readOnly || totals.debe <= 0 || balanceDiff !== 0} variant="accent" icon={CheckCircle} onClick={() => saveVoucher('Contabilizado')}>Contabilizar</Button>
+              <Button disabled={readOnly || totals.debe <= 0 || balanceDiff !== 0} variant="accent" icon={CheckCircle} onClick={accountAndExit}>Contabilizar</Button>
             </div>
           </div>
           {notice && <div className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">{notice}</div>}
