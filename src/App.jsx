@@ -1195,9 +1195,13 @@ const SearchableSelect = ({ label, options = [], value, onChange, disabled, plac
 const ComboInput = ({ label, value, onChange, options = [], disabled, placeholder }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value || '');
+  const [showAllOptions, setShowAllOptions] = useState(false);
   const ref = useRef(null);
 
-  useEffect(() => { setQuery(value || ''); }, [value]);
+  useEffect(() => {
+    setQuery(value || '');
+    setShowAllOptions(false);
+  }, [value]);
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -1205,19 +1209,23 @@ const ComboInput = ({ label, value, onChange, options = [], disabled, placeholde
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const filtered = query
+  const filtered = showAllOptions
+    ? options
+    : query
     ? options.filter(o => o.toLowerCase().includes(query.toLowerCase()))
     : options;
 
   const handleInput = (e) => {
     setQuery(e.target.value);
     setOpen(true);
+    setShowAllOptions(false);
     onChange(e);
   };
 
   const select = (opt) => {
     setQuery(opt);
     setOpen(false);
+    setShowAllOptions(false);
     onChange({ target: { value: opt } });
   };
 
@@ -1228,7 +1236,10 @@ const ComboInput = ({ label, value, onChange, options = [], disabled, placeholde
       {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
       <input
         type="text" value={query} onChange={handleInput}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          setOpen(true);
+          setShowAllOptions(true);
+        }}
         disabled={disabled} placeholder={placeholder || 'Seleccionar...'}
         className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all text-sm"
         style={{ backgroundImage: chevronSvg, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1em 1em', paddingRight: '2rem' }}
