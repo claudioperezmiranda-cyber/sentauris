@@ -9747,6 +9747,7 @@ const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
   .filter(voucher => !filters.unidadNegocio || filters.unidadNegocio === 'Todas' || voucher.unidadNegocio === filters.unidadNegocio)
   .flatMap(voucher => (voucher.detalles || []).map(line => ({ voucher, line, account: splitAccount(line.cuentaContable) })))
   .filter(item => !filters.cuentaContable || normalizeKey(item.line.cuentaContable) === normalizeKey(filters.cuentaContable))
+  .filter(item => !filters.auxiliar || normalizeKey(item.line.auxiliar) === normalizeKey(filters.auxiliar))
   .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || item.line.centroCosto === filters.centroCosto)
   .sort((a, b) =>
     String(a.account.code || '').localeCompare(String(b.account.code || '')) ||
@@ -9800,21 +9801,34 @@ const buildAnaliticoHtml = (rows = [], filters = {}, empresa = {}) => {
 };
 
 const AnaliticosContables = () => {
-  const { comprobantes, currentEmpresa } = useContext(ERPContext);
-  const accountOptions = dedupeByNormalizedText(comprobantes.flatMap(v => (v.detalles || []).map(line => line.cuentaContable).filter(Boolean)));
-  const centroOptions = dedupeByNormalizedText([
-    ...(currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue),
-    ...comprobantes.flatMap(v => (v.detalles || []).map(line => line.centroCosto).filter(Boolean)),
-  ]);
-  const unidadOptions = dedupeByNormalizedText([
-    ...(currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue),
-    ...comprobantes.map(v => v.unidadNegocio).filter(Boolean),
-  ]);
+  const { comprobantes, currentEmpresa, planCuentas, clientes, activeEmpresaId } = useContext(ERPContext);
+  const currentEmpresaName = currentEmpresa?.razonSocial || currentEmpresa?.nombreFantasia || '';
+  const belongsToCurrentEmpresa = (item = {}) => {
+    if (!activeEmpresaId) return true;
+    if (item.empresaId || item.empresa_id) return String(item.empresaId || item.empresa_id) === String(activeEmpresaId);
+    if (Array.isArray(item.empresas)) return item.empresas.some(id => String(id) === String(activeEmpresaId));
+    if (Array.isArray(item.empresaConfig) && item.empresaConfig.length > 0) {
+      return item.empresaConfig.some(cfg =>
+        String(cfg.empresaId || cfg.empresa_id || '') === String(activeEmpresaId) ||
+        normalizeKey(cfg.empresa) === normalizeKey(currentEmpresaName)
+      );
+    }
+    return true;
+  };
+  const accountOptions = dedupeByNormalizedText(planCuentas.filter(belongsToCurrentEmpresa).map(planCuentaLabel));
+  const centroOptions = dedupeByNormalizedText((currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue));
+  const unidadOptions = dedupeByNormalizedText((currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue));
+  const auxiliarOptions = dedupeByNormalizedText(
+    clientes
+      .filter(c => !activeEmpresaId || c.empresaId === activeEmpresaId)
+      .map(c => [c.rut, c.razonSocial || c.name || c.nombreFantasia].filter(Boolean).join(' - '))
+  );
   const [filters, setFilters] = useState({
     fechaDesde: `${new Date().getFullYear()}-01-01`,
     fechaHasta: accountingDate(),
     cuentaContable: '',
     documentos: 'Todos',
+    auxiliar: '',
     centroCosto: 'Todos',
     unidadNegocio: 'Todas',
   });
@@ -9823,11 +9837,6 @@ const AnaliticosContables = () => {
   const [search, setSearch] = useState('');
   const updateFilter = (field, value) => setFilters(prev => ({ ...prev, [field]: value }));
   const previewRows = rows.filter(row => Object.values(row).join(' ').toLowerCase().includes(search.toLowerCase()));
-  const totals = rows.reduce((acc, row) => ({
-    debe: acc.debe + toAmount(row.Debe),
-    haber: acc.haber + toAmount(row.Haber),
-    saldo: acc.saldo + toAmount(row.Saldo),
-  }), { debe: 0, haber: 0, saldo: 0 });
 
   const generate = () => {
     setRows(buildAnaliticoRows(comprobantes, filters));
@@ -9858,6 +9867,7 @@ const AnaliticosContables = () => {
           <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha hasta</span><input type="date" value={filters.fechaHasta} onChange={e => updateFilter('fechaHasta', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
           <div className="xl:col-span-2"><ComboInput label="Cuenta contable" value={filters.cuentaContable} onChange={e => updateFilter('cuentaContable', e.target.value)} options={accountOptions} placeholder="Todas las cuentas" /></div>
           <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Documentos a incluir</span><select value={filters.documentos} onChange={e => updateFilter('documentos', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option>Solo pendientes</option><option>Cancelados</option><option>Todos</option></select></label>
+          <ComboInput label="Auxiliar" value={filters.auxiliar} onChange={e => updateFilter('auxiliar', e.target.value)} options={auxiliarOptions} placeholder="Todos los auxiliares" />
           <ComboInput label="Centro de costo" value={filters.centroCosto} onChange={e => updateFilter('centroCosto', e.target.value)} options={['Todos', ...centroOptions]} placeholder="Todos" />
           <ComboInput label="Unidad de negocios" value={filters.unidadNegocio} onChange={e => updateFilter('unidadNegocio', e.target.value)} options={['Todas', ...unidadOptions]} placeholder="Todas" />
         </div>
@@ -9866,11 +9876,6 @@ const AnaliticosContables = () => {
           <Button variant="secondary" icon={FileSpreadsheet} onClick={exportExcel} disabled={!generated || rows.length === 0}>Exportar a Excel</Button>
           <Button variant="secondary" icon={FileDown} onClick={exportPdf} disabled={!generated || rows.length === 0}>PDF</Button>
         </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-black uppercase text-slate-400">Debe</p><p className="text-xl font-black text-slate-900">{money(totals.debe)}</p></div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-black uppercase text-slate-400">Haber</p><p className="text-xl font-black text-slate-900">{money(totals.haber)}</p></div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-black uppercase text-slate-400">Saldo</p><p className={`text-xl font-black ${totals.saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{money(totals.saldo)}</p></div>
       </div>
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-100"><div className="relative max-w-md"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar en informe generado" className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" /></div></div>
