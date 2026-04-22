@@ -1492,21 +1492,18 @@ const NuevoRegistro = () => {
     .filter(e =>
       (!formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo)) &&
       (!formData.marca || normalizeKey(e.marca) === normalizeKey(formData.marca)) &&
-      (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo))
+      (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo)) &&
+      (!formData.numeroInventario || normalizeKey(e.numero_inventario) === normalizeKey(formData.numeroInventario))
     )
     .map(e => e.numero_serie));
   const inventarioOptions = unique(availableEquipos
     .filter(e =>
       (!formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo)) &&
       (!formData.marca || normalizeKey(e.marca) === normalizeKey(formData.marca)) &&
-      (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo))
+      (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo)) &&
+      (!formData.numeroSerie || normalizeKey(e.numero_serie) === normalizeKey(formData.numeroSerie))
     )
     .map(e => e.numero_inventario));
-  const matchingEquipos = availableEquipos.filter(e =>
-    (!formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo)) &&
-    (!formData.marca || normalizeKey(e.marca) === normalizeKey(formData.marca)) &&
-    (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo))
-  );
 
   // Estado para nuevo cliente inline
   const [showNewCliente, setShowNewCliente] = useState(false);
@@ -1561,8 +1558,15 @@ const NuevoRegistro = () => {
       );
       if (match) {
         newData.modelo = match.modelo || newData.modelo;
-        newData.numeroInventario = match.numero_inventario || newData.numeroInventario;
       }
+      const hasMatchingInventario = !newData.numeroInventario || availableEquipos.some(e =>
+        sameText(e.tipo_equipo, newData.tipoEquipo) &&
+        sameText(e.marca, newData.marca) &&
+        (!newData.modelo || sameText(e.modelo, newData.modelo)) &&
+        sameText(e.numero_serie, value) &&
+        sameText(e.numero_inventario, newData.numeroInventario)
+      );
+      if (!hasMatchingInventario) newData.numeroInventario = '';
     }
     if (field === 'numeroInventario') {
       const match = availableEquipos.find(e =>
@@ -1573,21 +1577,17 @@ const NuevoRegistro = () => {
       );
       if (match) {
         newData.modelo = match.modelo || newData.modelo;
-        newData.numeroSerie = match.numero_serie || newData.numeroSerie;
       }
+      const hasMatchingSerie = !newData.numeroSerie || availableEquipos.some(e =>
+        sameText(e.tipo_equipo, newData.tipoEquipo) &&
+        sameText(e.marca, newData.marca) &&
+        (!newData.modelo || sameText(e.modelo, newData.modelo)) &&
+        sameText(e.numero_inventario, value) &&
+        sameText(e.numero_serie, newData.numeroSerie)
+      );
+      if (!hasMatchingSerie) newData.numeroSerie = '';
     }
     setFormData(newData);
-  };
-
-  const handleSelectEquipo = (equipo) => {
-    setFormData(prev => ({
-      ...prev,
-      tipoEquipo: equipo.tipo_equipo || prev.tipoEquipo,
-      marca: equipo.marca || prev.marca,
-      modelo: equipo.modelo || '',
-      numeroSerie: equipo.numero_serie || '',
-      numeroInventario: equipo.numero_inventario || '',
-    }));
   };
 
   const handleSaveCliente = async () => {
@@ -1813,57 +1813,6 @@ const NuevoRegistro = () => {
             placeholder="Seleccione o ingrese inventario"
             listId="nuevo-registro-inventarios"
           />
-          {formData.licitacionId && (
-            <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50/60 overflow-hidden">
-              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-200 bg-white">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Eye size={16} className="text-slate-400 shrink-0" />
-                  <h3 className="text-sm font-bold text-slate-800">Equipos del listado</h3>
-                </div>
-                <span className="text-xs font-semibold text-slate-500">{matchingEquipos.length} registro(s)</span>
-              </div>
-              <div className="max-h-60 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-slate-100 text-left text-[10px] uppercase text-slate-500">
-                    <tr>
-                      <th className="p-3 font-bold">Equipo</th>
-                      <th className="p-3 font-bold">Marca</th>
-                      <th className="p-3 font-bold">Modelo</th>
-                      <th className="p-3 font-bold">Serie</th>
-                      <th className="p-3 font-bold">Inventario</th>
-                      <th className="p-3 text-right font-bold">Accion</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {matchingEquipos.length === 0 ? (
-                      <tr>
-                        <td colSpan="6" className="px-4 py-6 text-center text-sm italic text-slate-400">
-                          No hay equipos registrados para los filtros seleccionados.
-                        </td>
-                      </tr>
-                    ) : matchingEquipos.map(equipo => (
-                      <tr key={equipo.id || `${equipo.tipo_equipo}-${equipo.marca}-${equipo.modelo}-${equipo.numero_serie}-${equipo.numero_inventario}`} className="border-t border-slate-200 bg-white hover:bg-blue-50/50">
-                        <td className="p-3 font-semibold text-slate-800">{equipo.tipo_equipo || '—'}</td>
-                        <td className="p-3">{equipo.marca || '—'}</td>
-                        <td className="p-3">{equipo.modelo || '—'}</td>
-                        <td className="p-3 font-mono text-xs">{equipo.numero_serie || '—'}</td>
-                        <td className="p-3 font-mono text-xs">{equipo.numero_inventario || '—'}</td>
-                        <td className="p-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleSelectEquipo(equipo)}
-                            className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
-                          >
-                            Usar
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
           <Input label="Area / Servicio" value={formData.ubicacionArea} onChange={(e) => handleChange('ubicacionArea', e.target.value)} placeholder="Ej: UCI, Pabellon, Urgencia" />
           <Input label="Solicitado por" value={formData.solicitadoPor} onChange={(e) => handleChange('solicitadoPor', e.target.value)} placeholder="Nombre del solicitante" />
         </div>
