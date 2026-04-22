@@ -6685,6 +6685,7 @@ const MODULES_TREE = [
     id: 'contabilidad', label: 'Contabilidad', sub: [
       { id: 'contabilidad-comprobantes', label: 'Comprobantes' },
       { id: 'contabilidad-informes-tributarios', label: 'Informes Tributarios' },
+      { id: 'contabilidad-analiticos', label: 'Analiticos' },
       { id: 'contabilidad-estados-financieros', label: 'Estados Financieros' },
     ],
   },
@@ -9735,6 +9736,154 @@ const InformesTributarios = () => {
   );
 };
 
+const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
+  .filter(voucher => dateInRange(voucher.fecha, filters.fechaDesde, filters.fechaHasta))
+  .filter(voucher => {
+    const estado = normalizeKey(voucher.estado);
+    if (filters.documentos === 'Solo pendientes') return !['contabilizado', 'cancelado', 'pagado'].includes(estado);
+    if (filters.documentos === 'Cancelados') return ['contabilizado', 'cancelado', 'pagado'].includes(estado);
+    return true;
+  })
+  .filter(voucher => !filters.unidadNegocio || filters.unidadNegocio === 'Todas' || voucher.unidadNegocio === filters.unidadNegocio)
+  .flatMap(voucher => (voucher.detalles || []).map(line => ({ voucher, line, account: splitAccount(line.cuentaContable) })))
+  .filter(item => !filters.cuentaContable || normalizeKey(item.line.cuentaContable) === normalizeKey(filters.cuentaContable))
+  .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || item.line.centroCosto === filters.centroCosto)
+  .sort((a, b) =>
+    String(a.account.code || '').localeCompare(String(b.account.code || '')) ||
+    String(a.voucher.fecha || '').localeCompare(String(b.voucher.fecha || '')) ||
+    String(a.voucher.numero || '').localeCompare(String(b.voucher.numero || ''))
+  )
+  .map(({ voucher, line, account }) => {
+    const debe = toAmount(line.debe);
+    const haber = toAmount(line.haber);
+    return {
+      Fecha: formatJournalDate(voucher.fecha),
+      Comprobante: voucherCode(voucher),
+      'Tipo comprobante': voucher.tipoComprobante || '',
+      Estado: voucher.estado || '',
+      'Unidad de negocio': voucher.unidadNegocio || '',
+      'Cod. cuenta': account.code || '',
+      'Cuenta contable': account.name || line.cuentaContable || '',
+      'Cuenta completa': line.cuentaContable || '',
+      Documento: [line.tipoDocumento, line.numeroDocumento].filter(Boolean).join(' - ') || voucher.documento || '',
+      Auxiliar: line.auxiliar || '',
+      'Centro de costo': line.centroCosto || '',
+      Glosa: line.glosa || voucher.glosa || '',
+      Debe: debe,
+      Haber: haber,
+      Saldo: debe - haber,
+      voucherId: voucher.id,
+    };
+  });
+
+const buildAnaliticoHtml = (rows = [], filters = {}, empresa = {}) => {
+  const totals = rows.reduce((acc, row) => ({
+    debe: acc.debe + toAmount(row.Debe),
+    haber: acc.haber + toAmount(row.Haber),
+    saldo: acc.saldo + toAmount(row.Saldo),
+  }), { debe: 0, haber: 0, saldo: 0 });
+  const body = rows.map(row => `<tr>
+    <td>${htmlText(row.Fecha)}</td><td>${htmlText(row.Comprobante)}</td><td>${htmlText(row['Cod. cuenta'])}</td><td>${htmlText(row['Cuenta contable'])}</td>
+    <td>${htmlText(row.Documento)}</td><td>${htmlText(row.Auxiliar)}</td><td>${htmlText(row['Centro de costo'])}</td><td>${htmlText(row['Unidad de negocio'])}</td>
+    <td>${htmlText(row.Estado)}</td><td class="num">${money(row.Debe)}</td><td class="num">${money(row.Haber)}</td><td class="num">${money(row.Saldo)}</td>
+  </tr>`).join('');
+  return `<html><head><title>Analitico contable</title><style>
+    body{font-family:Arial,sans-serif;color:#111827;padding:24px}.top{display:flex;justify-content:space-between;border-bottom:2px solid #1f2937;padding-bottom:12px;margin-bottom:16px}
+    h1{font-size:20px;margin:0}.meta{font-size:11px;color:#475569;margin-top:4px}.summary{text-align:right;font-size:12px}
+    table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:6px;font-size:9px;vertical-align:top}th{background:#e5e7eb;text-transform:uppercase}.num{text-align:right}.total td{background:#f8fafc;font-weight:700}
+    @media print{button{display:none}body{padding:0}}
+  </style></head><body>
+    <button onclick="window.print()" style="margin-bottom:14px;padding:8px 14px;border:0;background:#1f5b93;color:white;border-radius:8px;font-weight:700">Descargar PDF</button>
+    <div class="top"><div><h1>Analitico contable</h1><div class="meta">${htmlText(empresa?.razonSocial || empresa?.nombreFantasia || 'Empresa')} | RUT ${htmlText(empresa?.rut || '')}</div><div class="meta">Periodo: ${formatJournalDate(filters.fechaDesde)} al ${formatJournalDate(filters.fechaHasta)} | Cuenta: ${htmlText(filters.cuentaContable || 'Todas')} | Documentos: ${htmlText(filters.documentos || 'Todos')}</div></div><div class="summary"><b>Debe:</b> ${money(totals.debe)}<br/><b>Haber:</b> ${money(totals.haber)}<br/><b>Saldo:</b> ${money(totals.saldo)}</div></div>
+    <table><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cod. cuenta</th><th>Cuenta</th><th>Documento</th><th>Auxiliar</th><th>Centro costo</th><th>Unidad</th><th>Estado</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead><tbody>${body}<tr class="total"><td colspan="9">Total</td><td class="num">${money(totals.debe)}</td><td class="num">${money(totals.haber)}</td><td class="num">${money(totals.saldo)}</td></tr></tbody></table>
+  </body></html>`;
+};
+
+const AnaliticosContables = () => {
+  const { comprobantes, currentEmpresa } = useContext(ERPContext);
+  const accountOptions = dedupeByNormalizedText(comprobantes.flatMap(v => (v.detalles || []).map(line => line.cuentaContable).filter(Boolean)));
+  const centroOptions = dedupeByNormalizedText([
+    ...(currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue),
+    ...comprobantes.flatMap(v => (v.detalles || []).map(line => line.centroCosto).filter(Boolean)),
+  ]);
+  const unidadOptions = dedupeByNormalizedText([
+    ...(currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue),
+    ...comprobantes.map(v => v.unidadNegocio).filter(Boolean),
+  ]);
+  const [filters, setFilters] = useState({
+    fechaDesde: `${new Date().getFullYear()}-01-01`,
+    fechaHasta: accountingDate(),
+    cuentaContable: '',
+    documentos: 'Todos',
+    centroCosto: 'Todos',
+    unidadNegocio: 'Todas',
+  });
+  const [rows, setRows] = useState([]);
+  const [generated, setGenerated] = useState(false);
+  const [search, setSearch] = useState('');
+  const updateFilter = (field, value) => setFilters(prev => ({ ...prev, [field]: value }));
+  const previewRows = rows.filter(row => Object.values(row).join(' ').toLowerCase().includes(search.toLowerCase()));
+  const totals = rows.reduce((acc, row) => ({
+    debe: acc.debe + toAmount(row.Debe),
+    haber: acc.haber + toAmount(row.Haber),
+    saldo: acc.saldo + toAmount(row.Saldo),
+  }), { debe: 0, haber: 0, saldo: 0 });
+
+  const generate = () => {
+    setRows(buildAnaliticoRows(comprobantes, filters));
+    setGenerated(true);
+  };
+  const exportExcel = () => {
+    const cleanRows = rows.map(({ voucherId, 'Cuenta completa': _cuentaCompleta, ...row }) => row);
+    const ws = XLSX.utils.json_to_sheet(cleanRows, { header: ['Fecha', 'Comprobante', 'Tipo comprobante', 'Estado', 'Unidad de negocio', 'Cod. cuenta', 'Cuenta contable', 'Documento', 'Auxiliar', 'Centro de costo', 'Glosa', 'Debe', 'Haber', 'Saldo'] });
+    ws['!cols'] = [{ wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 34 }, { wch: 22 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Analitico');
+    XLSX.writeFile(wb, `analitico_contable_${new Date().toISOString().replace(/\D/g, '').slice(0, 15)}.xlsx`);
+  };
+  const exportPdf = () => {
+    const win = openHtmlDocument(buildAnaliticoHtml(rows, filters, currentEmpresa));
+    setTimeout(() => win.print(), 300);
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-2 space-y-5">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Contabilidad / Analiticos</p>
+        <h2 className="text-2xl font-black text-slate-900">Analiticos</h2>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 md:p-6 space-y-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
+          <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha desde</span><input type="date" value={filters.fechaDesde} onChange={e => updateFilter('fechaDesde', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha hasta</span><input type="date" value={filters.fechaHasta} onChange={e => updateFilter('fechaHasta', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          <div className="xl:col-span-2"><ComboInput label="Cuenta contable" value={filters.cuentaContable} onChange={e => updateFilter('cuentaContable', e.target.value)} options={accountOptions} placeholder="Todas las cuentas" /></div>
+          <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Documentos a incluir</span><select value={filters.documentos} onChange={e => updateFilter('documentos', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option>Solo pendientes</option><option>Cancelados</option><option>Todos</option></select></label>
+          <ComboInput label="Centro de costo" value={filters.centroCosto} onChange={e => updateFilter('centroCosto', e.target.value)} options={['Todos', ...centroOptions]} placeholder="Todos" />
+          <ComboInput label="Unidad de negocios" value={filters.unidadNegocio} onChange={e => updateFilter('unidadNegocio', e.target.value)} options={['Todas', ...unidadOptions]} placeholder="Todas" />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="accent" icon={FileText} onClick={generate}>Generar informe</Button>
+          <Button variant="secondary" icon={FileSpreadsheet} onClick={exportExcel} disabled={!generated || rows.length === 0}>Exportar a Excel</Button>
+          <Button variant="secondary" icon={FileDown} onClick={exportPdf} disabled={!generated || rows.length === 0}>PDF</Button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-black uppercase text-slate-400">Debe</p><p className="text-xl font-black text-slate-900">{money(totals.debe)}</p></div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-black uppercase text-slate-400">Haber</p><p className="text-xl font-black text-slate-900">{money(totals.haber)}</p></div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-black uppercase text-slate-400">Saldo</p><p className={`text-xl font-black ${totals.saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{money(totals.saldo)}</p></div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-slate-100"><div className="relative max-w-md"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar en informe generado" className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" /></div></div>
+        <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr><th className="p-3 text-left">Fecha</th><th className="p-3 text-left">Comprobante</th><th className="p-3 text-left">Cuenta</th><th className="p-3 text-left">Documento</th><th className="p-3 text-left">Auxiliar</th><th className="p-3 text-left">Centro costo</th><th className="p-3 text-left">Unidad</th><th className="p-3 text-left">Estado</th><th className="p-3 text-right">Debe</th><th className="p-3 text-right">Haber</th><th className="p-3 text-right">Saldo</th></tr></thead><tbody>
+          {previewRows.map((row, index) => (<tr key={`${row.voucherId}-${index}`} className="border-t border-slate-100 hover:bg-slate-50"><td className="p-3 font-mono">{row.Fecha}</td><td className="p-3">{row.Comprobante}</td><td className="p-3 min-w-52">{[row['Cod. cuenta'], row['Cuenta contable']].filter(Boolean).join(' - ')}</td><td className="p-3">{row.Documento || '-'}</td><td className="p-3 min-w-52">{row.Auxiliar || '-'}</td><td className="p-3">{row['Centro de costo'] || '-'}</td><td className="p-3">{row['Unidad de negocio'] || '-'}</td><td className="p-3">{row.Estado || '-'}</td><td className="p-3 text-right font-mono">{money(row.Debe)}</td><td className="p-3 text-right font-mono">{money(row.Haber)}</td><td className="p-3 text-right font-mono">{money(row.Saldo)}</td></tr>))}
+          {(!generated || previewRows.length === 0) && <tr><td colSpan="11" className="p-10 text-center text-sm text-slate-400">{generated ? 'No hay movimientos para los filtros seleccionados.' : 'Genera el informe para ver movimientos del libro diario.'}</td></tr>}
+        </tbody></table></div>
+        <div className="px-4 py-3 text-xs text-slate-400 border-t border-slate-100 flex justify-between"><span>Mostrando {previewRows.length} de {rows.length} movimientos</span><span>Origen: comprobantes contables / libro diario</span></div>
+      </div>
+    </div>
+  );
+};
+
 const buildBalanceRows = (comprobantes = [], fechaInforme = accountingDate()) => {
   const grouped = {};
   comprobantes
@@ -11156,6 +11305,7 @@ const Sidebar = () => {
       return {
         'Comprobantes': 'contabilidad-comprobantes',
         'Informes Tributarios': 'contabilidad-informes-tributarios',
+        'Analiticos': 'contabilidad-analiticos',
         'Estados Financieros': 'contabilidad-estados-financieros',
       }[label] || 'contabilidad-comprobantes';
     }
@@ -11171,7 +11321,7 @@ const Sidebar = () => {
     { id: 'operaciones-registro', label: 'Operaciones', icon: ClipboardList, sub: ['Nuevo Registro', 'Planificacion', 'Historial Preventivo', 'Historial Correctivo', 'Cotizaciones', 'Historial Cotizaciones', 'OC Recibidas', 'Rendiciones', 'Historial Rendiciones'] },
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
-    { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Informes Tributarios', 'Estados Financieros'] },
+    { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
     { id: 'calidad', label: 'Calidad', icon: CheckCircle2 },
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
@@ -11266,6 +11416,7 @@ const Header = () => {
     'abastecimiento-registro-compras': 'Abastecimiento / Registro de Compras',
     'contabilidad-comprobantes': 'Contabilidad / Comprobantes',
     'contabilidad-informes-tributarios': 'Contabilidad / Informes Tributarios',
+    'contabilidad-analiticos': 'Contabilidad / Analiticos',
     'contabilidad-estados-financieros': 'Contabilidad / Estados Financieros',
     'mantenedores-clientes': 'Mantenedores / Clientes y/o Proveedores',
     'mantenedores-licitaciones': 'Mantenedores / Licitaciones',
@@ -11600,6 +11751,7 @@ const ContentManager = () => {
     'abastecimiento-registro-compras': 'abastecimiento',
     'contabilidad-comprobantes': 'contabilidad',
     'contabilidad-informes-tributarios': 'contabilidad',
+    'contabilidad-analiticos': 'contabilidad',
     'contabilidad-estados-financieros': 'contabilidad',
   };
   const canAccess = (id) => {
@@ -11634,6 +11786,7 @@ const ContentManager = () => {
       case 'abastecimiento-registro-compras': return <RegistroCompras />;
       case 'contabilidad-comprobantes': return <ComprobantesContables />;
       case 'contabilidad-informes-tributarios': return <InformesTributarios />;
+      case 'contabilidad-analiticos': return <AnaliticosContables />;
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
       case 'mantenedores-clientes': return <MantenedoresClientesProveedores />;
       case 'mantenedores-licitaciones': return <MantenedoresLicitaciones />;
