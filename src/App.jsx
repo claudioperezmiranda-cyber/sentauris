@@ -3950,7 +3950,7 @@ const NuevaRendicion = () => {
 
 // --- RENDICIONES: HISTORIAL ---
 const HistorialRendiciones = () => {
-  const { rendiciones, setRendiciones } = useContext(ERPContext);
+  const { rendiciones, setRendiciones, currentEmpresa } = useContext(ERPContext);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
 
@@ -3984,26 +3984,67 @@ const HistorialRendiciones = () => {
     return map[estado] || 'bg-slate-100 text-slate-600';
   };
 
-  const rendicionBlock = (r) => {
+  const rendicionHeader = (r, title = 'Rendicion') => {
+    const empresaNombre = currentEmpresa?.razonSocial || currentEmpresa?.nombreFantasia || 'Vaicmedical';
+    const empresaRut = currentEmpresa?.rut || currentEmpresa?.RUT || '77.573.229-6';
+    const empresaGiro = currentEmpresa?.giro || 'Mantencion y Reparacion de Equipos Medicos';
+    const empresaMail = currentEmpresa?.correoContacto || currentEmpresa?.email || 'servicios@vaicmedical.cl';
+    const empresaMembrete = currentEmpresa?.membreteImagen || '/logo-vaic-pdf.jpeg';
+    return `<div class="head"><div class="logo-box"><img class="logo" src="${empresaMembrete}" alt="Membrete empresa"/></div><div class="company"><div class="brand">${htmlText(empresaNombre)}</div><div>RUT: ${htmlText(empresaRut)}</div><div>Giro: ${htmlText(empresaGiro)}</div><div>Correo: ${htmlText(empresaMail)}</div></div><div class="meta-head"><span class="folio-label">${htmlText(title)}</span><span class="folio-value">${htmlText(r?.folio || '')}</span>Fecha: ${htmlText(formatPdfDate(r?.fecha))}</div></div>`;
+  };
+
+  const rendicionLineData = (it = {}) => [
+    ['Fecha', formatPdfDate(it.fecha)],
+    ['N° documento', it.numeroDoc],
+    ['Tipo Doc.', it.tipoDoc],
+    ['Razon social', it.razonSocial],
+    ['Monto', `$${Number(it.monto || 0).toLocaleString('es-CL')}`],
+    ['Tipo gasto', it.tipoGasto || it.cuentaContable],
+    ['Observacion', it.observaciones],
+  ];
+
+  const attachmentPages = (r) => (r.items || [])
+    .filter(it => it.archivoData)
+    .map((it, index) => {
+      const isImage = String(it.archivoData || '').startsWith('data:image/');
+      const media = isImage
+        ? `<img class="attachment-media" src="${it.archivoData}" alt="${htmlText(it.archivoNombre || `Respaldo ${index + 1}`)}"/>`
+        : `<iframe class="attachment-media" src="${it.archivoData}" title="${htmlText(it.archivoNombre || `Respaldo ${index + 1}`)}"></iframe>`;
+      return `<section class="attachment-page">
+        ${rendicionHeader(r, 'Respaldo')}
+        <div class="attachment-wrap">
+          <div class="attachment-data">
+            <div class="attachment-title">Linea ${index + 1} - ${htmlText(it.archivoNombre || 'Respaldo adjunto')}</div>
+            <div class="attachment-grid">
+              ${rendicionLineData(it).map(([label, value]) => `<div><b>${htmlText(label)}</b><span>${htmlText(value || '')}</span></div>`).join('')}
+            </div>
+          </div>
+          ${media}
+        </div>
+      </section>`;
+    }).join('');
+
+  const rendicionBlock = (r, { includeHeader = true, mainPage = false } = {}) => {
     const filas = (r.items || []).map(it =>
       `<tr>
-        <td>${it.fecha || ''}</td><td>${it.numeroDoc || ''}</td><td>${it.tipoDoc || ''}</td>
-        <td>${it.razonSocial || ''}</td>
+        <td>${htmlText(formatPdfDate(it.fecha))}</td><td>${htmlText(it.numeroDoc || '')}</td><td>${htmlText(it.tipoDoc || '')}</td>
+        <td>${htmlText(it.razonSocial || '')}</td>
         <td style="text-align:right">$${Number(it.monto || 0).toLocaleString('es-CL')}</td>
-        <td>${it.tipoGasto || it.cuentaContable || ''}</td><td>${it.observaciones || ''}</td>
-        <td>${it.archivoNombre || '—'}</td>
+        <td>${htmlText(it.tipoGasto || it.cuentaContable || '')}</td><td>${htmlText(it.observaciones || '')}</td>
+        <td>${htmlText(it.archivoNombre || '—')}</td>
       </tr>`
     ).join('');
     return `
-      <div class="rend-block">
-        <h2>Rendición ${r.folio}</h2>
-        <div class="meta">
-          <div class="box"><b>Responsable</b>${r.responsable || ''}</div>
-          <div class="box"><b>Fecha</b>${r.fecha || ''}</div>
+      <section class="rend-block ${mainPage ? 'main-page' : ''}">
+        ${includeHeader ? rendicionHeader(r) : ''}
+        <h1>${r.tipo === 'devolucion' ? 'Devolucion de fondos' : 'Rendicion de fondos'}</h1>
+        <div class="doc-meta">
+          <div class="box"><b>Responsable</b>${htmlText(r.responsable || '')}</div>
+          <div class="box"><b>Fecha</b>${htmlText(formatPdfDate(r.fecha))}</div>
           <div class="box"><b>Tipo</b>${r.tipo === 'devolucion' ? 'Devolución' : 'Rendición'}</div>
           <div class="box"><b>Monto Asignado</b>$${Number(r.montoAsignado || 0).toLocaleString('es-CL')}</div>
           <div class="box"><b>Total Rendido</b>$${Number(r.total || 0).toLocaleString('es-CL')}</div>
-          <div class="box"><b>Estado</b>${r.estado || ''}</div>
+          <div class="box"><b>Estado</b>${htmlText(r.estado || '')}</div>
         </div>
         <table>
           <thead><tr>
@@ -4017,16 +4058,18 @@ const HistorialRendiciones = () => {
             <td colspan="3"></td>
           </tr></tfoot>
         </table>
-      </div>`;
+      </section>`;
   };
 
   const htmlStyles = `
-    body{font-family:Arial,sans-serif;padding:32px;color:#1e293b}
-    h1{font-size:20px;margin-bottom:4px;color:#0f172a}
+    @page{size:A4;margin:12mm}
+    body{font-family:Arial,sans-serif;padding:28px;color:#111827}
+    .page{max-width:960px;margin:auto}.head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo-box{display:flex;align-items:center;justify-content:flex-start}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta-head{text-align:right;font-size:12px;line-height:1.5;color:#111827}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;color:#0f172a;margin-bottom:8px}
+    h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase;letter-spacing:.06em;color:#0f172a}
     .subtitle{font-size:12px;color:#64748b;margin-bottom:24px}
     .rend-block{margin-bottom:40px;page-break-inside:avoid}
-    h2{font-size:14px;font-weight:bold;color:#1e40af;border-bottom:2px solid #bfdbfe;padding-bottom:4px;margin-bottom:12px}
-    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+    .main-page{page-break-after:always}
+    .doc-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
     .box{border:1px solid #e2e8f0;padding:8px 10px;border-radius:6px;font-size:11px}
     .box b{display:block;color:#64748b;font-size:9px;text-transform:uppercase;margin-bottom:2px}
     table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px}
@@ -4038,11 +4081,19 @@ const HistorialRendiciones = () => {
     .resumen-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
     .resumen-item{font-size:11px}.resumen-item b{display:block;color:#64748b;font-size:9px;text-transform:uppercase}
     .resumen-total{font-size:16px;font-weight:900;color:#1e40af}
-    @media print{.rend-block{page-break-after:always}}`;
+    .attachment-page{min-height:260mm;position:relative}
+    .attachment-page + .attachment-page{page-break-before:always}
+    .attachment-wrap{position:relative;margin-top:16px;height:232mm;border:1px solid #cbd5e1;background:#f8fafc;overflow:hidden}
+    .attachment-media{display:block;width:100%;height:100%;object-fit:contain;border:0;background:white}
+    .attachment-data{position:absolute;left:12px;right:12px;top:12px;z-index:2;border:1px solid rgba(15,23,42,.35);background:rgba(255,255,255,.92);padding:10px}
+    .attachment-title{font-size:11px;font-weight:900;text-transform:uppercase;color:#0f172a;margin-bottom:8px}
+    .attachment-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+    .attachment-grid div{font-size:10px;line-height:1.25}.attachment-grid b{display:block;font-size:8px;text-transform:uppercase;color:#64748b}.attachment-grid span{font-weight:700;color:#111827}
+    @media print{button{display:none}body{padding:0}.rend-block{page-break-after:auto}.main-page{page-break-after:always}}`;
 
   const printRendicion = (r) => {
     openHtmlDocument(`<html><head><title>Rendición ${r.folio}</title><style>${htmlStyles}</style></head>
-      <body>${rendicionBlock(r)}</body></html>`);
+      <body><div class="page">${rendicionBlock(r, { mainPage: true })}${attachmentPages(r)}<button onclick="window.print()">Imprimir / Guardar PDF</button></div></body></html>`);
   };
 
   const generateInforme = () => {
