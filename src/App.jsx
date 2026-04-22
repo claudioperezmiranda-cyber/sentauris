@@ -9246,8 +9246,8 @@ const ComprobantesContables = () => {
     const tipoDoc = tipoDocumentoOptions[0] || 'Factura';
     const auxiliar = auxiliarOptions[0] || '';
     const sampleRows = [
-      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Borrador', 'Ejemplo carga masiva libro diario', splitAccount(firstCuenta).code, firstCuenta, 'Linea debe ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 100000, 0],
-      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Borrador', 'Ejemplo carga masiva libro diario', splitAccount(secondCuenta).code, secondCuenta, 'Linea haber ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 0, 100000],
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(firstCuenta).code, firstCuenta, 'Linea debe ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 100000, 0],
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(secondCuenta).code, secondCuenta, 'Linea haber ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 0, 100000],
     ];
     const ws = XLSX.utils.aoa_to_sheet([VOUCHER_BULK_TEMPLATE_HEADERS, ...sampleRows]);
     ws['!cols'] = VOUCHER_BULK_TEMPLATE_HEADERS.map(header => ({ wch: Math.max(16, header.length + 2) }));
@@ -9306,7 +9306,7 @@ const ComprobantesContables = () => {
           fecha,
           documento,
           glosa: glosaComprobante,
-          estado: keyFor(row, ['estado']) || 'Importado',
+          estado: keyFor(row, ['estado']) || 'Contabilizado',
           detalles: [],
         });
       }
@@ -9493,7 +9493,7 @@ const voucherCode = (voucher) => {
 
 const splitAccount = (value = '') => {
   const text = String(value || '').trim();
-  const match = text.match(/^([0-9.\-]+)\s+(.+)$/);
+  const match = text.match(/^([0-9.\-]+)\s*(?:-|–)?\s*(.*)$/);
   return { code: match ? match[1] : text, name: match ? match[2] : '' };
 };
 
@@ -9963,18 +9963,36 @@ const filterValueMatches = (value = '', selected = '') => {
   return selectedParts.includes(normalizedValue) || valueParts.includes(normalizedSelected);
 };
 
+const accountFilterMatches = (value = '', selected = '') => {
+  if (!selected) return true;
+  if (filterValueMatches(value, selected)) return true;
+  const valueAccount = splitAccount(value);
+  const selectedAccount = splitAccount(selected);
+  const valueCode = normalizeKey(valueAccount.code);
+  const selectedCode = normalizeKey(selectedAccount.code);
+  const valueName = normalizeKey(valueAccount.name);
+  const selectedName = normalizeKey(selectedAccount.name);
+  return Boolean(
+    valueCode && selectedCode && valueCode === selectedCode ||
+    valueCode && normalizeKey(selected).includes(valueCode) ||
+    selectedCode && normalizeKey(value).includes(selectedCode) ||
+    valueName && selectedName && valueName === selectedName
+  );
+};
+
 const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
   .filter(voucher => dateInRange(voucher.fecha, filters.fechaDesde, filters.fechaHasta))
   .filter(voucher => {
     const estado = normalizeKey(voucher.estado);
-    if (filters.documentos === 'Solo pendientes') return !['contabilizado', 'cancelado', 'pagado'].includes(estado);
-    if (filters.documentos === 'Cancelados') return ['contabilizado', 'cancelado', 'pagado'].includes(estado);
+    const closedStates = ['contabilizado', 'cancelado', 'pagado', 'importado'];
+    if (filters.documentos === 'Solo pendientes') return !closedStates.includes(estado);
+    if (filters.documentos === 'Cancelados') return closedStates.includes(estado);
     return true;
   })
   .filter(voucher => !filters.unidadNegocio || filters.unidadNegocio === 'Todas' || filterValueMatches(voucher.unidadNegocio, filters.unidadNegocio))
   .flatMap(voucher => (voucher.detalles || []).map(line => ({ voucher, line, account: splitAccount(line.cuentaContable) })))
-  .filter(item => !filters.cuentaContable || normalizeKey(item.line.cuentaContable) === normalizeKey(filters.cuentaContable))
-  .filter(item => !filters.auxiliar || normalizeKey(item.line.auxiliar) === normalizeKey(filters.auxiliar))
+  .filter(item => accountFilterMatches(item.line.cuentaContable, filters.cuentaContable))
+  .filter(item => !filters.auxiliar || filterValueMatches(item.line.auxiliar, filters.auxiliar))
   .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || filterValueMatches(item.line.centroCosto, filters.centroCosto))
   .sort((a, b) =>
     String(a.account.code || '').localeCompare(String(b.account.code || '')) ||
