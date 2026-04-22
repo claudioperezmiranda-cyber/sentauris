@@ -5,7 +5,7 @@ import {
   Search, Bell, ChevronLeft, Wrench, CheckCircle2, AlertCircle,
   Mail, FileDown, Camera, Trash2, Cpu, Database, Upload, Download,
   FileSpreadsheet, X, CheckCircle, AlertTriangle, Plus, Pencil,
-  Lock, Eye, EyeOff, ShieldAlert, Settings, MoreVertical, ArrowUpDown
+  Lock, Eye, EyeOff, ShieldAlert, Settings, MoreVertical, ArrowUpDown, Info
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
@@ -160,10 +160,12 @@ const getPreventiveProtocol = (tipoEquipo = '', customProtocols = {}) => {
 const looksLikeEmail = (value) => String(value || '').includes('@');
 const looksLikeTimestamp = (value) => /^\d{4}-\d{2}-\d{2}/.test(String(value || ''));
 const normalizeKey = (value) => String(value || '').toLowerCase().replace(/[\s.]/g, '').trim();
+const normalizeRutKey = (value) => normalizeKey(value).replace(/[^0-9k]/g, '');
 const isNetworkFetchError = (err) => /failed to fetch|fetch failed|networkerror|econn|etimedout/i.test(String(err?.message || err || ''));
 const isMissingTableError = (err, table) => {
   const message = String(err?.message || err || '').toLowerCase();
-  return message.includes(`table 'public.${table}'`) || message.includes(`relation "public.${table}" does not exist`);
+  const expected = table ? [`table 'public.${table}'`, `relation "public.${table}" does not exist`] : ['could not find the table', 'does not exist'];
+  return ['PGRST205', '42P01'].includes(err?.code) || expected.some(text => message.includes(text));
 };
 const friendlyError = (err) => {
   const message = String(err?.message || err || 'Error desconocido');
@@ -234,6 +236,48 @@ const clienteFullPayload = (data) => ({
   plazo_pago:             data.plazoPago          || null,
   sucursales:             data.sucursales?.length ? data.sucursales : null,
 });
+
+const clienteExtendedSnapshot = (data = {}) => ({
+  id: data.id || data.id_RUT || '',
+  id_RUT: data.id_RUT || data.id || '',
+  rut: data.rut || '',
+  razonSocial: data.razonSocial || data.name || '',
+  name: data.name || data.razonSocial || '',
+  email: data.email || data.correoComercial || data.correoSii || '',
+  empresaId: data.empresaId || data.empresa_id || null,
+  empresa_id: data.empresa_id || data.empresaId || null,
+  encargado_contrato: data.encargado_contrato || '',
+  email_contacto: data.email_contacto || '',
+  direccionPrincipal: data.direccionPrincipal || data.direccion_principal || '',
+  direccion_principal: data.direccion_principal || data.direccionPrincipal || '',
+  comuna: data.comuna || '',
+  ciudad: data.ciudad || '',
+  region: data.region || '',
+  pais: data.pais || 'Chile',
+  telefono: data.telefono || '',
+  giro: data.giro || '',
+  nombreFantasia: data.nombreFantasia || data.nombre_fantasia || '',
+  tipoCliente: data.tipoCliente || data.tipo_cliente || 'No',
+  tipoProveedor: data.tipoProveedor || data.tipo_proveedor || 'No',
+  correoSii: data.correoSii || data.correo_sii || '',
+  correoComercial: data.correoComercial || data.correo_comercial || '',
+  plazoPago: data.plazoPago || data.plazo_pago || '',
+  sucursales: Array.isArray(data.sucursales) ? data.sucursales : [],
+});
+
+const mergeClientesExtended = (baseClientes = [], extendedClientes = []) => {
+  const byId = new Map();
+  const byRut = new Map();
+  (extendedClientes || []).forEach(item => {
+    const normalized = normalizeCliente(clienteExtendedSnapshot(item));
+    if (normalized.id) byId.set(String(normalized.id), normalized);
+    if (normalized.rut) byRut.set(normalizeKey(normalized.rut), normalized);
+  });
+  return baseClientes.map(cliente => {
+    const ext = byId.get(String(cliente.id || cliente.id_RUT || '')) || byRut.get(normalizeKey(cliente.rut));
+    return ext ? { ...cliente, ...ext, id: cliente.id, id_RUT: cliente.id_RUT || cliente.id, empresaId: ext.empresaId || cliente.empresaId } : cliente;
+  });
+};
 
 const clienteExtendedPayload = (data) => ({
   ...clienteFullPayload(data),
@@ -485,6 +529,30 @@ const normalizeUsuario = (u) => u ? ({
 
 const normalizeUsuarios = (rows = []) => rows.map(normalizeUsuario);
 
+const normalizeUserEmpresaPermissions = (user = {}, empresas = []) => {
+  const permisos = user.permisosEmpresas || user.permisos_empresas || {};
+  const validIds = new Set((empresas || []).map(e => String(e.id)));
+  const normalized = Object.entries(permisos).reduce((acc, [empresaId, accesos]) => {
+    if (validIds.has(String(empresaId))) acc[empresaId] = Array.isArray(accesos) ? accesos : [];
+    return acc;
+  }, {});
+  const hasValid = Object.values(normalized).some(accesos => (accesos || []).length > 0);
+  const orphanAccess = Object.entries(permisos)
+    .filter(([empresaId]) => !validIds.has(String(empresaId)))
+    .flatMap(([, accesos]) => Array.isArray(accesos) ? accesos : []);
+  if (!hasValid && empresas.length === 1 && orphanAccess.length > 0) {
+    normalized[empresas[0].id] = [...new Set(orphanAccess)];
+  }
+  return normalized;
+};
+
+const userEmpresaAccess = (user = {}, empresaId = '', empresas = []) => {
+  if (!user || !empresaId) return null;
+  const normalized = normalizeUserEmpresaPermissions(user, empresas);
+  if (normalized[empresaId]) return normalized[empresaId];
+  return null;
+};
+
 const usuarioPayload = (data, { includeId = true } = {}) => {
   const payload = {
     usuario: String(data.usuario || '').trim().toLowerCase(),
@@ -559,9 +627,11 @@ const migrateLocalParametrosToSupabase = async () => {
 };
 
 const APP_DATA_KEYS = {
+  clientes_ext: 'sentauris_clientes_ext',
   cotizaciones_historial: 'sentauris_cotizaciones_historial',
   oc_recibidas: 'sentauris_oc_recibidas',
   rendiciones: 'sentauris_rendiciones',
+  productos_rendiciones: 'sentauris_productos_rendiciones',
   comprobantes: 'sentauris_comprobantes',
   registro_compras: 'sentauris_registro_compras',
   empresas: 'sentauris_empresas',
@@ -571,17 +641,29 @@ const APP_DATA_KEYS = {
   protocolos_preventivos: 'sentauris_protocolos_preventivos',
 };
 
-const loadAppDataFromSupabase = async (keys) => supabaseRequest(() =>
-  supabase.from('app_data').select('key, data').in('key', keys)
-);
+const appDataParamId = (key) => `app_data:${key}`;
 
-const saveAppDataToSupabase = async (key, data) => supabaseRequest(() =>
-  supabase.from('app_data').upsert([{
-    key,
-    data: data || [],
-    updated_at: new Date().toISOString(),
-  }], { onConflict: 'key' }).select().single()
-);
+const loadAppDataFromSupabase = async (keys) => {
+  const response = await supabaseRequest(() =>
+    supabase.from('parametros').select('id, data').in('id', keys.map(appDataParamId))
+  );
+  if (response.error) return response;
+  return {
+    data: (response.data || []).map(row => ({ key: String(row.id || '').replace(/^app_data:/, ''), data: row.data })),
+    error: null,
+  };
+};
+
+const saveAppDataToSupabase = async (key, data) => {
+  const payload = data || [];
+  return supabaseRequest(() =>
+    supabase.from('parametros').upsert([{
+      id: appDataParamId(key),
+      data: payload,
+      updated_at: new Date().toISOString(),
+    }], { onConflict: 'id' }).select().single()
+  );
+};
 
 const cotizacionLineTotal = (item) => {
   if (item.tipo === 'info') return 0;
@@ -603,14 +685,51 @@ const nextCotizacionNumero = (cotizaciones = []) => {
   return String(max + 1).padStart(6, '0');
 };
 
-const clienteDireccion = (cliente = {}) =>
-  cliente.direccionPrincipal || cliente.direccion_principal || cliente.direccion || cliente.sucursalDireccion || cliente.sucursales?.[0]?.direccion || '';
+const clienteDireccion = (cliente = {}) => {
+  const c = cliente || {};
+  return c.direccionPrincipal || c.direccion_principal || c.direccion || c.sucursalDireccion || c.sucursales?.[0]?.direccion || '';
+};
 
-const clienteComuna = (cliente = {}) =>
-  cliente.comuna || cliente.sucursalComuna || cliente.sucursales?.[0]?.comuna || '';
+const clienteComuna = (cliente = {}) => {
+  const c = cliente || {};
+  return c.comuna || c.sucursalComuna || c.sucursales?.[0]?.comuna || '';
+};
 
-const clienteTelefono = (cliente = {}) =>
-  cliente.telefono || cliente.phone || cliente.fono || cliente.celular || '';
+const clienteTelefono = (cliente = {}) => {
+  const c = cliente || {};
+  return c.telefono || c.phone || c.fono || c.celular || '';
+};
+
+const empresaUnidadValue = (unidad = {}) =>
+  unidad.descripcion || unidad.nombre || unidad.codigo || '';
+
+const empresaCentroCostoValue = (centro = {}) =>
+  [centro.codigo, centro.nombre || centro.descripcion].filter(Boolean).join(' - ') || centro.codigo || centro.nombre || centro.descripcion || '';
+
+const emptyCotizacionDraft = (cotizaciones = [], currentEmpresa = null) => {
+  const unidadNegocio = (currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue).filter(Boolean)[0] || '';
+  const centroCosto = (currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue).filter(Boolean)[0] || '';
+  return {
+    numero: nextCotizacionNumero(cotizaciones),
+    fecha: new Date().toISOString().split('T')[0],
+    cliente: '',
+    rut: '',
+    direccion: '',
+    comuna: '',
+    telefono: '',
+    clienteId: '',
+    solicitadoPor: '',
+    vendedor: '',
+    referencia: '',
+    glosa: '',
+    detalles: '',
+    idLicitacion: '',
+    licitacionId: '',
+    unidadNegocio,
+    centroCosto,
+    items: [],
+  };
+};
 
 const buildCotizacionHtml = (draft, empresaInforme = {}) => {
   const docTitle = draft.masiva ? 'Cotizacion Masiva' : 'Cotizacion';
@@ -638,9 +757,9 @@ const buildCotizacionHtml = (draft, empresaInforme = {}) => {
     ${(draft.items || []).map((item) => item.tipo === 'info'
       ? `<tr class="info-row"><td colspan="9">${htmlText(item.descripcion || '')}</td></tr>`
       : `<tr><td>${++printableItem}</td><td>${htmlText(item.codigo || '')}</td><td>${htmlText(item.parte || '')}</td><td>${htmlText(item.descripcion || '')}</td><td>${htmlText(item.unidad || '')}</td><td>${item.cantidad || 0}</td><td>$${Number(item.precio || 0).toLocaleString('es-CL')}</td><td>${item.dcto || 0}</td><td>$${cotizacionLineTotal(item).toLocaleString('es-CL')}</td></tr>`).join('')}
-    </tbody></table>${detailsHtml ? `<div class="obs details"><b>Informes asociados</b><br/>${detailsHtml}</div>` : ''}
+    </tbody></table>${detailsHtml ? `<div class="obs details"><b>Descripcion Adicional</b><br/>${detailsHtml}</div>` : ''}
     <table class="totals"><tbody><tr><th>Neto</th><td>$${neto.toLocaleString('es-CL')}</td></tr><tr><th>Monto Exento</th><td>$0</td></tr><tr><th>I.V.A. (19%)</th><td>$${iva.toLocaleString('es-CL')}</td></tr><tr><th>Total</th><td>$${total.toLocaleString('es-CL')}</td></tr></tbody></table>
-    <div class="obs"><b>Observaciones</b><br/>Glosa: ${htmlText(draft.glosa || '')}<br/>Referencia: ${htmlText(draft.referencia || '')}</div><div class="footer">Cotizacion emitida por ${htmlText(empresaNombre)}. Valores netos afectos a IVA, salvo indicacion contraria.</div><button onclick="window.print()">Imprimir / Guardar PDF</button></div></body></html>`;
+    <div class="obs"><b>Observaciones</b><br/><br/></div><div class="footer">Cotizacion emitida por ${htmlText(empresaNombre)}. Valores netos afectos a IVA, salvo indicacion contraria.</div><button onclick="window.print()">Imprimir / Guardar PDF</button></div></body></html>`;
 };
 
 const openHtmlDocument = (html) => {
@@ -666,7 +785,7 @@ const ERPProvider = ({ children }) => {
         : { ...MOCK_USER, id: loggedInUser.id, name: loggedInUser.nombre, email: loggedInUser.email || loggedInUser.usuario, rut: loggedInUser.rut || '', position: loggedInUser.cargo })
     : MOCK_USER;
   const [activeModule, setActiveModule] = useState('dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window === 'undefined' ? true : window.innerWidth >= 1024));
   const [clientes, setClientes] = useState([]);
   const [licitaciones, setLicitaciones] = useState([]);
   const [repuestos, setRepuestos] = useState([]);
@@ -675,6 +794,7 @@ const ERPProvider = ({ children }) => {
   const [cotizacionesHistorial, setCotizacionesHistorial] = useState(() => readLocalList('sentauris_cotizaciones_historial'));
   const [ocRecibidas, setOcRecibidas] = useState(() => readLocalList('sentauris_oc_recibidas'));
   const [rendiciones, setRendiciones] = useState(() => readLocalList('sentauris_rendiciones'));
+  const [productosRendiciones, setProductosRendiciones] = useState(() => readLocalList('sentauris_productos_rendiciones'));
   const [comprobantes, setComprobantes] = useState(() => readLocalList('sentauris_comprobantes'));
   const [registroCompras, setRegistroCompras] = useState(() => readLocalList('sentauris_registro_compras'));
   const [usuarios, setUsuarios] = useState(() => readLocalList('sentauris_usuarios'));
@@ -737,9 +857,11 @@ const ERPProvider = ({ children }) => {
           }
 
           const appDataSetters = {
+            clientes_ext: null,
             cotizaciones_historial: setCotizacionesHistorial,
             oc_recibidas: setOcRecibidas,
             rendiciones: setRendiciones,
+            productos_rendiciones: setProductosRendiciones,
             comprobantes: setComprobantes,
             registro_compras: setRegistroCompras,
             empresas: setEmpresas,
@@ -757,7 +879,7 @@ const ERPProvider = ({ children }) => {
                 const remoteValue = key === 'protocolos_preventivos'
                   ? { ...defaultPreventiveProtocolsConfig(), ...(remoteByKey.get(key) || {}) }
                   : (Array.isArray(remoteByKey.get(key)) ? remoteByKey.get(key) : []);
-                setter(remoteValue);
+                if (setter) setter(remoteValue);
                 localStorage.setItem(APP_DATA_KEYS[key], JSON.stringify(remoteValue));
               } else {
                 const localValue = key === 'protocolos_preventivos'
@@ -771,7 +893,9 @@ const ERPProvider = ({ children }) => {
           }
           appDataLoadedRef.current = true;
 
-          setClientes((clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null })));
+          const clientesBase = (clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null }));
+          const clientesExt = readLocalList(APP_DATA_KEYS.clientes_ext);
+          setClientes(mergeClientesExtended(clientesBase, clientesExt));
           setLicitaciones(licitData || []);
           setRepuestos(repData || []);
           setEquipos(equiposData || []);
@@ -812,6 +936,10 @@ const ERPProvider = ({ children }) => {
   }, [rendiciones]);
 
   useEffect(() => {
+    persistAppData('productos_rendiciones', APP_DATA_KEYS.productos_rendiciones, productosRendiciones);
+  }, [productosRendiciones]);
+
+  useEffect(() => {
     localStorage.removeItem('sentauris_clientes');
   }, []);
 
@@ -850,7 +978,7 @@ const ERPProvider = ({ children }) => {
   const getAccessibleEmpresaIds = (user = loggedInUser) => {
     if (!user) return [];
     if (user.isSuperadmin) return empresas.map(e => e.id);
-    const permisos = user.permisosEmpresas || {};
+    const permisos = normalizeUserEmpresaPermissions(user, empresas);
     const ids = Object.keys(permisos).filter(id => (permisos[id] || []).length > 0);
     return ids.length > 0 ? ids : empresas.map(e => e.id);
   };
@@ -878,6 +1006,11 @@ const ERPProvider = ({ children }) => {
     return `VAIC${year}${correlative}`;
   };
   const resetRegistrationForm = () => setFormData(createEmptyFormData());
+  const accessibleEmpresaIds = getAccessibleEmpresaIds();
+  const currentEmpresa = empresas.find(e => e.id === activeEmpresaId)
+    || empresas.find(e => accessibleEmpresaIds.includes(e.id))
+    || empresas[0]
+    || null;
 
   // Guardar orden en Supabase
   const saveOrden = async (extraData = {}) => {
@@ -934,11 +1067,12 @@ const ERPProvider = ({ children }) => {
       repuestos, setRepuestos, cotizacionDraft, setCotizacionDraft,
       cotizacionesHistorial, setCotizacionesHistorial, ocRecibidas, setOcRecibidas,
       rendiciones, setRendiciones,
+      productosRendiciones, setProductosRendiciones,
       comprobantes, setComprobantes,
       registroCompras, setRegistroCompras,
       usuarios, setUsuarios,
       empresas, setEmpresas, activeEmpresaId, setActiveEmpresaId,
-      currentEmpresa: empresas.find(e => e.id === activeEmpresaId) || null,
+      currentEmpresa,
       getAccessibleEmpresaIds,
       planCuentas, setPlanCuentas,
       tipoDocumentos, setTipoDocumentos,
@@ -1368,6 +1502,11 @@ const NuevoRegistro = () => {
       (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo))
     )
     .map(e => e.numero_inventario));
+  const matchingEquipos = availableEquipos.filter(e =>
+    (!formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo)) &&
+    (!formData.marca || normalizeKey(e.marca) === normalizeKey(formData.marca)) &&
+    (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo))
+  );
 
   // Estado para nuevo cliente inline
   const [showNewCliente, setShowNewCliente] = useState(false);
@@ -1410,13 +1549,8 @@ const NuevoRegistro = () => {
       newData.numeroInventario = '';
     }
     if (field === 'modelo') {
-      const match = availableEquipos.find(e =>
-        sameText(e.tipo_equipo, newData.tipoEquipo) &&
-        sameText(e.marca, newData.marca) &&
-        sameText(e.modelo, value)
-      );
-      newData.numeroSerie = match?.numero_serie || '';
-      newData.numeroInventario = match?.numero_inventario || '';
+      newData.numeroSerie = '';
+      newData.numeroInventario = '';
     }
     if (field === 'numeroSerie') {
       const match = availableEquipos.find(e =>
@@ -1443,6 +1577,17 @@ const NuevoRegistro = () => {
       }
     }
     setFormData(newData);
+  };
+
+  const handleSelectEquipo = (equipo) => {
+    setFormData(prev => ({
+      ...prev,
+      tipoEquipo: equipo.tipo_equipo || prev.tipoEquipo,
+      marca: equipo.marca || prev.marca,
+      modelo: equipo.modelo || '',
+      numeroSerie: equipo.numero_serie || '',
+      numeroInventario: equipo.numero_inventario || '',
+    }));
   };
 
   const handleSaveCliente = async () => {
@@ -1668,6 +1813,57 @@ const NuevoRegistro = () => {
             placeholder="Seleccione o ingrese inventario"
             listId="nuevo-registro-inventarios"
           />
+          {formData.licitacionId && (
+            <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50/60 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-200 bg-white">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Eye size={16} className="text-slate-400 shrink-0" />
+                  <h3 className="text-sm font-bold text-slate-800">Equipos del listado</h3>
+                </div>
+                <span className="text-xs font-semibold text-slate-500">{matchingEquipos.length} registro(s)</span>
+              </div>
+              <div className="max-h-60 overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-slate-100 text-left text-[10px] uppercase text-slate-500">
+                    <tr>
+                      <th className="p-3 font-bold">Equipo</th>
+                      <th className="p-3 font-bold">Marca</th>
+                      <th className="p-3 font-bold">Modelo</th>
+                      <th className="p-3 font-bold">Serie</th>
+                      <th className="p-3 font-bold">Inventario</th>
+                      <th className="p-3 text-right font-bold">Accion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matchingEquipos.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" className="px-4 py-6 text-center text-sm italic text-slate-400">
+                          No hay equipos registrados para los filtros seleccionados.
+                        </td>
+                      </tr>
+                    ) : matchingEquipos.map(equipo => (
+                      <tr key={equipo.id || `${equipo.tipo_equipo}-${equipo.marca}-${equipo.modelo}-${equipo.numero_serie}-${equipo.numero_inventario}`} className="border-t border-slate-200 bg-white hover:bg-blue-50/50">
+                        <td className="p-3 font-semibold text-slate-800">{equipo.tipo_equipo || '—'}</td>
+                        <td className="p-3">{equipo.marca || '—'}</td>
+                        <td className="p-3">{equipo.modelo || '—'}</td>
+                        <td className="p-3 font-mono text-xs">{equipo.numero_serie || '—'}</td>
+                        <td className="p-3 font-mono text-xs">{equipo.numero_inventario || '—'}</td>
+                        <td className="p-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectEquipo(equipo)}
+                            className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                          >
+                            Usar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           <Input label="Area / Servicio" value={formData.ubicacionArea} onChange={(e) => handleChange('ubicacionArea', e.target.value)} placeholder="Ej: UCI, Pabellon, Urgencia" />
           <Input label="Solicitado por" value={formData.solicitadoPor} onChange={(e) => handleChange('solicitadoPor', e.target.value)} placeholder="Nombre del solicitante" />
         </div>
@@ -2237,7 +2433,7 @@ const Modal = ({ title, onClose, children, wide = false, fullScreen = false, wor
 
 // --- HISTORIAL DE MANTENCIONES ---
 const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) => {
-  const { clientes, licitaciones, repuestos, setActiveModule, setFormData, setCotizacionDraft, cotizacionesHistorial, currentEmpresa, currentUser, loggedInUser, activeEmpresaId, protocolosPreventivos } = useContext(ERPContext);
+  const { clientes, licitaciones, repuestos, setActiveModule, setFormData, setCotizacionDraft, cotizacionesHistorial, currentEmpresa, currentUser, loggedInUser, activeEmpresaId, empresas, protocolosPreventivos } = useContext(ERPContext);
   const [ordenes, setOrdenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editModal, setEditModal] = useState(null);
@@ -2261,7 +2457,18 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
 
   useEffect(() => { loadOrdenes(); setSelectedIds([]); setSearchTerm(''); setFechaDesde(''); setFechaHasta(''); }, [tipo]);
 
-  const getCliente = (orden) => clientes.find(c => c.id === orden.cliente_id);
+  const getCliente = (orden) => {
+    const base = clientes.find(c => String(c.id || c.id_RUT || '') === String(orden.cliente_id || ''));
+    if (!base) return null;
+    const hasContactData = (cliente) => Boolean(clienteDireccion(cliente) || clienteComuna(cliente) || clienteTelefono(cliente));
+    if (hasContactData(base) || !base.rut) return base;
+    const richerSameRut = clientes.find(c =>
+      String(c.id || c.id_RUT || '') !== String(base.id || base.id_RUT || '') &&
+      normalizeRutKey(c.rut) === normalizeRutKey(base.rut) &&
+      hasContactData(c)
+    );
+    return richerSameRut ? { ...base, ...clienteExtendedSnapshot(richerSameRut), id: base.id, id_RUT: base.id_RUT || base.id } : base;
+  };
   const getLicitacion = (orden) => licitaciones.find(l => l.id === orden.licitacion_id);
   const normalize = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const matchesSearch = (orden) => {
@@ -2310,7 +2517,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
   }));
   const canModifyExecutedCorrectiva = loggedInUser?.isSuperadmin || (
     activeEmpresaId
-      ? (loggedInUser?.permisosEmpresas?.[activeEmpresaId] || []).includes(PERM_MODIFICAR_CORRECTIVA_EJECUTADA)
+      ? (userEmpresaAccess(loggedInUser, activeEmpresaId, empresas) || []).includes(PERM_MODIFICAR_CORRECTIVA_EJECUTADA)
       : (loggedInUser?.accesos || []).includes(PERM_MODIFICAR_CORRECTIVA_EJECUTADA)
   );
   const canReopenOrden = (orden) => isPreventivo || !isEstadoEjecutado(orden.estado) || canModifyExecutedCorrectiva;
@@ -2613,6 +2820,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       numero: nextCotizacionNumero(cotizacionesHistorial),
       fecha: new Date().toISOString().split('T')[0],
       cliente: cliente?.name || '',
+      clienteId: cliente?.id || cliente?.id_RUT || orden.cliente_id || '',
       rut: cliente?.rut || '',
       direccion: clienteDireccion(cliente),
       comuna: clienteComuna(cliente),
@@ -2620,6 +2828,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       solicitadoPor: orden.solicitado_por || '',
       vendedor: '',
       idLicitacion: getLicitacion(orden)?.id_licitacion || getLicitacion(orden)?.name || '',
+      licitacionId: getLicitacion(orden)?.id || '',
       referencia: orden.folio || '',
       glosa: `${orden.tipo_equipo || ''} ${orden.marca || ''} ${orden.modelo || ''}`.trim(),
       detalles: `ID Licitacion: ${getLicitacion(orden)?.id_licitacion || ''} Equipo: ${orden.tipo_equipo || ''} Marca: ${orden.marca || ''} Modelo: ${orden.modelo || ''} Serie: ${orden.numero_serie || ''} Inventario: ${orden.numero_inventario || ''} Servicio: ${orden.ubicacion_area || ''} Codigo informe: ${orden.folio || ''}`,
@@ -2696,6 +2905,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       numero: nextCotizacionNumero(cotizacionesHistorial),
       fecha: new Date().toISOString().split('T')[0],
       cliente: clientesUnicos.length === 1 ? clientesUnicos[0] : 'Cotizacion masiva - multiples clientes',
+      clienteId: clientesUnicos.length === 1 ? firstCliente.id || firstCliente.id_RUT || selectedOrdenes[0]?.cliente_id || '' : '',
       rut: clientesUnicos.length === 1 ? firstCliente.rut || '' : '',
       direccion: clientesUnicos.length === 1 ? clienteDireccion(firstCliente) : '',
       comuna: clientesUnicos.length === 1 ? clienteComuna(firstCliente) : '',
@@ -2703,6 +2913,9 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       solicitadoPor: selectedOrdenes[0]?.solicitado_por || '',
       vendedor: '',
       idLicitacion: Array.from(new Set(selectedOrdenes.map(o => getLicitacion(o)?.id_licitacion || getLicitacion(o)?.name).filter(Boolean))).join(', '),
+      licitacionId: Array.from(new Set(selectedOrdenes.map(o => getLicitacion(o)?.id).filter(Boolean))).length === 1
+        ? Array.from(new Set(selectedOrdenes.map(o => getLicitacion(o)?.id).filter(Boolean)))[0]
+        : '',
       referencia: `Cotizacion masiva ${isPreventivo ? 'preventiva' : 'correctiva'}`,
       glosa: `${selectedOrdenes.length} informe(s): ${folios.join(', ')}`,
       detalles: '',
@@ -3036,23 +3249,80 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
 };
 
 const Cotizaciones = () => {
-  const { cotizacionDraft, setCotizacionDraft, setActiveModule, cotizacionesHistorial, setCotizacionesHistorial, currentEmpresa } = useContext(ERPContext);
-  const [draft, setDraft] = useState(cotizacionDraft || {
-    numero: nextCotizacionNumero(cotizacionesHistorial), fecha: new Date().toISOString().split('T')[0], cliente: '', rut: '', direccion: '',
-    comuna: '', telefono: '', solicitadoPor: '', vendedor: '', referencia: '', glosa: '', detalles: '',
-    idLicitacion: '', unidadNegocio: 'Casa Matriz', centroCosto: 'Operaciones',
-    items: [{ codigo: '', parte: '', descripcion: '', unidad: 'Uns', cantidad: 1, precio: 0, dcto: 0 }],
-  });
+  const { cotizacionDraft, setCotizacionDraft, setActiveModule, cotizacionesHistorial, setCotizacionesHistorial, currentEmpresa, clientes, activeEmpresaId, licitaciones, repuestos } = useContext(ERPContext);
+  const [draft, setDraft] = useState(cotizacionDraft || emptyCotizacionDraft(cotizacionesHistorial, currentEmpresa));
 
   useEffect(() => {
-    if (cotizacionDraft) setDraft(cotizacionDraft);
+    setDraft(cotizacionDraft || emptyCotizacionDraft(cotizacionesHistorial, currentEmpresa));
   }, [cotizacionDraft]);
 
-  const setField = (key, value) => setDraft(prev => ({ ...prev, [key]: value }));
+  const unidadOptions = (currentEmpresa?.unidadesNegocio || []).map(empresaUnidadValue).filter(Boolean);
+  const centroCostoOptions = (currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue).filter(Boolean);
+  const clientesEmpresa = (() => {
+    const base = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
+    const seen = new Set();
+    return base.filter(c => {
+      const key = normalizeRutKey(c.rut) || String(c.id || c.id_RUT || '');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
+  const selectedCliente = clientes.find(c => String(c.id || c.id_RUT || '') === String(draft.clienteId || ''))
+    || clientesEmpresa.find(c => normalizeRutKey(c.rut) && normalizeRutKey(c.rut) === normalizeRutKey(draft.rut));
+  const filteredLicitaciones = selectedCliente ? licitaciones.filter(l => {
+    if (String(l.cliente_id || '') === String(selectedCliente.id || selectedCliente.id_RUT || '')) return true;
+    const licCliente = clientes.find(c => String(c.id || c.id_RUT || '') === String(l.cliente_id || ''));
+    return licCliente && normalizeRutKey(licCliente.rut) === normalizeRutKey(selectedCliente.rut);
+  }) : [];
+  const selectedLic = filteredLicitaciones.find(l =>
+    String(l.id) === String(draft.licitacionId || draft.idLicitacion) ||
+    normalizeKey(l.id_licitacion) === normalizeKey(draft.idLicitacion) ||
+    normalizeKey(l.name) === normalizeKey(draft.idLicitacion)
+  ) || licitaciones.find(l => String(l.id) === String(draft.licitacionId || ''));
+  const repuestosFiltrados = repuestos.filter(r => !selectedLic?.id || String(r.licitacion_id || '') === String(selectedLic.id));
+  const repuestoOptionsId = 'cotizacion-repuestos-options';
+  const setField = (key, value) => setDraft(prev => {
+    if (key === 'clienteId') {
+      const cliente = clientesEmpresa.find(c => String(c.id || c.id_RUT || '') === String(value));
+      return {
+        ...prev,
+        clienteId: value,
+        cliente: cliente?.razonSocial || cliente?.name || '',
+        rut: cliente?.rut || '',
+        direccion: clienteDireccion(cliente || {}),
+        comuna: clienteComuna(cliente || {}),
+        telefono: clienteTelefono(cliente || {}),
+        licitacionId: '',
+        idLicitacion: '',
+      };
+    }
+    if (key === 'licitacionId') {
+      const lic = filteredLicitaciones.find(l => String(l.id) === String(value));
+      return { ...prev, licitacionId: value, idLicitacion: lic?.id_licitacion || lic?.name || '' };
+    }
+    return { ...prev, [key]: value };
+  });
   const setItem = (index, key, value) => setDraft(prev => ({
     ...prev,
     items: prev.items.map((item, i) => i === index ? { ...item, [key]: value } : item),
   }));
+  const applyRepuestoToItem = (index, value) => {
+    const repuesto = repuestosFiltrados.find(r => normalizeKey(r.name) === normalizeKey(value));
+    setDraft(prev => ({
+      ...prev,
+      items: prev.items.map((item, i) => i === index ? {
+        ...item,
+        descripcion: value,
+        ...(repuesto ? {
+          codigo: repuesto.sku || '',
+          parte: repuesto.part_number || '',
+          unidad: repuesto.unidad || item.unidad || 'Uns',
+          precio: repuesto.valor_neto || 0,
+        } : {}),
+      } : item),
+    }));
+  };
   const addItem = () => setDraft(prev => ({
     ...prev,
     items: [...prev.items, { codigo: '', parte: '', descripcion: '', unidad: 'Uns', cantidad: 1, precio: 0, dcto: 0 }],
@@ -3086,8 +3356,9 @@ const Cotizaciones = () => {
         ? prev.map(c => (c.id === record.id || (record.numero && c.numero === record.numero)) ? record : c)
         : [record, ...prev];
     });
-    setDraft(record);
-    setCotizacionDraft(record);
+    const nextCleanDraft = emptyCotizacionDraft([record, ...cotizacionesHistorial], currentEmpresa);
+    setDraft(nextCleanDraft);
+    setCotizacionDraft(null);
     alert(`Cotizacion ${record.numero || ''} guardada en historial`);
   };
 
@@ -3110,10 +3381,34 @@ const Cotizaciones = () => {
           <Input label="Cotizacion N" value={draft.numero} onChange={e => setField('numero', e.target.value)} />
           <Input label="Fecha Documento" type="date" value={draft.fecha} onChange={e => setField('fecha', e.target.value)} />
           <Input label="Vendedor" value={draft.vendedor} onChange={e => setField('vendedor', e.target.value)} />
-          <Input label="ID Licitacion" value={draft.idLicitacion || ''} onChange={e => setField('idLicitacion', e.target.value)} />
-          <Input label="Unidad de Negocio" value={draft.unidadNegocio || 'Casa Matriz'} onChange={e => setField('unidadNegocio', e.target.value)} />
-          <Input label="Centro de Costo" value={draft.centroCosto || 'Operaciones'} onChange={e => setField('centroCosto', e.target.value)} />
-          <Input label="Sres." value={draft.cliente} onChange={e => setField('cliente', e.target.value)} />
+          <label className="space-y-1">
+            <span className="text-sm font-semibold text-slate-700">ID Licitacion</span>
+            <select value={draft.licitacionId || ''} onChange={e => setField('licitacionId', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+              <option value="">{selectedCliente ? 'Seleccionar licitacion' : 'Selecciona cliente primero'}</option>
+              {filteredLicitaciones.map(l => <option key={l.id} value={l.id}>{l.id_licitacion ? `${l.id_licitacion} - ${l.name}` : l.name}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm font-semibold text-slate-700">Unidad de Negocio</span>
+            <select value={draft.unidadNegocio || ''} onChange={e => setField('unidadNegocio', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+              <option value="">Seleccionar unidad</option>
+              {unidadOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm font-semibold text-slate-700">Centro de Costo</span>
+            <select value={draft.centroCosto || ''} onChange={e => setField('centroCosto', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+              <option value="">Seleccionar centro</option>
+              {centroCostoOptions.map(cc => <option key={cc} value={cc}>{cc}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm font-semibold text-slate-700">Sres.</span>
+            <select value={draft.clienteId || selectedCliente?.id || ''} onChange={e => setField('clienteId', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+              <option value="">Seleccionar cliente</option>
+              {clientesEmpresa.map(c => <option key={c.id || c.id_RUT} value={c.id || c.id_RUT}>{c.razonSocial || c.name}</option>)}
+            </select>
+          </label>
           <Input label="Rut" value={draft.rut} onChange={e => setField('rut', e.target.value)} />
           <Input label="Solicitado por" value={draft.solicitadoPor} onChange={e => setField('solicitadoPor', e.target.value)} />
           <Input label="Direccion" value={draft.direccion} onChange={e => setField('direccion', e.target.value)} />
@@ -3122,6 +3417,9 @@ const Cotizaciones = () => {
         </div>
 
         <div className="overflow-x-auto">
+          <datalist id={repuestoOptionsId}>
+            {repuestosFiltrados.map(r => <option key={r.id} value={r.name}>{[r.sku, r.part_number, r.valor_neto ? `$${Number(r.valor_neto).toLocaleString('es-CL')}` : ''].filter(Boolean).join(' | ')}</option>)}
+          </datalist>
           <table className="w-full text-sm">
             <thead><tr className="bg-slate-50 text-left">{['Codigo', 'N Parte', 'Descripcion', 'Unidad', 'Cantidad', 'Precio Unit.', 'Dcto', 'Total', ''].map(h => <th key={h} className="p-2 text-[10px] uppercase text-slate-500">{h}</th>)}</tr></thead>
             <tbody>{draft.items.map((item, index) => item.tipo === 'info' ? (
@@ -3137,7 +3435,7 @@ const Cotizaciones = () => {
               <tr key={index} className="border-b">
                 <td className="p-2"><input className="w-24 rounded border p-1 text-xs" value={item.codigo || ''} onChange={e => setItem(index, 'codigo', e.target.value)} /></td>
                 <td className="p-2"><input className="w-20 rounded border p-1 text-xs" value={item.parte || ''} onChange={e => setItem(index, 'parte', e.target.value)} /></td>
-                <td className="p-2"><input className="w-64 rounded border p-1 text-xs" value={item.descripcion || ''} onChange={e => setItem(index, 'descripcion', e.target.value)} /></td>
+                <td className="p-2"><input list={repuestoOptionsId} className="w-64 rounded border p-1 text-xs" value={item.descripcion || ''} onChange={e => applyRepuestoToItem(index, e.target.value)} placeholder={selectedLic ? 'Escribir o seleccionar repuesto' : 'Selecciona licitacion para filtrar'} /></td>
                 <td className="p-2"><input className="w-16 rounded border p-1 text-xs" value={item.unidad || ''} onChange={e => setItem(index, 'unidad', e.target.value)} /></td>
                 <td className="p-2"><input type="number" className="w-20 rounded border p-1 text-xs" value={item.cantidad || 0} onChange={e => setItem(index, 'cantidad', e.target.value)} /></td>
                 <td className="p-2"><input type="number" className="w-24 rounded border p-1 text-xs" value={item.precio || 0} onChange={e => setItem(index, 'precio', e.target.value)} /></td>
@@ -3431,6 +3729,14 @@ const CUENTAS_CONTABLES = [
   '6100 - Costos directos de proyecto',
 ];
 
+const planCuentaLabel = (cuenta = {}) =>
+  [cuenta.numCuenta || cuenta.codigo, cuenta.descripcion || cuenta.nombre || cuenta.name].filter(Boolean).join(' - ');
+
+const cuentaContableOptions = (planCuentas = []) => {
+  const fromPlan = planCuentas.map(planCuentaLabel).filter(Boolean);
+  return fromPlan.length > 0 ? fromPlan : CUENTAS_CONTABLES;
+};
+
 const TIPOS_DOCUMENTO_RENDICION = [
   'Boleta',
   'Factura',
@@ -3457,7 +3763,9 @@ const createEmptyRendicionItem = () => ({
   tipoDoc: 'Boleta',
   razonSocial: '',
   monto: '',
-  cuentaContable: CUENTAS_CONTABLES[0],
+  tipoGastoId: '',
+  tipoGasto: '',
+  cuentaContable: '',
   observaciones: '',
   archivoNombre: '',
   archivoData: '',
@@ -3465,7 +3773,7 @@ const createEmptyRendicionItem = () => ({
 
 // --- RENDICIONES: FORMULARIO ---
 const NuevaRendicion = () => {
-  const { currentUser, rendiciones, setRendiciones, setActiveModule } = useContext(ERPContext);
+  const { currentUser, rendiciones, setRendiciones, setActiveModule, productosRendiciones, activeEmpresaId } = useContext(ERPContext);
   const [folio] = useState(generateRendicionFolio());
   const [montoAsignado, setMontoAsignado] = useState('');
   const [tipo, setTipo] = useState('rendicion');
@@ -3476,6 +3784,16 @@ const NuevaRendicion = () => {
 
   const updateItem = (id, field, value) =>
     setItems(prev => prev.map(it => it.id === id ? { ...it, [field]: value } : it));
+  const productosEmpresa = productosRendiciones.filter(item => !activeEmpresaId || item.empresaId === activeEmpresaId);
+  const applyTipoGasto = (id, productId) => {
+    const product = productosEmpresa.find(item => item.id === productId);
+    setItems(prev => prev.map(it => it.id === id ? {
+      ...it,
+      tipoGastoId: productId,
+      tipoGasto: product?.nombre || '',
+      cuentaContable: product?.cuentaContable || '',
+    } : it));
+  };
 
   const addItem = () => setItems(prev => [...prev, createEmptyRendicionItem()]);
 
@@ -3554,6 +3872,14 @@ const NuevaRendicion = () => {
                 <label key={t} className="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="tipo" value={t} checked={tipo === t} onChange={() => setTipo(t)}
                     className="accent-blue-600" />
+                  <span className="relative inline-flex items-center group">
+                    <Info size={15} className="text-slate-400 hover:text-blue-600" />
+                    <span className="pointer-events-none absolute left-0 top-6 z-20 hidden w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium normal-case leading-relaxed text-slate-600 shadow-lg group-hover:block">
+                      {t === 'rendicion'
+                        ? 'Monto asignado, previamente transferido en donde debe informar y declarar en que se utilizaron lo recursos'
+                        : 'solicitar devolucion de fondos por compras y egresos que se hayan realizado y que hayan sido previamente autorizados.'}
+                    </span>
+                  </span>
                   <span className="text-sm font-medium text-slate-700 capitalize">
                     {t === 'rendicion' ? 'Rendición' : 'Devolución'}
                   </span>
@@ -3577,7 +3903,7 @@ const NuevaRendicion = () => {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b">
-                {['Fecha', 'N° Documento', 'Tipo Doc.', 'Razón Social', 'Monto', 'Cuenta Contable', 'Observaciones', 'Respaldo', ''].map(h => (
+                {['Fecha', 'N° Documento', 'Tipo Doc.', 'Razón Social', 'Monto', 'Tipo de Gasto', 'Observaciones', 'Respaldo', ''].map(h => (
                   <th key={h} className="p-3 text-[10px] font-bold uppercase text-slate-500 text-left whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -3608,9 +3934,14 @@ const NuevaRendicion = () => {
                       placeholder="0" className="w-24 rounded border border-slate-200 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none" />
                   </td>
                   <td className="p-2">
-                    <select value={it.cuentaContable} onChange={e => updateItem(it.id, 'cuentaContable', e.target.value)}
+                    <select value={it.tipoGastoId || ''} onChange={e => applyTipoGasto(it.id, e.target.value)}
                       className="w-52 rounded border border-slate-200 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none bg-white">
-                      {CUENTAS_CONTABLES.map(c => <option key={c} value={c}>{c}</option>)}
+                      <option value="">Seleccionar tipo de gasto</option>
+                      {productosEmpresa.map(product => (
+                        <option key={product.id} value={product.id}>
+                          {[product.codigo, product.nombre].filter(Boolean).join(' - ')}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td className="p-2">
@@ -3699,7 +4030,7 @@ const HistorialRendiciones = () => {
         <td>${it.fecha || ''}</td><td>${it.numeroDoc || ''}</td><td>${it.tipoDoc || ''}</td>
         <td>${it.razonSocial || ''}</td>
         <td style="text-align:right">$${Number(it.monto || 0).toLocaleString('es-CL')}</td>
-        <td>${it.cuentaContable || ''}</td><td>${it.observaciones || ''}</td>
+        <td>${it.tipoGasto || it.cuentaContable || ''}</td><td>${it.observaciones || ''}</td>
         <td>${it.archivoNombre || '—'}</td>
       </tr>`
     ).join('');
@@ -3717,7 +4048,7 @@ const HistorialRendiciones = () => {
         <table>
           <thead><tr>
             <th>Fecha</th><th>N° Doc.</th><th>Tipo Doc.</th><th>Razón Social</th>
-            <th>Monto</th><th>Cuenta Contable</th><th>Observaciones</th><th>Respaldo</th>
+            <th>Monto</th><th>Tipo de Gasto</th><th>Observaciones</th><th>Respaldo</th>
           </tr></thead>
           <tbody>${filas}</tbody>
           <tfoot><tr>
@@ -3918,6 +4249,130 @@ const HistorialRendiciones = () => {
           </table>
         </div>
       </div>
+    </div>
+  );
+};
+
+// --- MANTENEDORES: PRODUCTOS/SERVICIOS RENDICIONES ---
+const emptyProductoRendicion = (empresaId = '') => ({
+  id: '',
+  empresaId,
+  codigo: '',
+  nombre: '',
+  tipo: 'Servicio',
+  familia: '',
+  descripcion: '',
+  cuentaContable: '',
+  estado: 'Activo',
+});
+
+const MantenedoresProductosRendiciones = () => {
+  const { productosRendiciones, setProductosRendiciones, planCuentas, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
+  const [search, setSearch] = useState('');
+  const [modal, setModal] = useState(null);
+  const accountOptions = cuentaContableOptions(planCuentas);
+  const filtered = productosRendiciones
+    .filter(item => !activeEmpresaId || item.empresaId === activeEmpresaId)
+    .filter(item => normalizeKey([item.codigo, item.nombre, item.tipo, item.familia, item.cuentaContable, item.estado].join(' ')).includes(normalizeKey(search)));
+
+  const openNew = () => {
+    if (!activeEmpresaId) { alert('Selecciona una empresa activa antes de crear productos o servicios.'); return; }
+    setModal({ mode: 'new', data: emptyProductoRendicion(activeEmpresaId) });
+  };
+  const openEdit = (item) => setModal({ mode: 'edit', data: { ...emptyProductoRendicion(activeEmpresaId), ...item } });
+  const closeModal = () => setModal(null);
+  const setField = (key, value) => setModal(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
+  const save = () => {
+    const data = { ...modal.data, empresaId: activeEmpresaId || modal.data.empresaId };
+    if (!data.codigo || !data.nombre || !data.cuentaContable) {
+      alert('Codigo, nombre y cuenta contable son obligatorios.');
+      return;
+    }
+    const duplicate = productosRendiciones.some(item =>
+      item.empresaId === data.empresaId &&
+      normalizeKey(item.codigo) === normalizeKey(data.codigo) &&
+      item.id !== data.id
+    );
+    if (duplicate) {
+      alert('Ya existe un producto o servicio con ese codigo en la empresa activa.');
+      return;
+    }
+    const record = { ...data, id: data.id || `rend-prod-${Date.now()}` };
+    setProductosRendiciones(prev => modal.mode === 'new'
+      ? [record, ...prev]
+      : prev.map(item => item.id === record.id ? record : item));
+    closeModal();
+  };
+  const remove = (item) => {
+    if (!window.confirm(`Eliminar "${item.nombre}"?`)) return;
+    setProductosRendiciones(prev => prev.filter(row => row.id !== item.id));
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Mantenedores / Rendiciones</p>
+          <h2 className="text-2xl font-bold text-slate-900">Productos y/o Servicios</h2>
+          <p className="mt-1 text-sm text-slate-500">Empresa activa: {currentEmpresa?.razonSocial || 'Sin empresa seleccionada'}</p>
+        </div>
+        <Button variant="primary" onClick={openNew} icon={Plus}>Nuevo producto/servicio</Button>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 p-4">
+          <div className="relative max-w-md">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por codigo, nombre, cuenta..."
+              className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-slate-50 text-left">
+              {['Codigo', 'Nombre', 'Tipo', 'Familia', 'Cuenta contable', 'Estado', 'Acciones'].map(h => <th key={h} className="p-3 text-[10px] font-bold uppercase text-slate-500">{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-400 italic">{activeEmpresaId ? 'No hay productos o servicios para rendiciones.' : 'Selecciona una empresa activa.'}</td></tr>
+              ) : filtered.map(item => (
+                <tr key={item.id} className="border-b hover:bg-slate-50">
+                  <td className="p-3 font-mono text-xs">{item.codigo}</td>
+                  <td className="p-3 font-semibold">{item.nombre}</td>
+                  <td className="p-3">{item.tipo}</td>
+                  <td className="p-3">{item.familia || '—'}</td>
+                  <td className="p-3 text-xs">{item.cuentaContable}</td>
+                  <td className="p-3"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.estado === 'Activo' ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{item.estado}</span></td>
+                  <td className="p-3">
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => openEdit(item)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Editar"><Pencil size={14} /></button>
+                      <button onClick={() => remove(item)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar"><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {modal && (
+        <Modal title={modal.mode === 'new' ? 'Nuevo producto/servicio' : 'Editar producto/servicio'} onClose={closeModal} maxWidth="max-w-5xl">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Input label="Codigo" value={modal.data.codigo} onChange={e => setField('codigo', e.target.value)} />
+            <Input label="Nombre" value={modal.data.nombre} onChange={e => setField('nombre', e.target.value)} />
+            <label className="space-y-1"><span className="text-sm font-semibold text-slate-700">Tipo</span><select value={modal.data.tipo} onChange={e => setField('tipo', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option>Producto</option><option>Servicio</option><option>Tipo de gasto</option></select></label>
+            <Input label="Familia" value={modal.data.familia} onChange={e => setField('familia', e.target.value)} />
+            <label className="space-y-1 md:col-span-2"><span className="text-sm font-semibold text-slate-700">Cuenta contable</span><select value={modal.data.cuentaContable} onChange={e => setField('cuentaContable', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Seleccionar cuenta</option>{accountOptions.map(account => <option key={account} value={account}>{account}</option>)}</select></label>
+            <label className="space-y-1"><span className="text-sm font-semibold text-slate-700">Estado</span><select value={modal.data.estado} onChange={e => setField('estado', e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option>Activo</option><option>Inactivo</option></select></label>
+            <label className="space-y-1 md:col-span-3"><span className="text-sm font-semibold text-slate-700">Descripcion</span><textarea value={modal.data.descripcion} onChange={e => setField('descripcion', e.target.value)} className="min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          </div>
+          <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+            <Button variant="secondary" onClick={closeModal}>Cancelar</Button>
+            <Button variant="accent" onClick={save}>Guardar</Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
@@ -4494,12 +4949,20 @@ const MantenedoresClientesProveedores = () => {
   const addSucursal = () => setModal(m => ({ ...m, data: { ...m.data, sucursales: [...(m.data.sucursales || []), emptySucursalCP()] } }));
   const updateSucursal = (id, key, value) => setModal(m => ({ ...m, data: { ...m.data, sucursales: (m.data.sucursales || []).map(s => s.id === id ? { ...s, [key]: value } : s) } }));
   const removeSucursal = (id) => setModal(m => ({ ...m, data: { ...m.data, sucursales: (m.data.sucursales || []).filter(s => s.id !== id) } }));
+  const persistClientesExtended = async (nextClientes) => {
+    const snapshots = nextClientes.map(clienteExtendedSnapshot);
+    localStorage.setItem(APP_DATA_KEYS.clientes_ext, JSON.stringify(snapshots));
+    const { error } = await saveAppDataToSupabase('clientes_ext', snapshots);
+    if (error) {
+      alert('El cliente se guardo en esta sesion, pero no se pudo compartir la informacion extendida con otros usuarios: ' + friendlyError(error));
+    }
+  };
 
   const saveRecord = async () => {
     if (!activeEmpresaId) { alert('Selecciona una empresa activa antes de guardar.'); return; }
     const data = { ...modal.data, empresaId: activeEmpresaId, name: modal.data.razonSocial, email: modal.data.correoComercial || modal.data.correoSii };
     if (!data.rut || !data.razonSocial) { alert('RUT y Razón Social son obligatorios.'); return; }
-    const duplicate = clientes.some(c => c.empresaId === activeEmpresaId && normalizeKey(c.rut) === normalizeKey(data.rut) && c.id !== data.id);
+    const duplicate = clientes.some(c => c.empresaId === activeEmpresaId && normalizeRutKey(c.rut) === normalizeRutKey(data.rut) && c.id !== data.id);
     if (duplicate) { alert('Ya existe un cliente/proveedor con ese RUT en la empresa activa.'); return; }
 
     const isColError = (msg) => msg && (msg.includes('column') || msg.includes('schema cache'));
@@ -4513,14 +4976,18 @@ const MantenedoresClientesProveedores = () => {
       }
       if (error) { alert('Error al guardar: ' + error.message); return; }
       const normalized = { ...normalizeCliente(row), ...data, empresaId: activeEmpresaId };
-      setClientes(prev => [normalized, ...prev]);
+      const nextClientes = [normalized, ...clientes];
+      setClientes(nextClientes);
+      await persistClientesExtended(nextClientes);
     } else {
       let { error } = await supabase.from('clientes').update(extPayload).eq('id_RUT', data.id);
       if (error && isColError(error.message)) {
         ({ error } = await supabase.from('clientes').update(basePayload).eq('id_RUT', data.id));
       }
       if (error) { alert('Error al guardar: ' + error.message); return; }
-      setClientes(prev => prev.map(c => c.id === data.id ? { ...c, ...normalizeCliente({ ...c, ...data }) } : c));
+      const nextClientes = clientes.map(c => c.id === data.id ? { ...c, ...normalizeCliente({ ...c, ...data }) } : c);
+      setClientes(nextClientes);
+      await persistClientesExtended(nextClientes);
     }
     closeModal();
   };
@@ -4529,7 +4996,9 @@ const MantenedoresClientesProveedores = () => {
     if (!window.confirm(`Eliminar "${record.razonSocial || record.name}"?`)) return;
     const { error } = await supabase.from('clientes').delete().eq('id', record.id);
     if (error) { alert('Error al eliminar: ' + error.message); return; }
-    setClientes(prev => prev.filter(c => c.id !== record.id));
+    const nextClientes = clientes.filter(c => c.id !== record.id);
+    setClientes(nextClientes);
+    await persistClientesExtended(nextClientes);
   };
 
   const exportTemplate = () => {
@@ -4579,17 +5048,16 @@ const MantenedoresClientesProveedores = () => {
     setImportResult(null);
   };
 
-  const confirmImport = () => {
+  const confirmImport = async () => {
     if (previewErrors.length > 0) return;
-    setClientes(prev => {
-      let next = [...prev];
-      preview.forEach(row => {
-        const existingIndex = next.findIndex(c => c.empresaId === activeEmpresaId && normalizeKey(c.rut) === normalizeKey(row.rut));
-        if (existingIndex >= 0) next[existingIndex] = { ...next[existingIndex], ...row, id: next[existingIndex].id };
-        else next.unshift(row);
-      });
-      return next;
+    let nextClientes = [...clientes];
+    preview.forEach(row => {
+      const existingIndex = nextClientes.findIndex(c => c.empresaId === activeEmpresaId && normalizeRutKey(c.rut) === normalizeRutKey(row.rut));
+      if (existingIndex >= 0) nextClientes[existingIndex] = { ...nextClientes[existingIndex], ...row, id: nextClientes[existingIndex].id };
+      else nextClientes.unshift(row);
     });
+    setClientes(nextClientes);
+    await persistClientesExtended(nextClientes);
     setImportResult({ ok: true, count: preview.length });
     setPreview([]);
     setPreviewErrors([]);
@@ -6217,6 +6685,7 @@ const MODULES_TREE = [
       { id: 'mantenedores-licitaciones',label: 'Licitaciones' },
       { id: 'mantenedores-equipos',     label: 'Equipos' },
       { id: 'mantenedores-repuestos',   label: 'Repuestos' },
+      { id: 'mantenedores-productos-rendiciones', label: 'Productos/Servicios Rendiciones' },
       { id: 'mantenedores-usuarios',    label: 'Usuarios' },
     ],
   },
@@ -6283,8 +6752,8 @@ const MantenedoresUsuarios = () => {
   const firstEmpresaId = () => empresas[0]?.id || '';
   const openNew  = () => { setSelectedEmpresaId(firstEmpresaId()); setModal({ mode: 'new',  data: emptyUsuario() }); };
   const openEdit = (u) => {
-    const permisos = u.permisosEmpresas || {};
-    const firstConfigured = Object.keys(permisos).find(id => (permisos[id] || []).length > 0);
+    const permisos = normalizeUserEmpresaPermissions(u, empresas);
+    const firstConfigured = Object.keys(permisos).find(id => empresas.some(emp => emp.id === id) && (permisos[id] || []).length > 0);
     setSelectedEmpresaId(firstConfigured || firstEmpresaId());
     setModal({ mode: 'edit', data: { ...emptyUsuario(), ...u, permisosEmpresas: permisos } });
   };
@@ -10388,7 +10857,7 @@ const ConfigPlaceholder = ({ titulo, descripcion }) => (
 
 // --- AUTH: LOGIN ---
 const LoginPage = () => {
-  const { setLoggedInUser, setActiveEmpresaId } = useContext(ERPContext);
+  const { setLoggedInUser, setActiveEmpresaId, empresas } = useContext(ERPContext);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -10402,10 +10871,13 @@ const LoginPage = () => {
   }, [setActiveEmpresaId]);
 
   const doLogin = (session) => {
+    const normalizedSession = session.isSuperadmin
+      ? session
+      : { ...session, permisosEmpresas: normalizeUserEmpresaPermissions(session, empresas) };
     setActiveEmpresaId('');
     localStorage.removeItem('sentauris_active_empresa');
-    setLoggedInUser(session);
-    localStorage.setItem('sentauris_session', JSON.stringify(session));
+    setLoggedInUser(normalizedSession);
+    localStorage.setItem('sentauris_session', JSON.stringify(normalizedSession));
   };
 
   const handleLogin = async (e) => {
@@ -10505,7 +10977,7 @@ const AccessDenied = () => (
 
 // --- LAYOUT ---
 const Sidebar = () => {
-  const { activeModule, setActiveModule, sidebarOpen, currentUser, loggedInUser, logout, activeEmpresaId } = useContext(ERPContext);
+  const { activeModule, setActiveModule, setCotizacionDraft, sidebarOpen, setSidebarOpen, currentUser, loggedInUser, logout, activeEmpresaId, empresas } = useContext(ERPContext);
   const [expandedMenus, setExpandedMenus] = useState(() => new Set());
   const toggleExpand = (id) => setExpandedMenus(prev => {
     const next = new Set(prev);
@@ -10527,7 +10999,7 @@ const Sidebar = () => {
 
   const isSuperadmin = loggedInUser?.isSuperadmin || false;
   const accesos = loggedInUser?.accesos || [];
-  const companyAccess = activeEmpresaId ? loggedInUser?.permisosEmpresas?.[activeEmpresaId] : null;
+  const companyAccess = activeEmpresaId ? userEmpresaAccess(loggedInUser, activeEmpresaId, empresas) : null;
   const effectiveAccess = companyAccess || accesos;
   const hasCompanyPermissions = activeEmpresaId && loggedInUser?.permisosEmpresas && Object.keys(loggedInUser.permisosEmpresas).length > 0;
   const canAccess = (id) => {
@@ -10556,6 +11028,7 @@ const Sidebar = () => {
     'Licitaciones': 'mantenedores-licitaciones',
     'Equipos': 'mantenedores-equipos',
     'Repuestos': 'mantenedores-repuestos',
+    'Productos/Servicios Rendiciones': 'mantenedores-productos-rendiciones',
     'Usuarios': 'mantenedores-usuarios',
   }[label] || 'mantenedores-clientes');
 
@@ -10588,7 +11061,7 @@ const Sidebar = () => {
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
   const menuBottom = [
-    { id: 'mantenedores-clientes',   label: 'Mantenedores',    icon: Database,  sub: ['Clientes y/o Proveedores', 'Licitaciones', 'Equipos', 'Repuestos', 'Usuarios'] },
+    { id: 'mantenedores-clientes',   label: 'Mantenedores',    icon: Database,  sub: ['Clientes y/o Proveedores', 'Licitaciones', 'Equipos', 'Repuestos', 'Productos/Servicios Rendiciones', 'Usuarios'] },
     { id: 'configuraciones-empresas',label: 'Configuraciones', icon: Settings,  sub: ['Empresas', 'Plan de Cuentas', 'Tipo de Documentos', 'Impuestos y Retenciones', 'Parámetros', 'Seguridad', 'Flujo de Aprobación'] },
   ];
 
@@ -10600,6 +11073,7 @@ const Sidebar = () => {
         toggleExpand(item.id);
       } else {
         setActiveModule(item.id);
+        if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
       }
     };
     return (
@@ -10607,17 +11081,17 @@ const Sidebar = () => {
         <button onClick={handleParentClick}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group ${isActiveParent ? 'bg-blue-600 text-white' : 'hover:bg-slate-900 hover:text-white'}`}>
           <item.icon size={20} />
-          {sidebarOpen && <span className="text-sm font-semibold max-lg:hidden flex-1 text-left">{item.label}</span>}
+          {sidebarOpen && <span className="text-sm font-semibold flex-1 text-left">{item.label}</span>}
           {sidebarOpen && item.sub && (
-            <ChevronLeft size={14} className={`max-lg:hidden transition-transform duration-200 ${isExpanded ? '-rotate-90' : 'rotate-180'}`} />
+            <ChevronLeft size={14} className={`transition-transform duration-200 ${isExpanded ? '-rotate-90' : 'rotate-180'}`} />
           )}
         </button>
         {sidebarOpen && item.sub && isExpanded && (
-          <div className="ml-9 space-y-1 border-l border-slate-800 pl-3 max-lg:hidden">
+          <div className="ml-9 space-y-1 border-l border-slate-800 pl-3">
             {visibleSubs(item).map(s => {
               const sid = subIdFor(item, s);
               return (
-                <button key={s} onClick={() => setActiveModule(sid)}
+                <button key={s} onClick={() => { if (sid === 'operaciones-cotizaciones') setCotizacionDraft(null); setActiveModule(sid); if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false); }}
                   className={`text-xs py-2 block font-medium transition-colors ${activeModule === sid ? 'text-blue-400' : 'hover:text-blue-400'}`}>
                   {s}
                 </button>
@@ -10630,10 +11104,10 @@ const Sidebar = () => {
   });
 
   return (
-    <div className={`${sidebarOpen ? 'w-64 max-lg:w-20' : 'w-20'} bg-slate-950 h-screen transition-all duration-300 flex flex-col fixed left-0 top-0 z-50 text-slate-400 border-r border-slate-800`}>
+    <div className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-slate-950 h-screen transition-all duration-300 flex flex-col fixed left-0 top-0 z-50 text-slate-400 border-r border-slate-800`}>
       <div className="p-6 flex items-center gap-3">
         <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shrink-0"><TrendingUp size={24} /></div>
-        {sidebarOpen && <span className="font-black text-xl text-white tracking-tighter max-lg:hidden">{APP_NAME}</span>}
+        {sidebarOpen && <span className="font-black text-xl text-white tracking-tighter">{APP_NAME}</span>}
       </div>
       <nav className="flex-1 px-3 mt-4 overflow-y-auto min-h-0">
         <div className="space-y-1">{renderItems(menuTop)}</div>
@@ -10643,14 +11117,14 @@ const Sidebar = () => {
         <div className="flex items-center gap-3 w-full p-2 rounded-lg">
           <img src={currentUser.avatar} className="w-10 h-10 rounded-lg object-cover border border-slate-700 shrink-0" alt="Profile" />
           {sidebarOpen && (
-            <div className="text-left overflow-hidden max-lg:hidden">
+            <div className="text-left overflow-hidden">
               <p className="text-sm font-bold text-white truncate">{currentUser.name}</p>
               <p className="text-[10px] text-slate-500 uppercase font-black truncate">{currentUser.position}</p>
             </div>
           )}
         </div>
         <button onClick={logout} className="mt-3 flex items-center gap-3 w-full px-3 py-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
-          <LogOut size={18} />{sidebarOpen && <span className="text-sm font-bold max-lg:hidden">Cerrar Sesión</span>}
+          <LogOut size={18} />{sidebarOpen && <span className="text-sm font-bold">Cerrar Sesión</span>}
         </button>
       </div>
     </div>
@@ -10682,6 +11156,7 @@ const Header = () => {
     'mantenedores-licitaciones': 'Mantenedores / Licitaciones',
     'mantenedores-equipos': 'Mantenedores / Equipos',
     'mantenedores-repuestos': 'Mantenedores / Repuestos',
+    'mantenedores-productos-rendiciones': 'Mantenedores / Productos y Servicios Rendiciones',
     'mantenedores-usuarios':                'Mantenedores / Usuarios',
     'configuraciones-empresas':             'Configuraciones / Empresas',
     'configuraciones-plan-cuentas':         'Configuraciones / Plan de Cuentas',
@@ -10970,7 +11445,7 @@ const PublicCorrectiveReport = ({ verifyOrderId = '', verifyFolio = '' }) => {
 };
 
 const ContentManager = () => {
-  const { activeModule, setActiveModule, sidebarOpen, loggedInUser, activeEmpresaId } = useContext(ERPContext);
+  const { activeModule, setActiveModule, sidebarOpen, setSidebarOpen, loggedInUser, activeEmpresaId, empresas } = useContext(ERPContext);
   const [verificationRequest] = useState(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
@@ -11014,7 +11489,7 @@ const ContentManager = () => {
   };
   const canAccess = (id) => {
     if (loggedInUser.isSuperadmin) return true;
-    const companyAccess = activeEmpresaId ? loggedInUser.permisosEmpresas?.[activeEmpresaId] : null;
+    const companyAccess = activeEmpresaId ? userEmpresaAccess(loggedInUser, activeEmpresaId, empresas) : null;
     const hasCompanyPermissions = activeEmpresaId && loggedInUser.permisosEmpresas && Object.keys(loggedInUser.permisosEmpresas).length > 0;
     if (hasCompanyPermissions && !companyAccess) return false;
     const acc = companyAccess || loggedInUser.accesos || [];
@@ -11049,6 +11524,7 @@ const ContentManager = () => {
       case 'mantenedores-licitaciones': return <MantenedoresLicitaciones />;
       case 'mantenedores-equipos': return <MantenedoresEquipos />;
       case 'mantenedores-repuestos': return <MantenedoresRepuestos />;
+      case 'mantenedores-productos-rendiciones': return <MantenedoresProductosRendiciones />;
       case 'mantenedores-usuarios':             return <MantenedoresUsuarios />;
       case 'configuraciones-empresas':          return <ConfigEmpresas />;
       case 'configuraciones-plan-cuentas':      return <ConfigPlanCuentas />;
@@ -11063,6 +11539,14 @@ const ContentManager = () => {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       <Sidebar />
+      {sidebarOpen && (
+        <button
+          type="button"
+          aria-label="Cerrar menu"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-y-0 left-64 right-0 z-40 bg-slate-950/30 backdrop-blur-[1px] lg:hidden"
+        />
+      )}
       <div className={`min-w-0 overflow-hidden transition-all duration-300 ${sidebarOpen ? 'ml-64 max-lg:ml-20' : 'ml-20'}`}>
         <Header />
         <main className="min-w-0 p-4 md:p-8">{renderModule()}</main>
