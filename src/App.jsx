@@ -9039,6 +9039,46 @@ const emptyVoucher = (nextNumber = 1) => ({
   detalles: [],
 });
 
+const VOUCHER_BULK_TEMPLATE_HEADERS = [
+  'Tipo de Comprobante',
+  'Numero de Comprobante',
+  'Fecha',
+  'Tipo Contabilidad',
+  'Unidad de Negocio',
+  'Estado',
+  'Glosa Comprobante',
+  'Cod. Cta. Contable',
+  'Cuenta Contable',
+  'Glosa',
+  'Documento Asociado',
+  'Tipo Documento',
+  'Numero Documento',
+  'Fecha Documento',
+  'Auxiliar',
+  'Centro de Costo',
+  'Debe',
+  'Haber',
+];
+
+const normalizeExcelKey = (value = '') =>
+  String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[°º.\-_]/g, ' ').replace(/\s+/g, ' ').trim();
+
+const excelDateToIso = (value, fallback = accountingDate()) => {
+  if (!value) return fallback;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  if (typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+  }
+  const text = String(value).trim();
+  const slash = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (slash) {
+    const year = slash[3].length === 2 ? `20${slash[3]}` : slash[3];
+    return `${year}-${slash[2].padStart(2, '0')}-${slash[1].padStart(2, '0')}`;
+  }
+  return text.slice(0, 10) || fallback;
+};
+
 const ComprobantesContables = () => {
   const { comprobantes, setComprobantes, planCuentas, tipoDocumentos, clientes, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
   const fileInputRef = useRef(null);
@@ -9196,6 +9236,34 @@ const ComprobantesContables = () => {
     setComprobantes(prev => prev.filter(item => item.id !== voucher.id));
   };
 
+  const downloadBulkTemplate = () => {
+    const wb = XLSX.utils.book_new();
+    const next = nextNumber();
+    const firstCuenta = cuentaContableOptionsComprobante[0] || '1-01-001 Caja';
+    const secondCuenta = cuentaContableOptionsComprobante[1] || '2-01-001 Proveedores';
+    const unidad = unidadNegocioOptions[0] || 'Casa Matriz';
+    const centro = centroCostoOptions[0] || '';
+    const tipoDoc = tipoDocumentoOptions[0] || 'Factura';
+    const auxiliar = auxiliarOptions[0] || '';
+    const sampleRows = [
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Borrador', 'Ejemplo carga masiva libro diario', splitAccount(firstCuenta).code, firstCuenta, 'Linea debe ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 100000, 0],
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Borrador', 'Ejemplo carga masiva libro diario', splitAccount(secondCuenta).code, secondCuenta, 'Linea haber ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 0, 100000],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet([VOUCHER_BULK_TEMPLATE_HEADERS, ...sampleRows]);
+    ws['!cols'] = VOUCHER_BULK_TEMPLATE_HEADERS.map(header => ({ wch: Math.max(16, header.length + 2) }));
+    XLSX.utils.book_append_sheet(wb, ws, 'Carga Libro Diario');
+    const help = XLSX.utils.aoa_to_sheet([
+      ['Instrucciones'],
+      ['Cada fila representa una linea del libro diario.'],
+      ['Para crear un comprobante con varias lineas, repite Tipo de Comprobante, Numero de Comprobante y Fecha.'],
+      ['Debe y Haber se importan por linea. El comprobante quedara con el total Debe de sus detalles.'],
+      ['Cuenta Contable puede venir como "codigo descripcion"; Cod. Cta. Contable se usa como apoyo si la cuenta viene separada.'],
+    ]);
+    help['!cols'] = [{ wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, help, 'Instrucciones');
+    XLSX.writeFile(wb, 'plantilla_carga_masiva_comprobantes.xlsx');
+  };
+
   const handleExcel = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -9205,41 +9273,68 @@ const ComprobantesContables = () => {
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
     const keyFor = (row, names) => {
       const keys = Object.keys(row);
-      const found = keys.find(key => names.some(name => key.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(name)));
+      const normalizedNames = names.map(normalizeExcelKey);
+      const found = keys.find(key => normalizedNames.includes(normalizeExcelKey(key)))
+        || keys.find(key => normalizedNames.some(name => normalizeExcelKey(key).includes(name)));
       return found ? row[found] : '';
     };
     const start = nextNumber();
-    const imported = rows.map((row, index) => {
+    const grouped = new Map();
+    rows.forEach((row, index) => {
       const tipo = keyFor(row, ['tipo de comprobante', 'tipo comprobante', 'tipo']) || 'Traspaso';
       const numero = keyFor(row, ['numero de comprobante', 'nro comprobante', 'numero']) || String(start + index).padStart(4, '0');
-      const fecha = keyFor(row, ['fecha']) || accountingDate();
+      const fecha = excelDateToIso(keyFor(row, ['fecha']), accountingDate());
       const documento = keyFor(row, ['documento', 'doc']) || `${tipo}-${numero}`;
-      const glosa = keyFor(row, ['glosa', 'descripcion']) || 'Carga masiva Excel';
+      const glosaComprobante = keyFor(row, ['glosa comprobante']) || keyFor(row, ['glosa', 'descripcion']) || 'Carga masiva Excel';
+      const glosaLinea = keyFor(row, ['glosa linea']) || keyFor(row, ['glosa']) || glosaComprobante;
+      const tipoDocumento = keyFor(row, ['tipo documento']);
+      const numeroDocumento = keyFor(row, ['numero documento', 'numero doc']);
+      const documentoAsociado = keyFor(row, ['documento asociado']);
+      const codCuenta = keyFor(row, ['cod cta contable', 'codigo cuenta', 'cod cuenta']);
+      const cuenta = keyFor(row, ['cuenta contable', 'cuenta']);
       const debe = toAmount(keyFor(row, ['debe']));
       const haber = toAmount(keyFor(row, ['haber']));
-      return {
-        ...emptyVoucher(start + index),
-        id: `comp-xlsx-${Date.now()}-${index}`,
-        tipoComprobante: tipo,
-        numero: String(numero),
-        fecha: String(fecha).slice(0, 10),
-        documento,
-        glosa,
-        estado: keyFor(row, ['estado']) || 'Importado',
+      const key = `${normalizeKey(tipo)}|${String(numero)}|${fecha}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ...emptyVoucher(start + grouped.size),
+          id: `comp-xlsx-${Date.now()}-${index}`,
+          tipoContabilidad: keyFor(row, ['tipo contabilidad']) || 'Ambas',
+          tipoComprobante: tipo,
+          numero: String(numero),
+          unidadNegocio: keyFor(row, ['unidad de negocio', 'unidad negocio', 'unidad']) || unidadNegocioOptions[0] || 'Casa Matriz',
+          fecha,
+          documento,
+          glosa: glosaComprobante,
+          estado: keyFor(row, ['estado']) || 'Importado',
+          detalles: [],
+        });
+      }
+      const voucher = grouped.get(key);
+      voucher.detalles.push({
+        ...emptyVoucherLine(voucher.detalles.length + 1),
+        cuentaContable: cuenta || codCuenta,
+        centroCosto: keyFor(row, ['centro de costo', 'centro costo']),
+        glosa: glosaLinea,
+        auxiliar: keyFor(row, ['auxiliar', 'cliente', 'proveedor']),
+        tipoDocumento,
+        numeroDocumento,
+        fechaDocumento: excelDateToIso(keyFor(row, ['fecha documento']) || fecha, fecha),
         debe,
-        detalles: [{
-          ...emptyVoucherLine(1),
-          cuentaContable: keyFor(row, ['cuenta contable', 'cuenta']),
-          centroCosto: keyFor(row, ['centro de costo', 'centro costo']),
-          glosa,
-          tipoDocumento: keyFor(row, ['tipo documento']),
-          numeroDocumento: keyFor(row, ['numero documento', 'numero doc']),
-          fechaDocumento: String(fecha).slice(0, 10),
-          debe,
-          haber,
-        }],
-      };
+        haber,
+        documentoAsociado,
+      });
     });
+    const imported = Array.from(grouped.values()).map(voucher => ({
+      ...voucher,
+      debe: (voucher.detalles || []).reduce((sum, line) => sum + toAmount(line.debe), 0),
+      detalles: (voucher.detalles || []).map((line, index) => ({
+        ...line,
+        numeroDetalle: index + 1,
+        tipoDocumento: line.tipoDocumento || String(line.documentoAsociado || '').split(' - ')[0] || '',
+        numeroDocumento: line.numeroDocumento || String(line.documentoAsociado || '').split(' - ').slice(1).join(' - ') || '',
+      })),
+    }));
     setComprobantes(prev => [...imported, ...prev]);
     setNotice(`${imported.length} comprobantes importados desde Excel.`);
     event.target.value = '';
@@ -9359,7 +9454,7 @@ const ComprobantesContables = () => {
     <div className="w-full max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-2 space-y-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div><p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Finanzas / Comprobantes contables</p><h2 className="text-2xl font-black text-slate-900">Comprobantes contables</h2></div>
-        <div className="flex flex-wrap gap-2"><input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleExcel} className="hidden" /><Button variant="secondary" icon={Upload} onClick={() => fileInputRef.current?.click()}>Carga Excel</Button><Button variant="accent" icon={Plus} onClick={openNew}>Ingreso manual</Button></div>
+        <div className="flex flex-wrap gap-2"><input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleExcel} className="hidden" /><Button variant="secondary" icon={Download} onClick={downloadBulkTemplate}>Plantilla carga</Button><Button variant="secondary" icon={Upload} onClick={() => fileInputRef.current?.click()}>Carga Excel</Button><Button variant="accent" icon={Plus} onClick={openNew}>Ingreso manual</Button></div>
       </div>
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
         <div className="p-4 border-b border-slate-100 grid grid-cols-1 md:grid-cols-[180px_1fr_auto] gap-3"><select value={filterType} onChange={e => setFilterType(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option>Todos</option><option>Apertura</option><option>Egreso</option><option>Ingreso</option><option>Traspaso</option></select><div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar" className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" /></div><Button variant="secondary" icon={Download} onClick={() => setNotice('Exportacion preparada desde la tabla visible.')}>Exportar</Button></div>
