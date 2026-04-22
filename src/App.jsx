@@ -9162,6 +9162,9 @@ const emptyVoucherLine = (index = 1) => ({
   tipoDocumento: '',
   numeroDocumento: '',
   fechaDocumento: accountingDate(),
+  moneda: 'CLP - Peso Chileno',
+  tipoCambio: 1,
+  valorMonedaExtranjera: '',
   debe: '',
   haber: '',
 });
@@ -9172,8 +9175,6 @@ const emptyVoucher = (nextNumber = 1) => ({
   tipoComprobante: 'Traspaso',
   numero: String(nextNumber).padStart(4, '0'),
   unidadNegocio: 'Casa Matriz',
-  moneda: 'CLP - Peso Chileno',
-  tipoCambio: 1,
   fecha: accountingDate(),
   documento: '',
   glosa: '',
@@ -9187,8 +9188,6 @@ const VOUCHER_BULK_TEMPLATE_HEADERS = [
   'Fecha',
   'Tipo Contabilidad',
   'Unidad de Negocio',
-  'Moneda',
-  'Tipo de Cambio',
   'Estado',
   'Glosa Comprobante',
   'Cod. Cta. Contable',
@@ -9200,6 +9199,9 @@ const VOUCHER_BULK_TEMPLATE_HEADERS = [
   'Fecha Documento',
   'Auxiliar',
   'Centro de Costo',
+  'Moneda',
+  'Tipo de Cambio',
+  'Valor en Moneda Extranjera',
   'Debe',
   'Haber',
 ];
@@ -9266,13 +9268,17 @@ const ComprobantesContables = () => {
     ? dedupeByNormalizedText(monedasData.monedas.map(monedaLabel))
     : ['CLP - Peso Chileno'];
   const lookupTipoCambio = (moneda, fecha) => tipoCambioFor(monedasData.tiposCambio, moneda, fecha) || (normalizeKey(monedaCodeFromLabel(moneda)) === 'clp' ? 1 : '');
+  const defaultLine = (index = 1) => {
+    const moneda = monedaOptions[0] || 'CLP - Peso Chileno';
+    return { ...emptyVoucherLine(index), moneda, tipoCambio: lookupTipoCambio(moneda, draft.fecha || accountingDate()) || 1 };
+  };
 
   useEffect(() => {
-    const nextTipoCambio = lookupTipoCambio(draft.moneda, draft.fecha);
-    if (nextTipoCambio !== '' && String(draft.tipoCambio || '') !== String(nextTipoCambio)) {
-      setDraft(prev => ({ ...prev, tipoCambio: nextTipoCambio }));
+    const nextTipoCambio = lookupTipoCambio(lineDraft.moneda, draft.fecha);
+    if (nextTipoCambio !== '' && String(lineDraft.tipoCambio || '') !== String(nextTipoCambio)) {
+      setLineDraft(prev => ({ ...prev, tipoCambio: nextTipoCambio }));
     }
-  }, [draft.moneda, draft.fecha, monedasIndicadores]);
+  }, [lineDraft.moneda, draft.fecha, monedasIndicadores]);
 
   const nextNumber = () => {
     const max = comprobantes.reduce((acc, item) => Math.max(acc, Number(item.numero) || 0), 0);
@@ -9293,11 +9299,9 @@ const ComprobantesContables = () => {
     const next = {
       ...emptyVoucher(nextNumber()),
       unidadNegocio: unidadNegocioOptions[0] || currentEmpresa?.razonSocial || 'Casa Matriz',
-      moneda: monedaOptions[0] || 'CLP - Peso Chileno',
-      tipoCambio: lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1,
     };
     setDraft(next);
-    setLineDraft(emptyVoucherLine(1));
+    setLineDraft(defaultLine(1));
     setEditingLineId('');
     setMode('edit');
     setNotice('');
@@ -9310,7 +9314,7 @@ const ComprobantesContables = () => {
       detalles: (voucher.detalles || []).map((item, index) => ({ ...emptyVoucherLine(index + 1), ...item, numeroDetalle: index + 1 })),
     };
     setDraft(normalized);
-    setLineDraft(emptyVoucherLine((normalized.detalles || []).length + 1));
+    setLineDraft(defaultLine((normalized.detalles || []).length + 1));
     setEditingLineId('');
     setMode(nextMode);
     setNotice('');
@@ -9327,7 +9331,7 @@ const ComprobantesContables = () => {
           item.id === editingLineId ? { ...lineDraft, id: editingLineId, glosa: lineDraft.glosa || draft.glosa } : item
         ).map((item, index) => ({ ...item, numeroDetalle: index + 1 })),
       }));
-      setLineDraft(emptyVoucherLine((draft.detalles || []).length + 1));
+      setLineDraft(defaultLine((draft.detalles || []).length + 1));
       setEditingLineId('');
       setNotice('Linea actualizada.');
       return;
@@ -9335,7 +9339,7 @@ const ComprobantesContables = () => {
     const index = (draft.detalles || []).length + 1;
     const nextLine = { ...lineDraft, id: lineDraft.id || `line-${Date.now()}`, numeroDetalle: index, glosa: lineDraft.glosa || draft.glosa };
     setDraft(prev => ({ ...prev, detalles: [...(prev.detalles || []), nextLine] }));
-    setLineDraft(emptyVoucherLine(index + 1));
+    setLineDraft(defaultLine(index + 1));
     setNotice('Linea agregada al comprobante.');
   };
 
@@ -9346,7 +9350,7 @@ const ComprobantesContables = () => {
     }));
     if (editingLineId === lineId) {
       setEditingLineId('');
-      setLineDraft(emptyVoucherLine((draft.detalles || []).length));
+      setLineDraft(defaultLine((draft.detalles || []).length));
     }
   };
 
@@ -9358,7 +9362,7 @@ const ComprobantesContables = () => {
 
   const cancelLineEdit = () => {
     setEditingLineId('');
-    setLineDraft(emptyVoucherLine((draft.detalles || []).length + 1));
+    setLineDraft(defaultLine((draft.detalles || []).length + 1));
     setNotice('');
   };
 
@@ -9404,8 +9408,8 @@ const ComprobantesContables = () => {
     const tipoDoc = tipoDocumentoOptions[0] || 'Factura';
     const auxiliar = auxiliarOptions[0] || '';
     const sampleRows = [
-      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, monedaOptions[0] || 'CLP - Peso Chileno', lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(firstCuenta).code, firstCuenta, 'Linea debe ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 100000, 0],
-      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, monedaOptions[0] || 'CLP - Peso Chileno', lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(secondCuenta).code, secondCuenta, 'Linea haber ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, 0, 100000],
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(firstCuenta).code, firstCuenta, 'Linea debe ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, monedaOptions[0] || 'CLP - Peso Chileno', lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1, '', 100000, 0],
+      ['Traspaso', String(next).padStart(4, '0'), accountingDate(), 'Ambas', unidad, 'Contabilizado', 'Ejemplo carga masiva libro diario', splitAccount(secondCuenta).code, secondCuenta, 'Linea haber ejemplo', `${tipoDoc} - 1001`, tipoDoc, '1001', accountingDate(), auxiliar, centro, monedaOptions[0] || 'CLP - Peso Chileno', lookupTipoCambio(monedaOptions[0] || 'CLP - Peso Chileno', accountingDate()) || 1, '', 0, 100000],
     ];
     const ws = XLSX.utils.aoa_to_sheet([VOUCHER_BULK_TEMPLATE_HEADERS, ...sampleRows]);
     ws['!cols'] = VOUCHER_BULK_TEMPLATE_HEADERS.map(header => ({ wch: Math.max(16, header.length + 2) }));
@@ -9461,8 +9465,6 @@ const ComprobantesContables = () => {
           tipoComprobante: tipo,
           numero: String(numero),
           unidadNegocio: keyFor(row, ['unidad de negocio', 'unidad negocio', 'unidad']) || unidadNegocioOptions[0] || 'Casa Matriz',
-          moneda: keyFor(row, ['moneda', 'codigo moneda']) || monedaOptions[0] || 'CLP - Peso Chileno',
-          tipoCambio: keyFor(row, ['tipo de cambio', 'tipo cambio']) || lookupTipoCambio(keyFor(row, ['moneda', 'codigo moneda']) || monedaOptions[0] || 'CLP - Peso Chileno', fecha) || 1,
           fecha,
           documento,
           glosa: glosaComprobante,
@@ -9480,6 +9482,9 @@ const ComprobantesContables = () => {
         tipoDocumento,
         numeroDocumento,
         fechaDocumento: excelDateToIso(keyFor(row, ['fecha documento']) || fecha, fecha),
+        moneda: keyFor(row, ['moneda', 'codigo moneda']) || monedaOptions[0] || 'CLP - Peso Chileno',
+        tipoCambio: keyFor(row, ['tipo de cambio', 'tipo cambio']) || lookupTipoCambio(keyFor(row, ['moneda', 'codigo moneda']) || monedaOptions[0] || 'CLP - Peso Chileno', fecha) || 1,
+        valorMonedaExtranjera: keyFor(row, ['valor en moneda extranjera', 'valor moneda extranjera', 'valor me']),
         debe,
         haber,
         documentoAsociado,
@@ -9534,15 +9539,6 @@ const ComprobantesContables = () => {
               options={unidadNegocioOptions}
               placeholder={unidadNegocioOptions.length ? 'Seleccionar unidad' : 'Sin unidades creadas'}
             />
-            <ComboInput
-              label="Moneda"
-              disabled={readOnly}
-              value={draft.moneda}
-              onChange={e => updateDraft('moneda', e.target.value)}
-              options={monedaOptions}
-              placeholder={monedaOptions.length ? 'Seleccionar moneda' : 'Sin monedas creadas'}
-            />
-            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo de cambio</span><input disabled={readOnly} inputMode="decimal" value={draft.tipoCambio} onChange={e => updateDraft('tipoCambio', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Fecha contable</span><input type="date" disabled={readOnly} value={draft.fecha} onChange={e => updateDraft('fecha', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="md:col-span-2 xl:col-span-4 space-y-1"><span className="text-xs font-semibold text-slate-600">Glosa</span><textarea disabled={readOnly} value={draft.glosa} onChange={e => updateDraft('glosa', e.target.value)} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" /></label>
           </div>
@@ -9569,6 +9565,16 @@ const ComprobantesContables = () => {
               options={centroCostoOptions}
               placeholder={centroCostoOptions.length ? 'Seleccionar centro' : 'Sin centros creados'}
             />
+            <ComboInput
+              label="Moneda"
+              disabled={readOnly}
+              value={lineDraft.moneda}
+              onChange={e => updateLine('moneda', e.target.value)}
+              options={monedaOptions}
+              placeholder={monedaOptions.length ? 'Seleccionar moneda' : 'Sin monedas creadas'}
+            />
+            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Tipo de cambio</span><input disabled={readOnly} inputMode="decimal" value={lineDraft.tipoCambio} onChange={e => updateLine('tipoCambio', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+            <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Valor en moneda extranjera</span><input disabled={readOnly} inputMode="decimal" value={lineDraft.valorMonedaExtranjera} onChange={e => updateLine('valorMonedaExtranjera', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Debe</span><input disabled={readOnly} inputMode="numeric" value={lineDraft.debe} onChange={e => updateLine('debe', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             <label className="space-y-1"><span className="text-xs font-semibold text-slate-600">Haber</span><input disabled={readOnly} inputMode="numeric" value={lineDraft.haber} onChange={e => updateLine('haber', e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
           </div>
@@ -9610,9 +9616,9 @@ const ComprobantesContables = () => {
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr><th className="p-3 text-left">N</th><th className="p-3 text-left">Cuenta contable</th><th className="p-3 text-left">Centro costo</th><th className="p-3 text-left">Documento</th><th className="p-3 text-left">Auxiliar</th><th className="p-3 text-left">Glosa</th><th className="p-3 text-right">Debe</th><th className="p-3 text-right">Haber</th><th className="p-3"></th></tr></thead><tbody>
-            {(draft.detalles || []).map(item => (<tr key={item.id} className={`border-t border-slate-100 ${editingLineId === item.id ? 'bg-blue-50/50' : ''}`}><td className="p-3 font-mono">{item.numeroDetalle}</td><td className="p-3">{item.cuentaContable || '-'}</td><td className="p-3">{item.centroCosto || '-'}</td><td className="p-3">{[item.tipoDocumento, item.numeroDocumento].filter(Boolean).join(' ') || '-'}</td><td className="p-3">{item.auxiliar || '-'}</td><td className="p-3 max-w-xs truncate">{item.glosa || '-'}</td><td className="p-3 text-right font-mono">{money(item.debe)}</td><td className="p-3 text-right font-mono">{money(item.haber)}</td><td className="p-3 text-right whitespace-nowrap">{!readOnly && <button onClick={() => editLine(item)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Modificar linea"><Pencil size={15}/></button>}{!readOnly && <button onClick={() => removeLine(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Eliminar linea"><Trash2 size={15}/></button>}</td></tr>))}
-            {(!draft.detalles || draft.detalles.length === 0) && (<tr><td colSpan="9" className="p-8 text-center text-sm text-slate-400">Agrega lineas para construir el comprobante.</td></tr>)}
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr><th className="p-3 text-left">N</th><th className="p-3 text-left">Cuenta contable</th><th className="p-3 text-left">Centro costo</th><th className="p-3 text-left">Documento</th><th className="p-3 text-left">Auxiliar</th><th className="p-3 text-left">Moneda</th><th className="p-3 text-right">T/C</th><th className="p-3 text-right">Valor ME</th><th className="p-3 text-left">Glosa</th><th className="p-3 text-right">Debe</th><th className="p-3 text-right">Haber</th><th className="p-3"></th></tr></thead><tbody>
+            {(draft.detalles || []).map(item => (<tr key={item.id} className={`border-t border-slate-100 ${editingLineId === item.id ? 'bg-blue-50/50' : ''}`}><td className="p-3 font-mono">{item.numeroDetalle}</td><td className="p-3">{item.cuentaContable || '-'}</td><td className="p-3">{item.centroCosto || '-'}</td><td className="p-3">{[item.tipoDocumento, item.numeroDocumento].filter(Boolean).join(' ') || '-'}</td><td className="p-3">{item.auxiliar || '-'}</td><td className="p-3">{item.moneda || '-'}</td><td className="p-3 text-right font-mono">{item.tipoCambio || '-'}</td><td className="p-3 text-right font-mono">{item.valorMonedaExtranjera || '-'}</td><td className="p-3 max-w-xs truncate">{item.glosa || '-'}</td><td className="p-3 text-right font-mono">{money(item.debe)}</td><td className="p-3 text-right font-mono">{money(item.haber)}</td><td className="p-3 text-right whitespace-nowrap">{!readOnly && <button onClick={() => editLine(item)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Modificar linea"><Pencil size={15}/></button>}{!readOnly && <button onClick={() => removeLine(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Eliminar linea"><Trash2 size={15}/></button>}</td></tr>))}
+            {(!draft.detalles || draft.detalles.length === 0) && (<tr><td colSpan="12" className="p-8 text-center text-sm text-slate-400">Agrega lineas para construir el comprobante.</td></tr>)}
           </tbody></table></div>
         </div>
       </div>
