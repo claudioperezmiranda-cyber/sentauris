@@ -1,0 +1,3 @@
+ALTER TABLE orden_repuestos
+  ADD COLUMN IF NOT EXISTS garantia BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS origen_garantia_folio TEXT;

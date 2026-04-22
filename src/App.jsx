@@ -1,11 +1,11 @@
-import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
+﻿import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, User, ClipboardList, TrendingUp, FileText, Users, LogOut,
   Search, Bell, ChevronLeft, Wrench, CheckCircle2, AlertCircle,
   Mail, FileDown, Camera, Trash2, Cpu, Database, Upload, Download,
   FileSpreadsheet, X, CheckCircle, AlertTriangle, Plus, Pencil,
-  Lock, Eye, EyeOff, ShieldAlert, Settings, MoreVertical
+  Lock, Eye, EyeOff, ShieldAlert, Settings, MoreVertical, ArrowUpDown
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
@@ -15,6 +15,7 @@ const APP_NAME = "Sentauris ERP";
 
 const MOCK_USER = {
   id: 'u1', name: 'Arquitecto Senior', email: 'admin@sentauris.cl',
+  rut: '',
   role: 'Superadmin', position: 'Director de Operaciones',
   avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'
 };
@@ -105,14 +106,55 @@ const GENERIC_PREVENTIVE_PROTOCOL = {
   ],
 };
 
-const getPreventiveProtocol = (tipoEquipo = '') => {
+const cloneProtocol = (protocol) => JSON.parse(JSON.stringify(protocol));
+const PREVENTIVE_PROTOCOL_KEYS = [
+  { id: 'camas', label: 'Camas', match: ['cama', 'camilla', 'mubi'] },
+  { id: 'monitores', label: 'Monitores', match: ['monitor', 'multiparametro', 'signosvitales'] },
+  { id: 'lamparas', label: 'Lamparas', match: ['lampara', 'quirurgica'] },
+  { id: 'otros', label: 'Otros', match: [] },
+];
+const defaultPreventiveProtocolByKey = (key) => cloneProtocol({
+  camas: PREVENTIVE_PROTOCOLS.camas,
+  monitores: PREVENTIVE_PROTOCOLS.monitores,
+  lamparas: PREVENTIVE_PROTOCOLS.lamparas,
+  otros: GENERIC_PREVENTIVE_PROTOCOL,
+}[key] || GENERIC_PREVENTIVE_PROTOCOL);
+const defaultPreventiveProtocolsConfig = () => PREVENTIVE_PROTOCOL_KEYS.reduce((acc, item) => {
+  acc[item.id] = defaultPreventiveProtocolByKey(item.id);
+  return acc;
+}, {});
+const normalizeProtocolCriticidad = (value) => normalizeKey(value) === 'critico' ? 'Critico' : 'No critico';
+const protocolItemLabel = (item) => typeof item === 'string' ? item : (item?.label || item?.name || item?.item || '');
+const protocolItemCriticidad = (item) => typeof item === 'object' && item ? normalizeProtocolCriticidad(item.criticidad) : 'No critico';
+const protocolItemRequired = (item) => typeof item === 'object' && item ? Boolean(item.obligatorio ?? item.required) : false;
+const preventiveProtocolKeyFor = (tipoEquipo = '') => {
   const key = normalizeKey(tipoEquipo);
-  if (key.includes('ventilador')) return PREVENTIVE_PROTOCOLS.ventilador;
-  if (key.includes('monitor') || key.includes('multiparametro') || key.includes('signosvitales')) return PREVENTIVE_PROTOCOLS.monitores;
-  if (key.includes('columna') || key.includes('gases') || key.includes('flange') || key.includes('vastago')) return PREVENTIVE_PROTOCOLS.columnas;
-  if (key.includes('lampara') || key.includes('quirurgica')) return PREVENTIVE_PROTOCOLS.lamparas;
-  if (key.includes('cama') || key.includes('camilla') || key.includes('mubi')) return PREVENTIVE_PROTOCOLS.camas;
-  return GENERIC_PREVENTIVE_PROTOCOL;
+  if (key.includes('monitor') || key.includes('multiparametro') || key.includes('signosvitales')) return 'monitores';
+  if (key.includes('lampara') || key.includes('quirurgica')) return 'lamparas';
+  if (key.includes('cama') || key.includes('camilla') || key.includes('mubi')) return 'camas';
+  return 'otros';
+};
+const normalizePreventiveProtocol = (protocol, key = 'otros') => {
+  const fallback = defaultPreventiveProtocolByKey(key);
+  return {
+    title: protocol?.title || fallback.title,
+    sections: Array.isArray(protocol?.sections) && protocol.sections.length > 0
+      ? protocol.sections.map(section => ({
+          section: section.section || 'Seccion',
+          items: Array.isArray(section.items)
+            ? section.items.map(item => ({
+                label: protocolItemLabel(item),
+                criticidad: protocolItemCriticidad(item),
+                obligatorio: protocolItemRequired(item),
+              })).filter(item => item.label)
+            : [],
+        }))
+      : fallback.sections,
+  };
+};
+const getPreventiveProtocol = (tipoEquipo = '', customProtocols = {}) => {
+  const protocolKey = preventiveProtocolKeyFor(tipoEquipo);
+  return normalizePreventiveProtocol(customProtocols?.[protocolKey], protocolKey);
 };
 
 const looksLikeEmail = (value) => String(value || '').includes('@');
@@ -151,6 +193,20 @@ const normalizeCliente = (cliente) => cliente ? ({
   email: cliente.email ?? cliente.email_institucional ?? cliente.Email_Institucional ?? (looksLikeEmail(cliente.Email) ? cliente.Email : ''),
   encargado_contrato: cliente.encargado_contrato ?? cliente.Encargado_Contrato ?? '',
   email_contacto: cliente.email_contacto ?? (looksLikeTimestamp(cliente.Email_contacto) ? '' : cliente.Email_contacto ?? ''),
+  direccionPrincipal: cliente.direccionPrincipal || cliente.direccion_principal || '',
+  comuna: cliente.comuna || '',
+  ciudad: cliente.ciudad || '',
+  region: cliente.region || '',
+  pais: cliente.pais || 'Chile',
+  telefono: cliente.telefono || '',
+  giro: cliente.giro || '',
+  nombreFantasia: cliente.nombreFantasia || cliente.nombre_fantasia || '',
+  tipoCliente: cliente.tipoCliente || cliente.tipo_cliente || 'No',
+  tipoProveedor: cliente.tipoProveedor || cliente.tipo_proveedor || 'No',
+  correoSii: cliente.correoSii || cliente.correo_sii || '',
+  correoComercial: cliente.correoComercial || cliente.correo_comercial || '',
+  plazoPago: cliente.plazoPago || cliente.plazo_pago || '',
+  sucursales: cliente.sucursales || [],
 }) : cliente;
 
 const clienteBasePayload = (data) => ({
@@ -161,8 +217,22 @@ const clienteBasePayload = (data) => ({
 
 const clienteFullPayload = (data) => ({
   ...clienteBasePayload(data),
-  Encargado_Contrato: data.encargado_contrato || null,
-  Email_contacto:     data.email_contacto     || data.email || null,
+  Encargado_Contrato:     data.encargado_contrato || null,
+  Email_contacto:         data.email_contacto     || data.email || null,
+  direccion_principal:    data.direccionPrincipal || data.direccion_principal || null,
+  comuna:                 data.comuna             || null,
+  ciudad:                 data.ciudad             || null,
+  region:                 data.region             || null,
+  pais:                   data.pais               || null,
+  telefono:               data.telefono           || null,
+  giro:                   data.giro               || null,
+  nombre_fantasia:        data.nombreFantasia     || data.nombre_fantasia || null,
+  tipo_cliente:           data.tipoCliente        || null,
+  tipo_proveedor:         data.tipoProveedor      || null,
+  correo_sii:             data.correoSii          || null,
+  correo_comercial:       data.correoComercial    || null,
+  plazo_pago:             data.plazoPago          || null,
+  sucursales:             data.sucursales?.length ? data.sucursales : null,
 });
 
 const clienteExtendedPayload = (data) => ({
@@ -178,20 +248,59 @@ const createEmptyFormData = () => ({
   ubicacionArea: '', solicitadoPor: '', tipoMantencion: '',
   preventivaChecklist: {}, preventivaObservaciones: '',
   preventivaEstadoEquipo: '', preventivaFirma: '',
+  preventivaFirmaRecepcion: '', preventivaRecibidoPor: '', preventivaCargoRecepcion: '',
   correctivaCondicionInicial: '', correctivaDiagnostico: '',
   correctivaConclusion: '', correctivaCondicionFinal: '',
-  correctivaFotos: [], correctivaFirma: '', correctivaRepuestos: []
+  correctivaFotos: [], correctivaFirma: '', correctivaRepuestos: [],
+  correctivaEstadoInterno: '', correctivaFirmaRecepcion: '',
+  correctivaRecibidoPor: '', correctivaCargoRecepcion: '',
+  correctivaGarantiaContrato: false, correctivaOrigenGarantiaFolio: ''
 });
 
 const PREVENTIVA_OBS_PREFIX = '__PREVENTIVA_JSON__';
 const CORRECTIVA_OBS_PREFIX = '__CORRECTIVA_JSON__';
+const DEFAULT_CORRECTIVA_CONCLUSION_PROMPT = 'Redacta la conclusion como un analisis causal tecnico del daño del repuesto o componente asociado a la falla. Explica la causa probable, el efecto sobre el funcionamiento del equipo y una solucion tecnica concreta. Usa un tono profesional y natural, sin citar textualmente el hallazgo ni mencionar instrucciones internas.';
+const PERM_MODIFICAR_CORRECTIVA_EJECUTADA = 'perm-modificar-correctiva-ejecutada';
 const DEFAULT_CONDICION_FINAL_CORRECTIVA = 'Tras la ejecución de las pruebas funcionales pertinentes, se constató que el equipo opera conforme a lo especificado, lo que confirma su operatividad.';
+const DEFAULT_ESTADOS_INTERNOS_CORRECTIVA = ['Ingresado', 'Garantía', 'En revisión', 'En reparación', 'Esperando Repuestos', 'Listo para Entrega', 'Ejecutado'];
 
-const buildPreventivaObservaciones = ({ observaciones, checklist, firma }) =>
+const normalizeEstadoInterno = (value) => String(value || '').trim();
+const dedupeByNormalizedText = (values = []) => {
+  const seen = new Set();
+  return values
+    .map(value => String(value || '').trim())
+    .filter(value => {
+      const key = normalizeKey(value);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+const ensureDefaultEstadosInternos = (values = [], { preserveEmpty = false } = {}) => {
+  const source = Array.isArray(values) && values.length > 0 ? values : DEFAULT_ESTADOS_INTERNOS_CORRECTIVA;
+  const merged = [...source, 'Ejecutado']
+    .map(value => preserveEmpty ? String(value ?? '') : normalizeEstadoInterno(value));
+  const seen = new Set();
+  return merged.filter(value => {
+    const key = normalizeKey(value);
+    if (!key) return preserveEmpty;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+const isEstadoEjecutado = (value) => normalizeKey(value) === 'ejecutado';
+
+const buildPreventivaObservaciones = ({ observaciones, checklist, firma, firmaRecepcion, recibidoPor, cargoRecepcion, tecnicoNombre, tecnicoRut }) =>
   `${PREVENTIVA_OBS_PREFIX}${JSON.stringify({
     observaciones: observaciones || '',
     checklist: checklist || {},
-    firma: firma || ''
+    firma: firma || '',
+    firmaRecepcion: firmaRecepcion || '',
+    recibidoPor: recibidoPor || '',
+    cargoRecepcion: cargoRecepcion || '',
+    tecnicoNombre: tecnicoNombre || '',
+    tecnicoRut: tecnicoRut || ''
   })}`;
 
 const parsePreventivaObservaciones = (value = '') => {
@@ -202,23 +311,72 @@ const parsePreventivaObservaciones = (value = '') => {
       return {
         observaciones: parsed.observaciones || '',
         checklist: parsed.checklist && typeof parsed.checklist === 'object' ? parsed.checklist : {},
-        firma: parsed.firma || ''
+        firma: parsed.firma || '',
+        firmaRecepcion: parsed.firmaRecepcion || '',
+        recibidoPor: parsed.recibidoPor || '',
+        cargoRecepcion: parsed.cargoRecepcion || '',
+        tecnicoNombre: parsed.tecnicoNombre || '',
+        tecnicoRut: parsed.tecnicoRut || ''
       };
     } catch {
-      return { observaciones: text, checklist: {}, firma: '' };
+      return { observaciones: text, checklist: {}, firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', tecnicoNombre: '', tecnicoRut: '' };
     }
   }
-  return { observaciones: text, checklist: {}, firma: '' };
+  return { observaciones: text, checklist: {}, firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', tecnicoNombre: '', tecnicoRut: '' };
 };
 
-const buildCorrectivaObservaciones = ({ condicionInicial, diagnostico, conclusion, condicionFinal, fotos, firma }) =>
+const normalizePreventiveChecklistEntry = (value) => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const estado = String(value.estado || '').trim();
+    const criticidad = normalizeKey(value.criticidad) === 'critico' ? 'Critico' : 'No critico';
+    return {
+      criticidad,
+      estado,
+      falla: criticidad === 'Critico' && estado === 'No' ? Boolean(value.falla) : false,
+    };
+  }
+  const legacyEstado = String(value || '').trim();
+  return {
+    criticidad: 'No critico',
+    estado: legacyEstado === 'Falla' ? 'No' : legacyEstado,
+    falla: legacyEstado === 'Falla',
+  };
+};
+
+const preventiveEntryMatches = (value, status) => {
+  const entry = normalizePreventiveChecklistEntry(value);
+  if (status === 'Falla') return entry.falla;
+  return entry.estado === status;
+};
+
+const preventiveChecklistEstadoForDb = (value) => {
+  const entry = normalizePreventiveChecklistEntry(value);
+  if (!entry.estado) return '';
+  if (entry.falla) return 'Falla';
+  return entry.estado;
+};
+
+const derivePreventiveFinalStatus = (checklist = {}) => {
+  const entries = Object.values(checklist).map(normalizePreventiveChecklistEntry);
+  if (entries.some(entry => entry.criticidad === 'Critico' && entry.estado === 'No' && entry.falla)) return 'No Operativo';
+  if (entries.some(entry => entry.estado === 'No')) return 'Operativo con Obs.';
+  return 'Operativo';
+};
+
+const buildCorrectivaObservaciones = ({ condicionInicial, diagnostico, conclusion, condicionFinal, fotos, firma, firmaRecepcion, recibidoPor, cargoRecepcion, garantiaContrato, origenGarantiaFolio, repuestosGarantia }) =>
   `${CORRECTIVA_OBS_PREFIX}${JSON.stringify({
     condicionInicial: condicionInicial || '',
     diagnostico: diagnostico || '',
     conclusion: conclusion || '',
     condicionFinal: condicionFinal || '',
     fotos: Array.isArray(fotos) ? fotos : [],
-    firma: firma || ''
+    firma: firma || '',
+    firmaRecepcion: firmaRecepcion || '',
+    recibidoPor: recibidoPor || '',
+    cargoRecepcion: cargoRecepcion || '',
+    garantiaContrato: Boolean(garantiaContrato),
+    origenGarantiaFolio: origenGarantiaFolio || '',
+    repuestosGarantia: Array.isArray(repuestosGarantia) ? repuestosGarantia : []
   })}`;
 
 const parseCorrectivaObservaciones = (value = '') => {
@@ -232,14 +390,20 @@ const parseCorrectivaObservaciones = (value = '') => {
         conclusion: parsed.conclusion || '',
         condicionFinal: parsed.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA,
         fotos: Array.isArray(parsed.fotos) ? parsed.fotos : [],
-        firma: parsed.firma || ''
+        firma: parsed.firma || '',
+        firmaRecepcion: parsed.firmaRecepcion || '',
+        recibidoPor: parsed.recibidoPor || '',
+        cargoRecepcion: parsed.cargoRecepcion || '',
+        garantiaContrato: Boolean(parsed.garantiaContrato),
+        origenGarantiaFolio: parsed.origenGarantiaFolio || '',
+        repuestosGarantia: Array.isArray(parsed.repuestosGarantia) ? parsed.repuestosGarantia : []
       };
     } catch {
-      return { condicionInicial: '', diagnostico: text, conclusion: '', condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], firma: '' };
+      return { condicionInicial: '', diagnostico: text, conclusion: '', condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', garantiaContrato: false, origenGarantiaFolio: '', repuestosGarantia: [] };
     }
   }
   const [condicionInicial = '', diagnostico = '', conclusion = ''] = text.split(/\n{2,}/);
-  return { condicionInicial, diagnostico, conclusion, condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], firma: '' };
+  return { condicionInicial, diagnostico, conclusion, condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', garantiaContrato: false, origenGarantiaFolio: '', repuestosGarantia: [] };
 };
 
 const correctivaText = (data) =>
@@ -251,6 +415,55 @@ const htmlText = (value = '') =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br/>');
+
+const formatPdfDate = (value = '') => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
+
+const reportVerificationUrl = (tipo = 'preventiva', orden = {}) => {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const params = new URLSearchParams({ verify: tipo });
+  if (orden.id) params.set('orden', orden.id);
+  if (orden.folio) params.set('folio', orden.folio);
+  return `${origin}/?${params.toString()}`;
+};
+
+const preventiveVerificationUrl = (orden = {}) => reportVerificationUrl('preventiva', orden);
+
+const qrImageUrl = (value = '') =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=132x132&margin=8&data=${encodeURIComponent(value)}`;
+
+const normalizeEquipmentMatchValue = (value = '') =>
+  normalizeKey(String(value || '').replace(/\s+/g, ' ').trim());
+
+const sameEquipmentIdentity = (source = {}, target = {}) =>
+  normalizeEquipmentMatchValue(source.tipo_equipo ?? source.tipoEquipo) === normalizeEquipmentMatchValue(target.tipo_equipo ?? target.tipoEquipo) &&
+  normalizeEquipmentMatchValue(source.marca) === normalizeEquipmentMatchValue(target.marca) &&
+  normalizeEquipmentMatchValue(source.modelo) === normalizeEquipmentMatchValue(target.modelo) &&
+  normalizeEquipmentMatchValue(source.numero_serie ?? source.numeroSerie) === normalizeEquipmentMatchValue(target.numero_serie ?? target.numeroSerie) &&
+  normalizeEquipmentMatchValue(source.numero_inventario ?? source.numeroInventario) === normalizeEquipmentMatchValue(target.numero_inventario ?? target.numeroInventario);
+
+const addMonthsToIsoDate = (value = '', months = 0) => {
+  const date = new Date(`${String(value || '').slice(0, 10)}T12:00:00`);
+  const amount = Number(months) || 0;
+  if (!value || Number.isNaN(date.getTime()) || amount <= 0) return '';
+  const day = date.getDate();
+  date.setMonth(date.getMonth() + amount);
+  if (date.getDate() !== day) date.setDate(0);
+  return date.toISOString().slice(0, 10);
+};
+
+const dateWithinWarranty = (sourceDate = '', targetDate = '', months = 0) => {
+  const endDate = addMonthsToIsoDate(sourceDate, months);
+  const checkDate = String(targetDate || new Date().toISOString()).slice(0, 10);
+  return Boolean(endDate && checkDate >= String(sourceDate || '').slice(0, 10) && checkDate <= endDate);
+};
 
 const readLocalObj = (key, fallback = null) => {
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
@@ -264,6 +477,112 @@ const readLocalList = (key) => {
   }
 };
 
+const normalizeUsuario = (u) => u ? ({
+  ...u,
+  accesos: Array.isArray(u.accesos) ? u.accesos : [],
+  permisosEmpresas: u.permisosEmpresas || u.permisos_empresas || {},
+}) : u;
+
+const normalizeUsuarios = (rows = []) => rows.map(normalizeUsuario);
+
+const usuarioPayload = (data, { includeId = true } = {}) => {
+  const payload = {
+    usuario: String(data.usuario || '').trim().toLowerCase(),
+    nombre: String(data.nombre || '').trim(),
+    rut: String(data.rut || '').trim(),
+    cargo: data.cargo || '',
+    contrasena: data.contrasena || '',
+    accesos: Array.isArray(data.accesos) ? data.accesos : [],
+    permisos_empresas: data.permisosEmpresas || data.permisos_empresas || {},
+  };
+  if (includeId && data.id) payload.id = data.id;
+  return payload;
+};
+
+const insertUsuario = async (data) => {
+  const basePayload = usuarioPayload(data, { includeId: false });
+  let res = await supabaseRequest(() => supabase.from('usuarios').insert([basePayload]).select().single());
+  if (!res.error) return res;
+
+  const fallbackPayload = usuarioPayload({ ...data, id: data.id || crypto.randomUUID() }, { includeId: true });
+  return supabaseRequest(() => supabase.from('usuarios').insert([fallbackPayload]).select().single());
+};
+
+const upsertLocalUsuariosToSupabase = async (remoteUsuarios = []) => {
+  const localUsuarios = readLocalList('sentauris_usuarios').map(normalizeUsuario);
+  if (localUsuarios.length === 0) return { migrated: 0, error: null };
+
+  const remoteKeys = new Set(remoteUsuarios.map(u => normalizeKey(u.usuario)));
+  const pending = localUsuarios.filter(u => u?.usuario && !remoteKeys.has(normalizeKey(u.usuario)));
+  let migrated = 0;
+
+  for (const localUser of pending) {
+    const payload = usuarioPayload({
+      ...localUser,
+      accesos: localUser.accesos || [],
+      permisosEmpresas: localUser.permisosEmpresas || {},
+    }, { includeId: false });
+    const { error } = await supabaseRequest(() =>
+      supabase.from('usuarios').upsert([payload], { onConflict: 'usuario' })
+    );
+    if (error) return { migrated, error };
+    migrated += 1;
+  }
+
+  if (migrated > 0) localStorage.removeItem('sentauris_usuarios');
+  return { migrated, error: null };
+};
+
+const PARAMETROS_ROW_ID = 'global';
+
+const loadParametrosFromSupabase = async () => {
+  const { data, error } = await supabaseRequest(() =>
+    supabase.from('parametros').select('data').eq('id', PARAMETROS_ROW_ID).maybeSingle()
+  );
+  if (error) return { data: null, error };
+  return { data: data?.data || null, error: null };
+};
+
+const saveParametrosToSupabase = async (data) => supabaseRequest(() =>
+  supabase.from('parametros').upsert([{
+    id: PARAMETROS_ROW_ID,
+    data: data || {},
+    updated_at: new Date().toISOString(),
+  }], { onConflict: 'id' }).select().single()
+);
+
+const migrateLocalParametrosToSupabase = async () => {
+  const localParametros = readLocalObj('sentauris_parametros');
+  if (!localParametros) return { data: null, error: null };
+  const { error } = await saveParametrosToSupabase(localParametros);
+  return { data: localParametros, error };
+};
+
+const APP_DATA_KEYS = {
+  cotizaciones_historial: 'sentauris_cotizaciones_historial',
+  oc_recibidas: 'sentauris_oc_recibidas',
+  rendiciones: 'sentauris_rendiciones',
+  comprobantes: 'sentauris_comprobantes',
+  registro_compras: 'sentauris_registro_compras',
+  empresas: 'sentauris_empresas',
+  plan_cuentas: 'sentauris_plan_cuentas',
+  tipo_documentos: 'sentauris_tipo_docs',
+  abastecimiento_documentos: 'sentauris_abastecimiento_documentos',
+  protocolos_preventivos: 'sentauris_protocolos_preventivos',
+};
+
+const loadAppDataFromSupabase = async (keys) => supabaseRequest(() =>
+  supabase.from('app_data').select('key, data').in('key', keys)
+);
+
+const saveAppDataToSupabase = async (key, data) => supabaseRequest(() =>
+  supabase.from('app_data').upsert([{
+    key,
+    data: data || [],
+    updated_at: new Date().toISOString(),
+  }], { onConflict: 'key' }).select().single()
+);
+
 const cotizacionLineTotal = (item) => {
   if (item.tipo === 'info') return 0;
   const subtotal = (Number(item.cantidad) || 0) * (Number(item.precio) || 0);
@@ -276,29 +595,52 @@ const cotizacionTotals = (items = []) => {
   return { neto, iva, total: neto + iva };
 };
 
-const buildCotizacionHtml = (draft) => {
+const nextCotizacionNumero = (cotizaciones = []) => {
+  const max = cotizaciones.reduce((acc, cotizacion) => {
+    const number = Number(String(cotizacion?.numero || '').replace(/\D/g, ''));
+    return Number.isFinite(number) ? Math.max(acc, number) : acc;
+  }, 0);
+  return String(max + 1).padStart(6, '0');
+};
+
+const clienteDireccion = (cliente = {}) =>
+  cliente.direccionPrincipal || cliente.direccion_principal || cliente.direccion || cliente.sucursalDireccion || cliente.sucursales?.[0]?.direccion || '';
+
+const clienteComuna = (cliente = {}) =>
+  cliente.comuna || cliente.sucursalComuna || cliente.sucursales?.[0]?.comuna || '';
+
+const clienteTelefono = (cliente = {}) =>
+  cliente.telefono || cliente.phone || cliente.fono || cliente.celular || '';
+
+const buildCotizacionHtml = (draft, empresaInforme = {}) => {
   const docTitle = draft.masiva ? 'Cotizacion Masiva' : 'Cotizacion';
   const detailsHtml = htmlText(draft.detalles || '');
   const { neto, iva, total } = cotizacionTotals(draft.items || []);
+  const empresaNombre = empresaInforme?.razonSocial || empresaInforme?.nombreFantasia || 'Vaicmedical';
+  const empresaRut = empresaInforme?.rut || empresaInforme?.RUT || '77.573.229-6';
+  const empresaGiro = empresaInforme?.giro || 'Mantencion y Reparacion de Equipos Medicos';
+  const empresaMail = empresaInforme?.correoContacto || empresaInforme?.email || 'servicios@vaicmedical.cl';
+  const empresaMembrete = empresaInforme?.membreteImagen || '/logo-vaic-pdf.jpeg';
   let printableItem = 0;
   return `
     <html><head><title>Cotizacion ${draft.numero || ''}</title><style>
-    body{font-family:Arial,sans-serif;padding:28px;color:#111827}.top{display:flex;justify-content:space-between;border-bottom:3px solid #111827;padding-bottom:12px}.brand{font-weight:800;font-size:20px}
-    .doc-title{text-align:right;text-transform:uppercase;letter-spacing:.06em}.badge{display:inline-block;margin-top:6px;border:1px solid #111827;padding:3px 8px;font-size:10px;font-weight:700}
+    body{font-family:Arial,sans-serif;padding:28px;color:#111827}.page{max-width:960px;margin:auto}.head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo-box{display:flex;align-items:center;justify-content:flex-start}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta{text-align:right;font-size:12px;line-height:1.5;color:#111827}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;color:#0f172a;margin-bottom:8px}
+    h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase;letter-spacing:.06em}.badge{display:inline-block;margin-top:6px;border:1px solid #111827;padding:3px 8px;font-size:10px;font-weight:700}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin:18px 0;font-size:12px}.intro{font-size:12px;margin:10px 0 4px}
     table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #cbd5e1;padding:7px;font-size:11px;vertical-align:top}th{background:#e5e7eb;text-transform:uppercase;font-size:10px}.info-row td{background:#f8fafc;color:#334155;font-size:10px;font-weight:700}.totals{margin-left:auto;width:260px;margin-top:12px}.obs{margin-top:16px;font-size:12px;line-height:1.45}.details{border:1px solid #cbd5e1;padding:10px;background:#f8fafc}
     .footer{margin-top:28px;border-top:1px solid #cbd5e1;padding-top:10px;font-size:10px;color:#475569}@media print{button{display:none}body{padding:12px}}
-    </style></head><body>
-    <div class="top"><div><div class="brand">VAICMEDICAL SPA</div><div>RUT: 77573229-6<br/>Compania 1068, Oficina 806, Santiago<br/>Telefono: 997021037</div></div><div class="doc-title"><h2>${docTitle}<br/>N ${draft.numero || ''}</h2>${draft.masiva ? '<span class="badge">Consolidado de informes</span>' : ''}</div></div>
-    <h3>Informacion del cliente</h3><div class="grid"><div><b>Sres.:</b> ${draft.cliente || ''}</div><div><b>Fecha Documento:</b> ${draft.fecha || ''}</div><div><b>Rut:</b> ${draft.rut || ''}</div><div><b>Vendedor:</b> ${draft.vendedor || ''}</div><div><b>Direccion:</b> ${draft.direccion || ''}</div><div><b>Comuna:</b> ${draft.comuna || ''}</div><div><b>Telefono:</b> ${draft.telefono || ''}</div><div><b>Solicitado por:</b> ${draft.solicitadoPor || ''}</div></div>
+    </style></head><body><div class="page">
+    <div class="head"><div class="logo-box"><img class="logo" src="${empresaMembrete}" alt="Membrete empresa"/></div><div class="company"><div class="brand">${htmlText(empresaNombre)}</div><div>RUT: ${htmlText(empresaRut)}</div><div>Giro: ${htmlText(empresaGiro)}</div><div>Correo: ${htmlText(empresaMail)}</div></div><div class="meta"><span class="folio-label">Cotizacion</span><span class="folio-value">${htmlText(draft.numero || '')}</span>Fecha: ${htmlText(formatPdfDate(draft.fecha))}</div></div>
+    <h1>${docTitle}</h1>${draft.masiva ? '<div style="text-align:right"><span class="badge">Consolidado de informes</span></div>' : ''}
+    <h3>Informacion del cliente</h3><div class="grid"><div><b>Sres.:</b> ${htmlText(draft.cliente || '')}</div><div><b>Fecha Documento:</b> ${htmlText(formatPdfDate(draft.fecha))}</div><div><b>Rut:</b> ${htmlText(draft.rut || '')}</div><div><b>Vendedor:</b> ${htmlText(draft.vendedor || '')}</div><div><b>Direccion:</b> ${htmlText(draft.direccion || '')}</div><div><b>Comuna:</b> ${htmlText(draft.comuna || '')}</div><div><b>Telefono:</b> ${htmlText(draft.telefono || '')}</div><div><b>Solicitado por:</b> ${htmlText(draft.solicitadoPor || '')}</div></div>
     <p class="intro">Tenemos el agrado de cotizar a usted lo siguiente:</p>
     <table><thead><tr><th>Item</th><th>Codigo</th><th>N de Parte</th><th>Descripcion</th><th>Unidad</th><th>Cantidad</th><th>Precio Unit.</th><th>Dcto</th><th>Total</th></tr></thead><tbody>
     ${(draft.items || []).map((item) => item.tipo === 'info'
       ? `<tr class="info-row"><td colspan="9">${htmlText(item.descripcion || '')}</td></tr>`
-      : `<tr><td>${++printableItem}</td><td>${item.codigo || ''}</td><td>${item.parte || ''}</td><td>${item.descripcion || ''}</td><td>${item.unidad || ''}</td><td>${item.cantidad || 0}</td><td>$${Number(item.precio || 0).toLocaleString('es-CL')}</td><td>${item.dcto || 0}</td><td>$${cotizacionLineTotal(item).toLocaleString('es-CL')}</td></tr>`).join('')}
+      : `<tr><td>${++printableItem}</td><td>${htmlText(item.codigo || '')}</td><td>${htmlText(item.parte || '')}</td><td>${htmlText(item.descripcion || '')}</td><td>${htmlText(item.unidad || '')}</td><td>${item.cantidad || 0}</td><td>$${Number(item.precio || 0).toLocaleString('es-CL')}</td><td>${item.dcto || 0}</td><td>$${cotizacionLineTotal(item).toLocaleString('es-CL')}</td></tr>`).join('')}
     </tbody></table>${detailsHtml ? `<div class="obs details"><b>Informes asociados</b><br/>${detailsHtml}</div>` : ''}
     <table class="totals"><tbody><tr><th>Neto</th><td>$${neto.toLocaleString('es-CL')}</td></tr><tr><th>Monto Exento</th><td>$0</td></tr><tr><th>I.V.A. (19%)</th><td>$${iva.toLocaleString('es-CL')}</td></tr><tr><th>Total</th><td>$${total.toLocaleString('es-CL')}</td></tr></tbody></table>
-    <div class="obs"><b>Observaciones</b><br/>Glosa: ${draft.glosa || ''}<br/>Referencia: ${draft.referencia || ''}</div><div class="footer">Cotizacion emitida por VAICMEDICAL SPA. Valores netos afectos a IVA, salvo indicacion contraria.</div><button onclick="window.print()">Imprimir / Guardar PDF</button></body></html>`;
+    <div class="obs"><b>Observaciones</b><br/>Glosa: ${htmlText(draft.glosa || '')}<br/>Referencia: ${htmlText(draft.referencia || '')}</div><div class="footer">Cotizacion emitida por ${htmlText(empresaNombre)}. Valores netos afectos a IVA, salvo indicacion contraria.</div><button onclick="window.print()">Imprimir / Guardar PDF</button></div></body></html>`;
 };
 
 const openHtmlDocument = (html) => {
@@ -321,7 +663,7 @@ const ERPProvider = ({ children }) => {
   const currentUser = loggedInUser
     ? (loggedInUser.isSuperadmin
         ? MOCK_USER
-        : { ...MOCK_USER, name: loggedInUser.nombre, position: loggedInUser.cargo })
+        : { ...MOCK_USER, id: loggedInUser.id, name: loggedInUser.nombre, email: loggedInUser.email || loggedInUser.usuario, rut: loggedInUser.rut || '', position: loggedInUser.cargo })
     : MOCK_USER;
   const [activeModule, setActiveModule] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -340,9 +682,14 @@ const ERPProvider = ({ children }) => {
   const [activeEmpresaId, setActiveEmpresaId] = useState(() => localStorage.getItem('sentauris_active_empresa') || '');
   const [planCuentas, setPlanCuentas] = useState(() => readLocalList('sentauris_plan_cuentas'));
   const [tipoDocumentos, setTipoDocumentos] = useState(() => readLocalList('sentauris_tipo_docs'));
-  const [parametros, setParametros] = useState(() => readLocalObj('sentauris_parametros'));
+  const [parametros, setParametrosState] = useState(() => readLocalObj('sentauris_parametros'));
+  const [protocolosPreventivos, setProtocolosPreventivos] = useState(() => ({
+    ...defaultPreventiveProtocolsConfig(),
+    ...(readLocalObj('sentauris_protocolos_preventivos') || {}),
+  }));
   const [loading, setLoading] = useState(true);
   const [dbStatus, setDbStatus] = useState('connecting'); // 'connecting' | 'ok' | 'error'
+  const appDataLoadedRef = useRef(false);
 
   const [formData, setFormData] = useState(createEmptyFormData);
 
@@ -368,15 +715,69 @@ const ERPProvider = ({ children }) => {
           console.error('Error Supabase:', e1 || e2 || e3 || e4 || e5);
           setDbStatus('error');
         } else {
+          const remoteUsuarios = normalizeUsuarios(usuariosData || []);
+          const migration = await upsertLocalUsuariosToSupabase(remoteUsuarios);
+          if (migration.error) {
+            console.error('Error migrando usuarios locales a Supabase:', migration.error);
+          }
+
+          const remoteParametros = await loadParametrosFromSupabase();
+          if (remoteParametros.error) {
+            console.error('Error cargando parametros desde Supabase:', remoteParametros.error);
+          } else if (remoteParametros.data) {
+            setParametrosState(remoteParametros.data);
+            localStorage.setItem('sentauris_parametros', JSON.stringify(remoteParametros.data));
+          } else {
+            const migratedParametros = await migrateLocalParametrosToSupabase();
+            if (migratedParametros.error) {
+              console.error('Error migrando parametros locales a Supabase:', migratedParametros.error);
+          } else if (migratedParametros.data) {
+              setParametrosState(migratedParametros.data);
+            }
+          }
+
+          const appDataSetters = {
+            cotizaciones_historial: setCotizacionesHistorial,
+            oc_recibidas: setOcRecibidas,
+            rendiciones: setRendiciones,
+            comprobantes: setComprobantes,
+            registro_compras: setRegistroCompras,
+            empresas: setEmpresas,
+            plan_cuentas: setPlanCuentas,
+            tipo_documentos: setTipoDocumentos,
+            protocolos_preventivos: setProtocolosPreventivos,
+          };
+          const appDataResponse = await loadAppDataFromSupabase(Object.keys(appDataSetters));
+          if (appDataResponse.error) {
+            console.error('Error cargando datos de app_data desde Supabase:', appDataResponse.error);
+          } else {
+            const remoteByKey = new Map((appDataResponse.data || []).map(row => [row.key, row.data]));
+            for (const [key, setter] of Object.entries(appDataSetters)) {
+              if (remoteByKey.has(key)) {
+                const remoteValue = key === 'protocolos_preventivos'
+                  ? { ...defaultPreventiveProtocolsConfig(), ...(remoteByKey.get(key) || {}) }
+                  : (Array.isArray(remoteByKey.get(key)) ? remoteByKey.get(key) : []);
+                setter(remoteValue);
+                localStorage.setItem(APP_DATA_KEYS[key], JSON.stringify(remoteValue));
+              } else {
+                const localValue = key === 'protocolos_preventivos'
+                  ? readLocalObj(APP_DATA_KEYS[key])
+                  : readLocalList(APP_DATA_KEYS[key]);
+                if ((Array.isArray(localValue) && localValue.length > 0) || (localValue && typeof localValue === 'object' && Object.keys(localValue).length > 0)) {
+                  await saveAppDataToSupabase(key, localValue);
+                }
+              }
+            }
+          }
+          appDataLoadedRef.current = true;
+
           setClientes((clientesData || []).map(c => ({ ...normalizeCliente(c), empresaId: c.empresa_id || c.empresaId || null })));
           setLicitaciones(licitData || []);
           setRepuestos(repData || []);
           setEquipos(equiposData || []);
-          setUsuarios((usuariosData || []).map(u => ({
-            ...u,
-            accesos: u.accesos || [],
-            permisosEmpresas: u.permisos_empresas || {},
-          })));
+          setUsuarios(migration.migrated > 0
+            ? normalizeUsuarios((await supabase.from('usuarios').select('*')).data || remoteUsuarios)
+            : remoteUsuarios);
           setDbStatus('ok');
         }
       } catch (err) {
@@ -389,16 +790,25 @@ const ERPProvider = ({ children }) => {
     loadData();
   }, []);
 
+  const persistAppData = (key, localStorageKey, value) => {
+    localStorage.setItem(localStorageKey, JSON.stringify(value));
+    if (appDataLoadedRef.current) {
+      saveAppDataToSupabase(key, value).then(({ error }) => {
+        if (error) console.error(`Error guardando ${key} en Supabase:`, error);
+      });
+    }
+  };
+
   useEffect(() => {
-    localStorage.setItem('sentauris_cotizaciones_historial', JSON.stringify(cotizacionesHistorial));
+    persistAppData('cotizaciones_historial', APP_DATA_KEYS.cotizaciones_historial, cotizacionesHistorial);
   }, [cotizacionesHistorial]);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_oc_recibidas', JSON.stringify(ocRecibidas));
+    persistAppData('oc_recibidas', APP_DATA_KEYS.oc_recibidas, ocRecibidas);
   }, [ocRecibidas]);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_rendiciones', JSON.stringify(rendiciones));
+    persistAppData('rendiciones', APP_DATA_KEYS.rendiciones, rendiciones);
   }, [rendiciones]);
 
   useEffect(() => {
@@ -406,30 +816,36 @@ const ERPProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_comprobantes', JSON.stringify(comprobantes));
+    persistAppData('comprobantes', APP_DATA_KEYS.comprobantes, comprobantes);
   }, [comprobantes]);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_registro_compras', JSON.stringify(registroCompras));
+    persistAppData('registro_compras', APP_DATA_KEYS.registro_compras, registroCompras);
   }, [registroCompras]);
 
   // usuarios se persisten en Supabase, no en localStorage
 
   useEffect(() => {
-    localStorage.setItem('sentauris_empresas', JSON.stringify(empresas));
+    persistAppData('empresas', APP_DATA_KEYS.empresas, empresas);
   }, [empresas]);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_plan_cuentas', JSON.stringify(planCuentas));
+    persistAppData('plan_cuentas', APP_DATA_KEYS.plan_cuentas, planCuentas);
   }, [planCuentas]);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_tipo_docs', JSON.stringify(tipoDocumentos));
+    persistAppData('tipo_documentos', APP_DATA_KEYS.tipo_documentos, tipoDocumentos);
   }, [tipoDocumentos]);
 
   useEffect(() => {
-    if (parametros) localStorage.setItem('sentauris_parametros', JSON.stringify(parametros));
-  }, [parametros]);
+    persistAppData('protocolos_preventivos', APP_DATA_KEYS.protocolos_preventivos, protocolosPreventivos);
+  }, [protocolosPreventivos]);
+
+  const setParametros = async (nextParametros) => {
+    setParametrosState(nextParametros);
+    localStorage.setItem('sentauris_parametros', JSON.stringify(nextParametros));
+    return saveParametrosToSupabase(nextParametros);
+  };
 
   const getAccessibleEmpresaIds = (user = loggedInUser) => {
     if (!user) return [];
@@ -526,6 +942,7 @@ const ERPProvider = ({ children }) => {
       getAccessibleEmpresaIds,
       planCuentas, setPlanCuentas,
       tipoDocumentos, setTipoDocumentos,
+      protocolosPreventivos, setProtocolosPreventivos,
       parametros, setParametros,
       loading, dbStatus
     }}>
@@ -573,6 +990,59 @@ const Select = ({ label, options, value, onChange, disabled, placeholder }) => (
     </select>
   </div>
 );
+
+const SearchableSelect = ({ label, options = [], value, onChange, disabled, placeholder, getLabel, getSearchText }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef(null);
+  const selected = options.find(opt => String(opt.id || opt) === String(value || ''));
+  const labelFor = (opt) => getLabel ? getLabel(opt) : (opt?.name || opt);
+  const searchFor = (opt) => getSearchText ? getSearchText(opt) : labelFor(opt);
+
+  useEffect(() => {
+    const handler = (event) => { if (ref.current && !ref.current.contains(event.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = options.filter(opt => normalizeKey(searchFor(opt)).includes(normalizeKey(query)));
+  const select = (opt) => {
+    onChange?.({ target: { value: opt.id || opt } });
+    setQuery('');
+    setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative flex w-full flex-col gap-1.5">
+      {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
+      <input
+        type="text"
+        value={open ? query : (selected ? labelFor(selected) : '')}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => { setQuery(''); setOpen(true); }}
+        disabled={disabled}
+        placeholder={placeholder || 'Buscar y seleccionar...'}
+        className="w-full rounded-lg border border-slate-200 px-3 py-2 pr-9 text-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400"
+      />
+      <Search size={14} className="pointer-events-none absolute bottom-3 right-3 text-slate-400" />
+      {open && !disabled && (
+        <ul className="absolute z-50 top-full mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {filtered.length === 0 ? (
+            <li className="px-3 py-3 text-sm italic text-slate-400">Sin resultados</li>
+          ) : filtered.map(opt => (
+            <li
+              key={opt.id || labelFor(opt)}
+              onMouseDown={() => select(opt)}
+              className="cursor-pointer px-3 py-2 text-sm text-slate-700 hover:bg-blue-600 hover:text-white"
+            >
+              {labelFor(opt)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
 
 const ComboInput = ({ label, value, onChange, options = [], disabled, placeholder }) => {
   const [open, setOpen] = useState(false);
@@ -629,10 +1099,11 @@ const ComboInput = ({ label, value, onChange, options = [], disabled, placeholde
   );
 };
 
-const SignaturePad = ({ signerName, onChange, initialValue = '' }) => {
+const SignaturePad = ({ signerName, onChange, initialValue = '', label = 'Firma del tecnico', disabled = false }) => {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const initialDrawnRef = useRef(false);
+  const ignoreMouseRef = useRef(false);
 
   const getPoint = (event) => {
     const canvas = canvasRef.current;
@@ -682,6 +1153,9 @@ const SignaturePad = ({ signerName, onChange, initialValue = '' }) => {
   }, [initialValue]);
 
   const beginDraw = (event) => {
+    if (disabled) return;
+    if (event.type?.startsWith('mouse') && ignoreMouseRef.current) return;
+    if (event.type?.startsWith('touch')) ignoreMouseRef.current = true;
     event.preventDefault();
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -692,7 +1166,7 @@ const SignaturePad = ({ signerName, onChange, initialValue = '' }) => {
   };
 
   const draw = (event) => {
-    if (!drawingRef.current) return;
+    if (disabled || !drawingRef.current) return;
     event.preventDefault();
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -702,12 +1176,15 @@ const SignaturePad = ({ signerName, onChange, initialValue = '' }) => {
   };
 
   const endDraw = () => {
-    if (!drawingRef.current) return;
+    if (disabled || !drawingRef.current) return;
     drawingRef.current = false;
+    initialDrawnRef.current = true;
     onChange?.(canvasRef.current.toDataURL('image/png'));
+    window.setTimeout(() => { ignoreMouseRef.current = false; }, 500);
   };
 
   const clear = () => {
+    if (disabled) return;
     const canvas = canvasRef.current;
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
     onChange?.('');
@@ -716,15 +1193,20 @@ const SignaturePad = ({ signerName, onChange, initialValue = '' }) => {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <label className="text-sm font-bold text-slate-700">Firma del tecnico</label>
-        <button type="button" onClick={clear} className="text-xs font-bold text-blue-600 hover:text-blue-800">
+        <label className="text-sm font-bold text-slate-700">{label}</label>
+        <button
+          type="button"
+          onClick={clear}
+          disabled={disabled}
+          className={`text-xs font-bold ${disabled ? 'cursor-not-allowed text-slate-300' : 'text-blue-600 hover:text-blue-800'}`}
+        >
           Redibujar firma
         </button>
       </div>
-      <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-3">
+      <div className={`rounded-xl border-2 border-dashed p-3 ${disabled ? 'border-slate-200 bg-slate-100' : 'border-slate-200 bg-slate-50'}`}>
         <canvas
           ref={canvasRef}
-          className="h-36 w-full touch-none rounded-lg bg-white"
+          className={`h-36 w-full touch-none rounded-lg bg-white ${disabled ? 'cursor-not-allowed opacity-80' : ''}`}
           onMouseDown={beginDraw}
           onMouseMove={draw}
           onMouseUp={endDraw}
@@ -840,7 +1322,7 @@ const Dashboard = () => {
 
 // --- NUEVO REGISTRO ---
 const NuevoRegistro = () => {
-  const { formData, setFormData, setActiveModule, generateFolio, clientes, licitaciones, equipos, activeEmpresaId } = useContext(ERPContext);
+  const { formData, setFormData, setActiveModule, generateFolio, clientes, licitaciones, equipos, setEquipos, repuestos, activeEmpresaId } = useContext(ERPContext);
   const clientesEmpresa = (() => {
     const base = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
     const seen = new Set();
@@ -861,29 +1343,29 @@ const NuevoRegistro = () => {
     return false;
   });
   const availableEquipos = equipos.filter(e => e.licitacion_id === formData.licitacionId);
-  const unique = (values) => Array.from(new Set(values.filter(Boolean).map(v => String(v).trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const unique = (values) => dedupeByNormalizedText(values).sort((a, b) => a.localeCompare(b));
   const tipoEquipoOptions = unique(availableEquipos.map(e => e.tipo_equipo));
   const marcaOptions = unique(availableEquipos
-    .filter(e => !formData.tipoEquipo || e.tipo_equipo === formData.tipoEquipo)
+    .filter(e => !formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo))
     .map(e => e.marca));
   const modeloOptions = unique(availableEquipos
     .filter(e =>
-      (!formData.tipoEquipo || e.tipo_equipo === formData.tipoEquipo) &&
-      (!formData.marca || e.marca === formData.marca)
+      (!formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo)) &&
+      (!formData.marca || normalizeKey(e.marca) === normalizeKey(formData.marca))
     )
     .map(e => e.modelo));
   const serieOptions = unique(availableEquipos
     .filter(e =>
-      (!formData.tipoEquipo || e.tipo_equipo === formData.tipoEquipo) &&
-      (!formData.marca || e.marca === formData.marca) &&
-      (!formData.modelo || e.modelo === formData.modelo)
+      (!formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo)) &&
+      (!formData.marca || normalizeKey(e.marca) === normalizeKey(formData.marca)) &&
+      (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo))
     )
     .map(e => e.numero_serie));
   const inventarioOptions = unique(availableEquipos
     .filter(e =>
-      (!formData.tipoEquipo || e.tipo_equipo === formData.tipoEquipo) &&
-      (!formData.marca || e.marca === formData.marca) &&
-      (!formData.modelo || e.modelo === formData.modelo)
+      (!formData.tipoEquipo || normalizeKey(e.tipo_equipo) === normalizeKey(formData.tipoEquipo)) &&
+      (!formData.marca || normalizeKey(e.marca) === normalizeKey(formData.marca)) &&
+      (!formData.modelo || normalizeKey(e.modelo) === normalizeKey(formData.modelo))
     )
     .map(e => e.numero_inventario));
 
@@ -894,6 +1376,7 @@ const NuevoRegistro = () => {
 
   const handleChange = (field, value) => {
     const newData = { ...formData, [field]: value };
+    const sameText = (a, b) => normalizeKey(a) === normalizeKey(b);
     if (field === 'clienteId') {
       const client = clientesEmpresa.find(c => c.id === value);
       newData.rut = client?.rut || '';
@@ -928,19 +1411,19 @@ const NuevoRegistro = () => {
     }
     if (field === 'modelo') {
       const match = availableEquipos.find(e =>
-        e.tipo_equipo === newData.tipoEquipo &&
-        e.marca === newData.marca &&
-        e.modelo === value
+        sameText(e.tipo_equipo, newData.tipoEquipo) &&
+        sameText(e.marca, newData.marca) &&
+        sameText(e.modelo, value)
       );
       newData.numeroSerie = match?.numero_serie || '';
       newData.numeroInventario = match?.numero_inventario || '';
     }
     if (field === 'numeroSerie') {
       const match = availableEquipos.find(e =>
-        e.tipo_equipo === newData.tipoEquipo &&
-        e.marca === newData.marca &&
-        (!newData.modelo || e.modelo === newData.modelo) &&
-        e.numero_serie === value
+        sameText(e.tipo_equipo, newData.tipoEquipo) &&
+        sameText(e.marca, newData.marca) &&
+        (!newData.modelo || sameText(e.modelo, newData.modelo)) &&
+        sameText(e.numero_serie, value)
       );
       if (match) {
         newData.modelo = match.modelo || newData.modelo;
@@ -949,10 +1432,10 @@ const NuevoRegistro = () => {
     }
     if (field === 'numeroInventario') {
       const match = availableEquipos.find(e =>
-        e.tipo_equipo === newData.tipoEquipo &&
-        e.marca === newData.marca &&
-        (!newData.modelo || e.modelo === newData.modelo) &&
-        e.numero_inventario === value
+        sameText(e.tipo_equipo, newData.tipoEquipo) &&
+        sameText(e.marca, newData.marca) &&
+        (!newData.modelo || sameText(e.modelo, newData.modelo)) &&
+        sameText(e.numero_inventario, value)
       );
       if (match) {
         newData.modelo = match.modelo || newData.modelo;
@@ -992,9 +1475,114 @@ const NuevoRegistro = () => {
   const isFormValid = formData.clienteId && formData.licitacionId && formData.tipoEquipo &&
     formData.marca && formData.ubicacionArea && formData.solicitadoPor;
 
-  const handleNext = (tipo) => {
+  const ensureEquipoRegistered = async () => {
+    const payload = {
+      licitacion_id: formData.licitacionId,
+      tipo_equipo: String(formData.tipoEquipo || '').trim(),
+      marca: String(formData.marca || '').trim(),
+      modelo: String(formData.modelo || '').trim() || null,
+      numero_serie: String(formData.numeroSerie || '').trim() || null,
+      numero_inventario: String(formData.numeroInventario || '').trim() || null,
+    };
+    if (!payload.licitacion_id || !payload.tipo_equipo || !payload.marca) return;
+    const existing = equipos.find(e =>
+      e.licitacion_id === payload.licitacion_id &&
+      normalizeKey(e.tipo_equipo) === normalizeKey(payload.tipo_equipo) &&
+      normalizeKey(e.marca) === normalizeKey(payload.marca) &&
+      normalizeKey(e.modelo) === normalizeKey(payload.modelo) &&
+      normalizeKey(e.numero_serie) === normalizeKey(payload.numero_serie) &&
+      normalizeKey(e.numero_inventario) === normalizeKey(payload.numero_inventario)
+    );
+    if (existing) return;
+    const { data, error } = await supabaseRequest(() => supabase.from('equipos').insert([payload]).select().single());
+    if (error) {
+      alert('No se pudo agregar el equipo nuevo a la tabla de equipos: ' + friendlyError(error));
+      return;
+    }
+    setEquipos(prev => [...prev, data]);
+  };
+
+  const garantiaCondicionInicial = (baseText, previousFolio = '') => {
+    const prefix = `El equipo corresponde a una garantia por contrato${previousFolio ? ` asociada a la mantencion correctiva previa ${previousFolio}` : ''}.`;
+    const fallback = `Se recibe equipo ${formData.tipoEquipo || 'sin tipo definido'} ${formData.marca || ''} ${formData.modelo || ''}, serie ${formData.numeroSerie || 'sin serie'}, inventario ${formData.numeroInventario || 'sin inventario'}, ubicado en ${formData.ubicacionArea || 'area no informada'}, por solicitud de ${formData.solicitadoPor || 'solicitante no informado'}, reportando fallas o problemas en su funcionamiento.`;
+    const text = baseText || fallback;
+    return String(text || '').includes('garantia por contrato') ? text : `${prefix}\n\n${text}`.trim();
+  };
+
+  const handleNext = async (tipo) => {
     if (!isFormValid) return;
-    setFormData(prev => ({ ...prev, tipoMantencion: tipo, folio: prev.folio || generateFolio() }));
+    await ensureEquipoRegistered();
+    let extraCorrectiva = {};
+    if (tipo === 'correctiva') {
+      const hasFullEquipmentIdentity = [
+        formData.tipoEquipo,
+        formData.marca,
+        formData.modelo,
+        formData.numeroSerie,
+        formData.numeroInventario
+      ].every(value => normalizeEquipmentMatchValue(value));
+      let previousOrden = null;
+      if (hasFullEquipmentIdentity) {
+        const { data, error } = await supabaseRequest(() =>
+          supabase.from('ordenes_trabajo')
+            .select('*')
+            .eq('tipo_mantencion', 'correctiva')
+            .order('created_at', { ascending: false })
+        );
+        if (error) {
+          alert('No se pudo revisar el historial correctivo: ' + friendlyError(error));
+          return;
+        }
+        previousOrden = (data || []).find(orden => sameEquipmentIdentity(orden, formData));
+      }
+      if (previousOrden) {
+        const currentLicitacion = licitaciones.find(l => l.id === formData.licitacionId) || {};
+        const previousLicitacion = licitaciones.find(l => l.id === previousOrden.licitacion_id) || {};
+        const garantiaCorrectivaMeses = Number(currentLicitacion.garantia_correctiva_meses ?? previousLicitacion.garantia_correctiva_meses ?? 0) || 0;
+        const coberturaHasta = addMonthsToIsoDate(previousOrden.fecha, garantiaCorrectivaMeses);
+        const garantiaVigente = dateWithinWarranty(previousOrden.fecha, formData.fecha, garantiaCorrectivaMeses);
+        if (!garantiaVigente) {
+          setFormData(prev => ({ ...prev, tipoMantencion: tipo, folio: prev.folio || generateFolio() }));
+          setActiveModule('operaciones-correctiva');
+          return;
+        }
+        const bringPrevious = window.confirm(`El equipo seleccionado tiene una mantencion correctiva previamente realizada, posiblemente aplique la garantia por contrato.\n\nCobertura estimada hasta: ${formatPdfDate(coberturaHasta)}\n\nDesea traer datos previamente cargados?\n\nAceptar = Si / Cancelar = No`);
+        if (bringPrevious) {
+          const previousCorrectiva = parseCorrectivaObservaciones(previousOrden.observaciones);
+          const { data: usados, error: repError } = await supabaseRequest(() =>
+            supabase.from('orden_repuestos').select('*').eq('orden_id', previousOrden.id)
+          );
+          if (repError) {
+            alert('No se pudieron cargar los repuestos del informe anterior: ' + friendlyError(repError));
+            return;
+          }
+          const previousRepuestos = (usados || []).map((item, index) => {
+            const repuesto = repuestos.find(r => r.id === item.repuesto_id) || {};
+            return {
+              ...repuesto,
+              id: item.repuesto_id || repuesto.id,
+              qty: item.cantidad || 1,
+              toBodega: Boolean(item.desde_bodega),
+              garantia: true,
+              lockedQty: true,
+              tempId: `garantia-${item.repuesto_id || 'rep'}-${Date.now()}-${index}`
+            };
+          }).filter(item => item.id);
+          extraCorrectiva = {
+            correctivaCondicionInicial: garantiaCondicionInicial(previousCorrectiva.condicionInicial, previousOrden.folio),
+            correctivaDiagnostico: previousCorrectiva.diagnostico || '',
+            correctivaConclusion: previousCorrectiva.conclusion || '',
+            correctivaCondicionFinal: previousCorrectiva.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA,
+            correctivaFotos: previousCorrectiva.fotos || [],
+            correctivaRepuestos: previousRepuestos,
+            correctivaEstadoInterno: 'Garantía',
+            correctivaGarantiaContrato: true,
+            correctivaOrigenGarantiaFolio: previousOrden.folio || '',
+          };
+        }
+      }
+    }
+    setFormData(prev => ({ ...prev, tipoMantencion: tipo, folio: prev.folio || generateFolio(), ...extraCorrectiva }));
     setActiveModule(tipo === 'preventiva' ? 'operaciones-preventiva' : 'operaciones-correctiva');
   };
 
@@ -1036,9 +1624,9 @@ const NuevoRegistro = () => {
 
           <hr className="md:col-span-2 border-slate-100 my-2" />
 
-          <Select
+          <ComboInput
             label="Tipo de Equipo"
-            options={tipoEquipoOptions.map(name => ({ id: name, name }))}
+            options={tipoEquipoOptions}
             value={formData.tipoEquipo}
             disabled={!formData.licitacionId}
             onChange={(e) => handleChange('tipoEquipo', e.target.value)}
@@ -1095,33 +1683,84 @@ const NuevoRegistro = () => {
 
 // --- MANTENCIÓN PREVENTIVA ---
 const MantencionPreventiva = () => {
-  const { formData, setActiveModule, currentUser, saveOrden, resetRegistrationForm } = useContext(ERPContext);
+  const { formData, setActiveModule, currentUser, saveOrden, resetRegistrationForm, protocolosPreventivos } = useContext(ERPContext);
+  const isReopenedPreventiva = Boolean(formData.ordenId);
   const [checklist, setChecklist] = useState(formData.preventivaChecklist || {});
   const [observaciones, setObservaciones] = useState(formData.preventivaObservaciones || '');
   const [estadoEquipo, setEstadoEquipo] = useState(formData.preventivaEstadoEquipo || 'Operativo');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [signatureData, setSignatureData] = useState(formData.preventivaFirma || '');
-  const protocolo = getPreventiveProtocol(formData.tipoEquipo);
+  const [firmaRecepcion, setFirmaRecepcion] = useState(formData.preventivaFirmaRecepcion || '');
+  const [recibidoPor, setRecibidoPor] = useState(formData.preventivaRecibidoPor || '');
+  const [cargoRecepcion, setCargoRecepcion] = useState(formData.preventivaCargoRecepcion || '');
+  const protocolo = getPreventiveProtocol(formData.tipoEquipo, protocolosPreventivos);
   const statusOptions = ['Si', 'No', 'N/A', 'Falla'];
 
+  const handleBackToRegistro = () => {
+    resetRegistrationForm();
+    setActiveModule('operaciones-registro');
+  };
+
+  useEffect(() => {
+    setEstadoEquipo(derivePreventiveFinalStatus(checklist));
+  }, [checklist]);
+
+  const updateChecklistEntry = (itemKey, patch) => {
+    setChecklist(prev => {
+      const current = normalizePreventiveChecklistEntry(prev[itemKey]);
+      const next = { ...current, ...patch };
+      if (next.criticidad !== 'Critico' || next.estado !== 'No') next.falla = false;
+      return { ...prev, [itemKey]: next };
+    });
+  };
+
   const handleFinish = async () => {
+    const missingRequired = protocolo.sections.flatMap(section =>
+      section.items
+        .map(item => {
+          const itemLabel = protocolItemLabel(item);
+          const itemKey = `${section.section} - ${itemLabel}`;
+          const entry = normalizePreventiveChecklistEntry(checklist[itemKey]);
+          return protocolItemRequired(item) && !entry.estado ? `${section.section}: ${itemLabel}` : null;
+        })
+        .filter(Boolean)
+    );
+    if (missingRequired.length > 0) {
+      alert(`Debes completar los campos obligatorios antes de guardar:\n\n${missingRequired.slice(0, 8).join('\n')}${missingRequired.length > 8 ? `\n...y ${missingRequired.length - 8} mas` : ''}`);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const orden = await saveOrden({
         estado_equipo: estadoEquipo,
-        observaciones: buildPreventivaObservaciones({ observaciones, checklist, firma: signatureData }),
+        observaciones: buildPreventivaObservaciones({
+          observaciones,
+          checklist,
+          firma: signatureData,
+          firmaRecepcion,
+          recibidoPor: recibidoPor.trim(),
+          cargoRecepcion: cargoRecepcion.trim(),
+          tecnicoNombre: currentUser.name,
+          tecnicoRut: currentUser.rut,
+        }),
         estado: 'Completado'
       });
 
       // Guardar checklist
-      const checkItems = Object.entries(checklist).map(([item, estado]) => ({
-        orden_id: orden.id, item, estado
-      }));
+      const checkItems = Object.entries(checklist)
+        .map(([item, value]) => ({
+          orden_id: orden.id,
+          item,
+          estado: preventiveChecklistEstadoForDb(value)
+        }))
+        .filter(item => ['Si', 'No', 'N/A', 'Falla'].includes(item.estado));
       if (checkItems.length > 0) {
         const { error: delErr } = await supabase.from('orden_checklist').delete().eq('orden_id', orden.id);
         if (delErr) throw delErr;
         const { error: insErr } = await supabase.from('orden_checklist').insert(checkItems);
-        if (insErr) throw insErr;
+        if (insErr) {
+          console.warn('No se pudo guardar la copia resumida del checklist preventivo:', insErr);
+        }
       }
 
       alert(`✅ Informe ${formData.folio} guardado en Supabase`);
@@ -1154,6 +1793,18 @@ const MantencionPreventiva = () => {
         <div><p className="text-[10px] uppercase font-bold text-slate-400">Ubicación</p><p className="text-sm font-bold text-slate-700">{formData.ubicacionArea}</p></div>
       </Card>
 
+      <Card className="grid grid-cols-1 gap-3 border-amber-100 bg-amber-50 md:grid-cols-[1fr_auto] md:items-center">
+        <div>
+          <p className="text-xs font-black uppercase text-amber-700">Leyenda de criticidad</p>
+          <p className="text-sm text-amber-900">La criticidad de cada componente viene definida desde Configuraciones / Tipo de Documentos / Protocolos.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-[10px] font-bold">
+          <span className="rounded border border-amber-300 bg-amber-100 px-2 py-1 text-amber-800">Critico</span>
+          <span className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-600">No critico</span>
+          <span className="rounded border border-red-300 bg-red-50 px-2 py-1 text-red-700">Critico + No + Falla = No Operativo</span>
+        </div>
+      </Card>
+
       <div className="space-y-6">
         {protocolo.sections.map((section, idx) => (
           <div key={idx} className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
@@ -1162,19 +1813,39 @@ const MantencionPreventiva = () => {
             </div>
             <div className="divide-y divide-slate-50">
               {section.items.map((item, i) => {
-                const itemKey = `${section.section} - ${item}`;
+                const itemLabel = protocolItemLabel(item);
+                const itemCriticidad = protocolItemCriticidad(item);
+                const itemRequired = protocolItemRequired(item);
+                const itemKey = `${section.section} - ${itemLabel}`;
+                const entry = { ...normalizePreventiveChecklistEntry(checklist[itemKey]), criticidad: itemCriticidad };
                 return (
-                  <div key={i} className="flex flex-col gap-3 px-6 py-3 hover:bg-slate-50 transition-colors md:flex-row md:items-center md:justify-between">
-                    <span className="text-sm text-slate-700 font-medium">{item}</span>
-                    <div className="grid grid-cols-4 gap-2 md:flex">
+                  <div key={i} className="flex flex-col gap-3 px-6 py-3 hover:bg-slate-50 transition-colors lg:flex-row lg:items-center lg:justify-between">
+                    <span className="text-sm text-slate-700 font-medium">{itemLabel}</span>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="grid grid-cols-5 gap-2 md:flex md:items-center">
+                      <span className={`flex items-center justify-center rounded border px-3 py-1 text-[10px] font-bold uppercase ${itemCriticidad === 'Critico' ? 'border-amber-200 bg-amber-100 text-amber-800' : 'border-slate-200 bg-slate-100 text-slate-500'}`}>
+                        {itemCriticidad}
+                      </span>
+                      {itemRequired && (
+                        <span className="flex items-center justify-center rounded border border-blue-200 bg-blue-50 px-3 py-1 text-[10px] font-bold uppercase text-blue-700">
+                          Obligatorio
+                        </span>
+                      )}
                       {statusOptions.map(status => (
-                        <button key={status} onClick={() => setChecklist(prev => ({ ...prev, [itemKey]: status }))}
+                        <button key={status}
+                          disabled={status === 'Falla' && !(itemCriticidad === 'Critico' && entry.estado === 'No')}
+                          onClick={() => status === 'Falla'
+                            ? updateChecklistEntry(itemKey, { criticidad: itemCriticidad, falla: !entry.falla })
+                            : updateChecklistEntry(itemKey, { criticidad: itemCriticidad, estado: status })}
                           className={`px-3 py-1 rounded text-[10px] font-bold border transition-all ${
-                            checklist[itemKey] === status
+                            preventiveEntryMatches(entry, status)
                               ? status === 'Si' ? 'bg-green-600 border-green-600 text-white' : status === 'No' || status === 'Falla' ? 'bg-red-600 border-red-600 text-white' : 'bg-slate-500 border-slate-500 text-white'
-                              : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
+                              : status === 'Falla' && !(itemCriticidad === 'Critico' && entry.estado === 'No')
+                                ? 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed'
+                                : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
                           }`}>{status}</button>
                       ))}
+                      </div>
                     </div>
                   </div>
                 );
@@ -1195,13 +1866,18 @@ const MantencionPreventiva = () => {
             <label className="text-sm font-bold text-slate-700">Estado Final del Equipo</label>
             <div className="flex gap-2">
               {['Operativo', 'No Operativo', 'Operativo con Obs.'].map(s => (
-                <button key={s} onClick={() => setEstadoEquipo(s)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${estadoEquipo === s ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>{s}</button>
+                <button key={s} disabled title="Estado calculado automaticamente por criticidad y resultado"
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${estadoEquipo === s ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>{s}</button>
               ))}
             </div>
           </div>
           <div className="space-y-2">
-            <SignaturePad signerName={currentUser.name} initialValue={signatureData} onChange={setSignatureData} />
+            <SignaturePad
+              signerName={currentUser.name}
+              initialValue={signatureData}
+              onChange={setSignatureData}
+              disabled={isReopenedPreventiva}
+            />
             <p className={`text-[10px] font-bold uppercase ${signatureData ? 'text-green-600' : 'text-slate-400'}`}>
               {signatureData ? 'Firma capturada' : 'Firma pendiente'}
             </p>
@@ -1209,8 +1885,23 @@ const MantencionPreventiva = () => {
         </div>
       </Card>
 
+      <Card className="space-y-4 border-l-4 border-l-blue-500">
+        <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2">Recepcion del equipo</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input label="Nombre" value={recibidoPor} onChange={(e) => setRecibidoPor(e.target.value)} placeholder="Nombre de quien recibe" />
+          <Input label="Cargo" value={cargoRecepcion} onChange={(e) => setCargoRecepcion(e.target.value)} placeholder="Cargo de quien recibe" />
+        </div>
+        <SignaturePad
+          label="Firma de recepcion"
+          signerName={recibidoPor || 'Pendiente de receptor'}
+          initialValue={firmaRecepcion}
+          onChange={setFirmaRecepcion}
+          disabled={isReopenedPreventiva}
+        />
+      </Card>
+
       <div className="flex gap-4 pb-12">
-        <Button variant="secondary" className="flex-1" onClick={() => setActiveModule('operaciones-registro')} icon={ChevronLeft}>Atrás</Button>
+        <Button variant="secondary" className="flex-1" onClick={handleBackToRegistro} icon={ChevronLeft}>Atrás</Button>
         <Button variant="accent" className="flex-[2] py-4" onClick={handleFinish} disabled={isSubmitting} icon={isSubmitting ? Cpu : FileDown}>
           {isSubmitting ? 'Guardando en Supabase...' : 'Finalizar y Guardar Informe'}
         </Button>
@@ -1221,7 +1912,7 @@ const MantencionPreventiva = () => {
 
 // --- MANTENCIÓN CORRECTIVA ---
 const MantencionCorrectiva = () => {
-  const { formData, setActiveModule, repuestos, saveOrden, resetRegistrationForm, currentUser } = useContext(ERPContext);
+  const { formData, setActiveModule, repuestos, saveOrden, resetRegistrationForm, currentUser, parametros } = useContext(ERPContext);
   const defaultCondicionInicial = `Se recibe equipo ${formData.tipoEquipo || 'sin tipo definido'} ${formData.marca || ''} ${formData.modelo || ''}, serie ${formData.numeroSerie || 'sin serie'}, inventario ${formData.numeroInventario || 'sin inventario'}, ubicado en ${formData.ubicacionArea || 'area no informada'}, por solicitud de ${formData.solicitadoPor || 'solicitante no informado'}, reportando fallas o problemas en su funcionamiento.`;
   const isReopenedCorrectiva = Boolean(formData.ordenId);
   const repuestoVisibleFields = (r = {}) => ({
@@ -1230,10 +1921,16 @@ const MantencionCorrectiva = () => {
     part_number: r.part_number || '',
     qty: r.qty || 1,
     toBodega: Boolean(r.toBodega),
+    garantia: Boolean(r.garantia),
+    lockedQty: Boolean(r.lockedQty),
     tempId: r.tempId || `${r.id || 'repuesto'}-${Date.now()}-${Math.random()}`
   });
   const [repuestosSeleccionados, setRepuestosSeleccionados] = useState(Array.isArray(formData.correctivaRepuestos) ? formData.correctivaRepuestos.map(repuestoVisibleFields) : []);
-  const [condicionInicial, setCondicionInicial] = useState(formData.correctivaCondicionInicial || defaultCondicionInicial);
+  const garantiaPrefix = formData.correctivaGarantiaContrato
+    ? `El equipo corresponde a una garantia por contrato${formData.correctivaOrigenGarantiaFolio ? ` asociada a la mantencion correctiva previa ${formData.correctivaOrigenGarantiaFolio}` : ''}.`
+    : '';
+  const initialCondicionInicial = formData.correctivaCondicionInicial || defaultCondicionInicial;
+  const [condicionInicial, setCondicionInicial] = useState(garantiaPrefix && !initialCondicionInicial.includes('garantia por contrato') ? `${garantiaPrefix}\n\n${initialCondicionInicial}` : initialCondicionInicial);
   const [diagnostico, setDiagnostico] = useState({
     text: formData.correctivaDiagnostico || '',
     conclusion: formData.correctivaConclusion || ''
@@ -1241,10 +1938,23 @@ const MantencionCorrectiva = () => {
   const [condicionFinal, setCondicionFinal] = useState(formData.correctivaCondicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [estadoInterno, setEstadoInterno] = useState('Ingresado');
+  const estadoInternoOptions = ensureDefaultEstadosInternos(parametros?.estadosInternosCorrectiva || []);
+  const [estadoInterno, setEstadoInterno] = useState(formData.correctivaEstadoInterno || estadoInternoOptions[0] || 'Ingresado');
   const [fotos, setFotos] = useState(Array.isArray(formData.correctivaFotos) ? formData.correctivaFotos : []);
   const [firmaCorrectiva, setFirmaCorrectiva] = useState(formData.correctivaFirma || '');
+  const [firmaRecepcion, setFirmaRecepcion] = useState(formData.correctivaFirmaRecepcion || '');
+  const [recibidoPor, setRecibidoPor] = useState(formData.correctivaRecibidoPor || '');
+  const [cargoRecepcion, setCargoRecepcion] = useState(formData.correctivaCargoRecepcion || '');
   const availableRepuestos = repuestos.filter(r => r.licitacion_id === formData.licitacionId);
+  const garantiaHabilitada = Boolean(formData.correctivaGarantiaContrato);
+  const estadoEsEjecutado = isEstadoEjecutado(estadoInterno);
+  const estadoInternoKey = normalizeKey(estadoInterno);
+  const muestraCondicionFinal = ['garantia', 'sugerencia de baja'].includes(estadoInternoKey) || estadoEsEjecutado;
+
+  const handleBackToRegistro = () => {
+    resetRegistrationForm();
+    setActiveModule('operaciones-registro');
+  };
 
   const handleFotos = (files) => {
     const selected = Array.from(files || []);
@@ -1260,26 +1970,44 @@ const MantencionCorrectiva = () => {
   const addRepuesto = (id) => {
     const r = availableRepuestos.find(rep => rep.id === id);
     if (!r) return;
-    setRepuestosSeleccionados(prev => [...prev, repuestoVisibleFields({ ...r, qty: 1, toBodega: false, tempId: Date.now() })]);
+    setRepuestosSeleccionados(prev => [...prev, repuestoVisibleFields({ ...r, qty: 1, toBodega: false, garantia: false, lockedQty: false, tempId: Date.now() })]);
   };
   const updateRepuestoSeleccionado = (tempId, patch) => {
     setRepuestosSeleccionados(prev => prev.map(r => r.tempId === tempId ? { ...r, ...patch } : r));
   };
 
   const generateAI = () => {
-    if (repuestosSeleccionados.length === 0) return;
+    if (!diagnostico.text.trim()) {
+      alert('Primero escribe el hallazgo tecnico del problema del equipo.');
+      return;
+    }
     setIsGenerating(true);
     setTimeout(() => {
-      const items = repuestosSeleccionados.map(r => r.name).join(", ");
-      setDiagnostico({
-        text: `Tras la inspección técnica del equipo ${formData.tipoEquipo} ${formData.marca}, se detectaron fallas críticas. La presencia de ruidos inusuales y pérdida de potencia confirman el desgaste de los componentes asociados a ${items}.`,
-        conclusion: `Se requiere el reemplazo inmediato de los componentes defectuosos (${items}) para restablecer los estándares de seguridad clínica según norma vigente.`
-      });
+      const items = repuestosSeleccionados.map(r => r.name).filter(Boolean).join(', ') || 'sin repuestos seleccionados';
+      const estiloConclusion = normalizeKey(parametros?.promptConclusionCorrectiva || DEFAULT_CORRECTIVA_CONCLUSION_PROMPT);
+      const requiereDetalle = estiloConclusion.includes('detall') || estiloConclusion.includes('diagnostico');
+      const garantiaText = garantiaHabilitada ? ' Considerando que el caso se encuentra asociado a garantía por contrato, se recomienda mantener trazabilidad de la intervención y de los componentes evaluados.' : '';
+      const equipo = `${formData.tipoEquipo || 'equipo'} ${formData.marca || ''} ${formData.modelo || ''}`.trim();
+      const serieInventario = [
+        formData.numeroSerie ? `serie ${formData.numeroSerie}` : '',
+        formData.numeroInventario ? `inventario ${formData.numeroInventario}` : ''
+      ].filter(Boolean).join(', ');
+      const contextoEquipo = `${equipo}${serieInventario ? `, ${serieInventario}` : ''}`;
+      const detalle = requiereDetalle
+        ? ` Se debe revisar el conjunto asociado al componente comprometido, confirmar si existe desgaste, pérdida de ajuste, daño eléctrico, fatiga mecánica o falla de conexión, y validar que la causa detectada no afecte otros subsistemas del equipo.`
+        : '';
+      setDiagnostico(prev => ({
+        ...prev,
+        conclusion: `El análisis técnico del ${contextoEquipo} permite orientar la falla hacia un daño o deterioro del componente asociado al sistema intervenido. La causa probable se relaciona con desgaste operacional, pérdida de ajuste, fatiga del material o alteración funcional del repuesto comprometido, lo que puede generar un comportamiento inestable del equipo y afectar su desempeño durante el uso.\n\nLa solución técnica recomendada es intervenir el conjunto afectado, reemplazar o reparar el repuesto comprometido según corresponda, revisar sus puntos de fijación, conexiones y elementos relacionados, y posteriormente realizar pruebas funcionales para confirmar que la falla fue corregida. Para esta intervención se consideran los siguientes repuestos o servicios: ${items}.${detalle}${garantiaText}\n\nFinalizada la reparación, se recomienda verificar el funcionamiento del equipo en condiciones normales de operación, dejar registro de las acciones ejecutadas y entregar el equipo solo cuando se confirme una respuesta estable y conforme.`
+      }));
       setIsGenerating(false);
     }, 1500);
   };
-
   const handleFinish = async () => {
+    if (estadoEsEjecutado && (!recibidoPor.trim() || !cargoRecepcion.trim() || !firmaRecepcion)) {
+      alert('Para marcar como Ejecutado debes completar Recibido por, Cargo y la firma de recepción.');
+      return;
+    }
     setIsSaving(true);
     try {
       const orden = await saveOrden({
@@ -1288,9 +2016,17 @@ const MantencionCorrectiva = () => {
           condicionInicial,
           diagnostico: diagnostico.text,
           conclusion: diagnostico.conclusion,
-          condicionFinal: isReopenedCorrectiva ? condicionFinal : '',
+          condicionFinal: muestraCondicionFinal ? condicionFinal : '',
           fotos,
-          firma: firmaCorrectiva
+          firma: firmaCorrectiva,
+          firmaRecepcion: estadoEsEjecutado ? firmaRecepcion : '',
+          recibidoPor: estadoEsEjecutado ? recibidoPor.trim() : '',
+          cargoRecepcion: estadoEsEjecutado ? cargoRecepcion.trim() : '',
+          garantiaContrato: Boolean(formData.correctivaGarantiaContrato),
+          origenGarantiaFolio: formData.correctivaOrigenGarantiaFolio || '',
+          repuestosGarantia: repuestosSeleccionados
+            .filter(r => r.garantia)
+            .map(r => ({ id: r.id, name: r.name || '', part_number: r.part_number || '', qty: Number(r.qty) || 1 }))
         })
       });
 
@@ -1299,10 +2035,22 @@ const MantencionCorrectiva = () => {
       if (delRepErr) throw delRepErr;
       if (repuestosSeleccionados.length > 0) {
         const items = repuestosSeleccionados.map(r => ({
-          orden_id: orden.id, repuesto_id: r.id, cantidad: r.qty || 1, desde_bodega: r.toBodega || false
+          orden_id: orden.id,
+          repuesto_id: r.id,
+          cantidad: Number(r.qty) || 1,
+          desde_bodega: r.toBodega || false,
+          garantia: Boolean(r.garantia),
+          origen_garantia_folio: r.garantia ? (formData.correctivaOrigenGarantiaFolio || null) : null,
         }));
         const { error: insRepErr } = await supabase.from('orden_repuestos').insert(items);
-        if (insRepErr) throw insRepErr;
+        if (insRepErr && isSchemaError(insRepErr.message)) {
+          const fallbackItems = items.map(({ garantia, origen_garantia_folio, ...base }) => base);
+          const { error: fallbackErr } = await supabase.from('orden_repuestos').insert(fallbackItems);
+          if (fallbackErr) throw fallbackErr;
+          console.warn('La tabla orden_repuestos no tiene columnas de garantia. Ejecuta supabase/garantia_repuestos.sql para guardar el check en tabla.');
+        } else if (insRepErr) {
+          throw insRepErr;
+        }
       }
 
       alert(`✅ Correctiva ${formData.folio} guardada en Supabase`);
@@ -1354,7 +2102,14 @@ const MantencionCorrectiva = () => {
         <div className="flex justify-between items-center">
           <h3 className="font-bold text-slate-800">Repuestos y Servicios</h3>
           <div className="w-full md:w-64">
-            <Select options={availableRepuestos} placeholder="Añadir repuesto..." onChange={(e) => addRepuesto(e.target.value)} value="" />
+            <SearchableSelect
+              options={availableRepuestos}
+              placeholder="Buscar repuesto..."
+              onChange={(e) => addRepuesto(e.target.value)}
+              value=""
+              getLabel={(r) => `${r.name || 'Repuesto'}${r.part_number ? ` - ${r.part_number}` : ''}`}
+              getSearchText={(r) => [r.name, r.part_number, r.sku].join(' ')}
+            />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -1364,7 +2119,8 @@ const MantencionCorrectiva = () => {
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Descripción</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">P/N</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Cant.</th>
-                <th className="px-4 py-3 font-bold uppercase text-[10px]">Bodega</th>
+                <th className="px-4 py-3 font-bold uppercase text-[10px]">Solicitar compra</th>
+                {garantiaHabilitada && <th className="px-4 py-3 font-bold uppercase text-[10px]">Garantia</th>}
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -1373,15 +2129,16 @@ const MantencionCorrectiva = () => {
                 <tr key={r.tempId} className="hover:bg-slate-50">
                   <td className="px-4 py-3 font-medium text-slate-700">{r.name}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.part_number}</td>
-                  <td className="px-4 py-3"><input type="number" min="1" value={r.qty || 1} onChange={e => updateRepuestoSeleccionado(r.tempId, { qty: Number(e.target.value) || 1 })} className="w-12 border rounded px-1 text-center text-sm" /></td>
+                  <td className="px-4 py-3"><input type="number" min="1" value={r.qty ?? ''} disabled={r.lockedQty} onChange={e => updateRepuestoSeleccionado(r.tempId, { qty: e.target.value })} onBlur={e => updateRepuestoSeleccionado(r.tempId, { qty: Number(e.target.value) > 0 ? e.target.value : 1 })} className="w-16 border rounded px-1 text-center text-sm disabled:bg-slate-100 disabled:text-slate-400" /></td>
                   <td className="px-4 py-3"><input type="checkbox" checked={Boolean(r.toBodega)} onChange={e => updateRepuestoSeleccionado(r.tempId, { toBodega: e.target.checked })} className="w-4 h-4 rounded" /></td>
+                  {garantiaHabilitada && <td className="px-4 py-3"><input type="checkbox" checked={Boolean(r.garantia)} onChange={e => updateRepuestoSeleccionado(r.tempId, { garantia: e.target.checked })} className="w-4 h-4 rounded accent-emerald-600" /></td>}
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => setRepuestosSeleccionados(prev => prev.filter(x => x.tempId !== r.tempId))} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
                   </td>
                 </tr>
               ))}
               {repuestosSeleccionados.length === 0 && (
-                <tr><td colSpan="5" className="px-4 py-10 text-center text-slate-400 italic">No hay repuestos seleccionados</td></tr>
+                <tr><td colSpan={garantiaHabilitada ? 6 : 5} className="px-4 py-10 text-center text-slate-400 italic">No hay repuestos seleccionados</td></tr>
               )}
             </tbody>
           </table>
@@ -1393,8 +2150,8 @@ const MantencionCorrectiva = () => {
           <div className="flex items-center gap-2 text-blue-600">
             <Cpu size={20} /><h3 className="font-bold">Diagnóstico Técnico Inteligente</h3>
           </div>
-          <Button variant="secondary" onClick={generateAI} disabled={isGenerating || repuestosSeleccionados.length === 0} className="text-xs h-8">
-            {isGenerating ? 'Generando...' : 'Actualizar con IA'}
+          <Button variant="secondary" onClick={generateAI} disabled={isGenerating || !diagnostico.text.trim()} className="text-xs h-8">
+            {isGenerating ? 'Generando...' : 'Generar conclusion IA'}
           </Button>
         </div>
         <div className="space-y-4">
@@ -1402,17 +2159,17 @@ const MantencionCorrectiva = () => {
             <label className="text-[10px] font-black uppercase text-slate-400">Hallazgo Técnico</label>
             <textarea className="w-full h-24 p-3 bg-slate-50 border border-slate-100 rounded-lg text-sm mt-1 focus:outline-none resize-none"
               value={diagnostico.text} onChange={(e) => setDiagnostico({ ...diagnostico, text: e.target.value })}
-              placeholder="El diagnóstico se generará automáticamente según los repuestos..." />
+              placeholder="Escribe las notas del problema, sintomas observados, pruebas realizadas y hallazgos tecnicos..." />
           </div>
           <div>
             <label className="text-[10px] font-black uppercase text-slate-400">Conclusión del Informe</label>
-            <textarea className="w-full h-16 p-3 bg-slate-50 border border-slate-100 rounded-lg text-sm mt-1 focus:outline-none resize-none"
+            <textarea className="w-full min-h-44 p-3 bg-slate-50 border border-slate-100 rounded-lg text-sm mt-1 focus:outline-none resize-y"
               value={diagnostico.conclusion} onChange={(e) => setDiagnostico({ ...diagnostico, conclusion: e.target.value })} />
           </div>
         </div>
       </Card>
 
-      {isReopenedCorrectiva && (
+      {muestraCondicionFinal && (
         <Card className="space-y-4">
           <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2">Condicion Final</h3>
           <textarea className="w-full min-h-[96px] p-4 rounded-lg border border-slate-100 bg-slate-50 text-sm text-slate-600 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-y"
@@ -1426,16 +2183,33 @@ const MantencionCorrectiva = () => {
           signerName={currentUser.name}
           initialValue={firmaCorrectiva}
           onChange={setFirmaCorrectiva}
+          disabled={isReopenedCorrectiva}
         />
       </Card>
 
+      {estadoEsEjecutado && (
+        <Card className="space-y-4 border-l-4 border-l-emerald-500">
+          <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2">Recepción de equipo ejecutado</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Recibido por" value={recibidoPor} onChange={(e) => setRecibidoPor(e.target.value)} placeholder="Nombre de quien recibe" />
+            <Input label="Cargo" value={cargoRecepcion} onChange={(e) => setCargoRecepcion(e.target.value)} placeholder="Cargo de quien recibe" />
+          </div>
+          <SignaturePad
+            label="Firma de recepción"
+            signerName={recibidoPor || 'Pendiente de receptor'}
+            initialValue={firmaRecepcion}
+            onChange={setFirmaRecepcion}
+          />
+        </Card>
+      )}
+
       <div className="flex gap-4 pb-12">
         <div className="flex-1">
-          <Select label="Estado Interno" options={['Ingresado', 'En revisión', 'En reparación', 'Esperando Repuestos', 'Listo para Entrega']}
+          <Select label="Estado Interno" options={estadoInternoOptions}
             value={estadoInterno} onChange={(e) => setEstadoInterno(e.target.value)} />
         </div>
         <div className="flex-[2] flex gap-2 items-end">
-          <Button variant="secondary" className="flex-1" onClick={() => setActiveModule('operaciones-registro')} icon={ChevronLeft}>Atrás</Button>
+          <Button variant="secondary" className="flex-1" onClick={handleBackToRegistro} icon={ChevronLeft}>Atrás</Button>
           <Button variant="primary" className="flex-[2]" onClick={handleFinish} disabled={isSaving} icon={Mail}>
             {isSaving ? 'Guardando...' : 'Guardar y Enviar Informe'}
           </Button>
@@ -1462,13 +2236,17 @@ const Modal = ({ title, onClose, children, wide = false, fullScreen = false, wor
 );
 
 // --- HISTORIAL DE MANTENCIONES ---
-const HistorialMantenciones = ({ tipo }) => {
-  const { clientes, licitaciones, repuestos, setActiveModule, setFormData, setCotizacionDraft } = useContext(ERPContext);
+const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) => {
+  const { clientes, licitaciones, repuestos, setActiveModule, setFormData, setCotizacionDraft, cotizacionesHistorial, currentEmpresa, currentUser, loggedInUser, activeEmpresaId, protocolosPreventivos } = useContext(ERPContext);
   const [ordenes, setOrdenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editModal, setEditModal] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
+  const verifiedReportOpened = useRef(false);
   const isPreventivo = tipo === 'preventiva';
 
   const loadOrdenes = async () => {
@@ -1481,7 +2259,7 @@ const HistorialMantenciones = ({ tipo }) => {
     setLoading(false);
   };
 
-  useEffect(() => { loadOrdenes(); setSelectedIds([]); setSearchTerm(''); }, [tipo]);
+  useEffect(() => { loadOrdenes(); setSelectedIds([]); setSearchTerm(''); setFechaDesde(''); setFechaHasta(''); }, [tipo]);
 
   const getCliente = (orden) => clientes.find(c => c.id === orden.cliente_id);
   const getLicitacion = (orden) => licitaciones.find(l => l.id === orden.licitacion_id);
@@ -1497,7 +2275,53 @@ const HistorialMantenciones = ({ tipo }) => {
     ].join(' ');
     return normalize(haystack).includes(normalize(searchTerm));
   };
-  const filteredOrdenes = ordenes.filter(matchesSearch);
+  const matchesDateRange = (orden) => {
+    const fecha = String(orden.fecha || '').slice(0, 10);
+    if (!fecha && (fechaDesde || fechaHasta)) return false;
+    if (fechaDesde && fecha < fechaDesde) return false;
+    if (fechaHasta && fecha > fechaHasta) return false;
+    return true;
+  };
+  const filteredOrdenes = ordenes.filter(orden => matchesSearch(orden) && matchesDateRange(orden));
+  const sortValue = (orden, key) => {
+    const cliente = getCliente(orden);
+    const values = {
+      fecha: orden.fecha || orden.created_at || '',
+      folio: orden.folio || '',
+      cliente: cliente?.name || '',
+      equipo: orden.tipo_equipo || '',
+      marca: orden.marca || '',
+      modelo: orden.modelo || '',
+      serie: orden.numero_serie || '',
+      inventario: orden.numero_inventario || '',
+      estado: orden.estado || orden.estado_equipo || '',
+    };
+    return normalize(String(values[key] || ''));
+  };
+  const sortedOrdenes = [...filteredOrdenes].sort((a, b) => {
+    const av = sortValue(a, sortConfig.key);
+    const bv = sortValue(b, sortConfig.key);
+    const result = av.localeCompare(bv, 'es', { numeric: true });
+    return sortConfig.direction === 'asc' ? result : -result;
+  });
+  const toggleSort = (key) => setSortConfig(prev => ({
+    key,
+    direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+  }));
+  const canModifyExecutedCorrectiva = loggedInUser?.isSuperadmin || (
+    activeEmpresaId
+      ? (loggedInUser?.permisosEmpresas?.[activeEmpresaId] || []).includes(PERM_MODIFICAR_CORRECTIVA_EJECUTADA)
+      : (loggedInUser?.accesos || []).includes(PERM_MODIFICAR_CORRECTIVA_EJECUTADA)
+  );
+  const canReopenOrden = (orden) => isPreventivo || !isEstadoEjecutado(orden.estado) || canModifyExecutedCorrectiva;
+  const SortableHeader = ({ label, sortKey }) => (
+    <th className="p-3 text-[10px] font-bold uppercase text-slate-500">
+      <button type="button" onClick={() => toggleSort(sortKey)} className="inline-flex items-center gap-1 hover:text-slate-900">
+        <span>{label}</span>
+        <ArrowUpDown size={12} className={sortConfig.key === sortKey ? 'text-blue-600' : 'text-slate-300'} />
+      </button>
+    </th>
+  );
   const filteredIds = filteredOrdenes.map(o => o.id).filter(Boolean);
   const selectedVisibleIds = filteredIds.filter(id => selectedIds.includes(id));
   const allVisibleSelected = filteredIds.length > 0 && selectedVisibleIds.length === filteredIds.length;
@@ -1519,64 +2343,100 @@ const HistorialMantenciones = ({ tipo }) => {
   const buildReportHtml = (orden) => {
     const cliente = getCliente(orden);
     const lic = getLicitacion(orden);
+    const empresaInforme = currentEmpresa || {};
+    const empresaNombre = empresaInforme.razonSocial || empresaInforme.nombreFantasia || 'Vaicmedical';
+    const empresaRut = empresaInforme.rut || empresaInforme.RUT || '77.573.229-6';
+    const empresaGiro = empresaInforme.giro || 'Mantencion y Reparacion de Equipos Medicos';
+    const empresaMail = empresaInforme.correoContacto || empresaInforme.email || 'servicios@vaicmedical.cl';
+    const empresaMembrete = empresaInforme.membreteImagen || '/logo-vaic-pdf.jpeg';
+    const fechaInforme = formatPdfDate(orden.fecha);
     if (isPreventivo) {
-      const protocolo = getPreventiveProtocol(orden.tipo_equipo);
+      const protocolo = getPreventiveProtocol(orden.tipo_equipo, protocolosPreventivos);
       const preventiva = parsePreventivaObservaciones(orden.observaciones);
+      const tecnicoNombre = preventiva.tecnicoNombre || currentUser?.name || '';
+      const tecnicoRut = preventiva.tecnicoRut || currentUser?.rut || '';
       const checklist = orden.preventivaChecklist || preventiva.checklist || {};
       const isStructuredPreventiva = String(orden.observaciones || '').startsWith(PREVENTIVA_OBS_PREFIX);
       const obs = htmlText(isStructuredPreventiva ? preventiva.observaciones : (preventiva.observaciones || orden.observaciones || ''));
       const firmaPreventiva = preventiva.firma
         ? `<img class="firma-img" src="${preventiva.firma}" alt="Firma tecnico"/>`
         : '';
-      const mark = (item, status) => checklist[item] === status ? 'X' : '';
+      const firmaRecepcionPreventiva = preventiva.firmaRecepcion
+        ? `<img class="firma-img" src="${preventiva.firmaRecepcion}" alt="Firma recepcion"/>`
+        : '';
+      const mark = (item, status) => preventiveEntryMatches(checklist[item], status) ? 'X' : '';
+      const criticidad = (item) => normalizePreventiveChecklistEntry(checklist[item]).criticidad;
+      const verificationUrl = preventiveVerificationUrl(orden);
+      const recepcionPreventivaHtml = `<div class="section-title">Recepcion del equipo</div><table class="recepcion"><thead><tr><th>Nombre</th><th>Cargo</th><th>Verificacion QR</th></tr></thead><tbody><tr><td>${htmlText(preventiva.recibidoPor || '')}</td><td>${htmlText(preventiva.cargoRecepcion || '')}</td><td class="qr-cell"><img class="qr" src="${qrImageUrl(verificationUrl)}" alt="QR verificacion"/><div class="qr-url">${htmlText(verificationUrl)}</div></td></tr></tbody></table>`;
       return `
         <html><head><title>${orden.folio}</title><style>
         body{font-family:Arial,sans-serif;color:#111827;margin:0;padding:24px}.page{max-width:960px;margin:auto}
-        .head{display:flex;justify-content:space-between;border:2px solid #111827;padding:12px;align-items:center}.brand{font-weight:800;font-size:18px}
+        .head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo-box{display:flex;align-items:center;justify-content:flex-start}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta{text-align:right;font-size:12px;line-height:1.5;color:#111827}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;color:#0f172a;margin-bottom:8px}
         h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase}.grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #111827;border-bottom:0}
         .cell{border-bottom:1px solid #111827;border-right:1px solid #111827;padding:7px;font-size:12px}.cell b{display:block;font-size:10px;text-transform:uppercase;color:#475569}
         table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #111827;padding:6px;font-size:11px}.mark{text-align:center;font-weight:800}th{background:#e5e7eb}.obs{border:1px solid #111827;padding:10px;min-height:70px;margin-top:12px;font-size:12px}
-        .firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto 8px}
-        .sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px}
+        .section-title{font-size:12px;font-weight:800;text-transform:uppercase;margin-top:14px}.recepcion th,.recepcion td{text-align:left;vertical-align:middle}.recepcion th:nth-child(3),.recepcion td:nth-child(3){width:180px;text-align:center}.qr{width:108px;height:108px;object-fit:contain}.qr-url{font-size:7px;line-height:1.2;color:#475569;word-break:break-all;margin-top:4px}
+        .firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto}
+        .sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.sign-card{display:flex;flex-direction:column}.signature-slot{height:96px;display:flex;align-items:flex-end;justify-content:center}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px;min-height:38px}
         @media print{button{display:none}body{padding:0}}
         </style></head><body><div class="page">
-        <div class="head"><div class="brand">VAICMEDICAL</div><div>Codigo: FO-OP-001<br/>Fecha: ${orden.fecha || ''}<br/>Folio: ${orden.folio || ''}</div></div>
+        <div class="head"><div class="logo-box"><img class="logo" src="${empresaMembrete}" alt="Membrete empresa"/></div><div class="company"><div class="brand">${htmlText(empresaNombre)}</div><div>RUT: ${htmlText(empresaRut)}</div><div>Giro: ${htmlText(empresaGiro)}</div><div>Correo: ${htmlText(empresaMail)}</div></div><div class="meta"><span class="folio-label">Folio</span><span class="folio-value">${htmlText(orden.folio || '')}</span>Fecha: ${htmlText(fechaInforme)}</div></div>
         <h1>${protocolo.title}</h1>
         <div class="grid">
           <div class="cell"><b>Cliente</b>${cliente?.name || ''}</div><div class="cell"><b>RUT</b>${cliente?.rut || ''}</div><div class="cell"><b>Licitacion</b>${lic?.id_licitacion || lic?.name || ''}</div>
           <div class="cell"><b>Equipo</b>${orden.tipo_equipo || ''}</div><div class="cell"><b>Marca</b>${orden.marca || ''}</div><div class="cell"><b>Modelo</b>${orden.modelo || ''}</div>
           <div class="cell"><b>Serie</b>${orden.numero_serie || ''}</div><div class="cell"><b>Inventario</b>${orden.numero_inventario || ''}</div><div class="cell"><b>Servicio</b>${orden.ubicacion_area || ''}</div>
         </div>
-        <table><thead><tr><th>Accion</th><th>Si</th><th>No</th><th>N/A</th><th>Falla</th></tr></thead><tbody>
-        ${protocolo.sections.flatMap(s => [`<tr><th colspan="5">${s.section}</th></tr>`, ...s.items.map(i => {
-          const itemKey = `${s.section} - ${i}`;
-          return `<tr><td>${i}</td><td class="mark">${mark(itemKey, 'Si')}</td><td class="mark">${mark(itemKey, 'No')}</td><td class="mark">${mark(itemKey, 'N/A')}</td><td class="mark">${mark(itemKey, 'Falla')}</td></tr>`;
+        <table><thead><tr><th>Accion</th><th>Criticidad</th><th>Si</th><th>No</th><th>N/A</th><th>Falla</th></tr></thead><tbody>
+        ${protocolo.sections.flatMap(s => [`<tr><th colspan="6">${s.section}</th></tr>`, ...s.items.map(i => {
+          const itemLabel = protocolItemLabel(i);
+          const itemKey = `${s.section} - ${itemLabel}`;
+          return `<tr><td>${htmlText(itemLabel)}</td><td>${criticidad(itemKey)}</td><td class="mark">${mark(itemKey, 'Si')}</td><td class="mark">${mark(itemKey, 'No')}</td><td class="mark">${mark(itemKey, 'N/A')}</td><td class="mark">${mark(itemKey, 'Falla')}</td></tr>`;
         })]).join('')}
         </tbody></table>
         <div class="obs"><b>Observaciones</b><br/>${obs}</div>
         <p><b>Estado final:</b> ${orden.estado_equipo || orden.estado || ''}</p>
-        <div class="sign"><div class="line">Nombre y firma quien recepciona</div><div>${firmaPreventiva}<div class="line">Tecnico en Mantenimiento Equipo Medico</div></div></div>
+        ${recepcionPreventivaHtml}
+        <div class="sign"><div class="sign-card"><div class="signature-slot">${firmaRecepcionPreventiva}</div><div class="line">Firma y Recepcion Conforme</div></div><div class="sign-card"><div class="signature-slot">${firmaPreventiva}</div><div class="line">Tecnico en Mantenimiento Equipo Medico${tecnicoNombre ? `<br/>${htmlText(tecnicoNombre)}` : ''}${tecnicoRut ? ` - RUT: ${htmlText(tecnicoRut)}` : ''}</div></div></div>
         <button onclick="window.print()">Imprimir / Guardar PDF</button>
         </div></body></html>`;
     }
     const correctiva = parseCorrectivaObservaciones(orden.observaciones);
+    const correctivaEstado = String(orden.estado || '').trim();
+    const correctivaEstadoKey = normalizeKey(correctivaEstado);
+    const correctivaTitle = correctiva.garantiaContrato || correctivaEstadoKey === 'garantia'
+      ? 'MANT. CORRECTIVO. - GARANTIA'
+      : isEstadoEjecutado(orden.estado)
+        ? 'MANT. CORRECTIVO - EJECUTADO'
+        : correctivaEstadoKey === 'ingresado'
+          ? 'MANT. CORRECTIVO - DIAGNOSTICO'
+          : correctivaEstado
+            ? `MANT. CORRECTIVO - ${correctivaEstado.toUpperCase()}`
+            : 'MANT. CORRECTIVO';
     const correctivaFotos = correctiva.fotos.length > 0
       ? `<div class="photos">${correctiva.fotos.map(f => `<figure><img src="${f.src}" alt="${f.name || 'foto'}"/><figcaption>${htmlText(f.name || '')}</figcaption></figure>`).join('')}</div>`
       : '';
     const correctivaFirma = correctiva.firma
       ? `<img class="firma-img" src="${correctiva.firma}" alt="Firma tecnico"/>`
       : '';
+    const correctivaFirmaRecepcion = correctiva.firmaRecepcion
+      ? `<img class="firma-img" src="${correctiva.firmaRecepcion}" alt="Firma recepcion"/>`
+      : '';
+    const correctivaVerificationUrl = reportVerificationUrl('correctiva', orden);
+    const recepcionHtml = `<div class="section-title">Recepcion del equipo</div><table class="recepcion"><thead><tr><th>Nombre</th><th>Cargo</th><th>Verificacion QR</th></tr></thead><tbody><tr><td>${htmlText(correctiva.recibidoPor || '')}</td><td>${htmlText(correctiva.cargoRecepcion || '')}</td><td class="qr-cell"><img class="qr" src="${qrImageUrl(correctivaVerificationUrl)}" alt="QR verificacion"/><div class="qr-url">${htmlText(correctivaVerificationUrl)}</div></td></tr></tbody></table>`;
+    const showCorrectivaCondicionFinal = ['garantia', 'sugerencia de baja'].includes(correctivaEstadoKey) || isEstadoEjecutado(orden.estado);
+    const diagnosticoHtml = correctiva.conclusion ? htmlText(correctiva.conclusion) : '';
     return `
       <html><head><title>${orden.folio}</title><style>
-      body{font-family:Arial,sans-serif;color:#111827;margin:0;padding:28px}.page{max-width:900px;margin:auto}.brand{font-size:20px;font-weight:800}
-      .top{display:flex;justify-content:space-between;border-bottom:3px solid #0f172a;padding-bottom:12px}.muted{color:#475569;font-size:12px}.section{margin-top:22px}
-      h1{font-size:18px;letter-spacing:.08em}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #cbd5e1}.cell{border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;padding:8px;font-size:12px}.cell b{display:block;color:#64748b;font-size:10px;text-transform:uppercase}
-      .box{border:1px solid #cbd5e1;padding:12px;min-height:70px;font-size:12px;line-height:1.45}.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:42px}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px}
+      body{font-family:Arial,sans-serif;color:#111827;margin:0;padding:24px}.page{max-width:960px;margin:auto}
+      .head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo-box{display:flex;align-items:center;justify-content:flex-start}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta{text-align:right;font-size:12px;line-height:1.5;color:#111827}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;color:#0f172a;margin-bottom:8px}
+      h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase;letter-spacing:.06em}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #111827;border-bottom:0}.cell{border-right:1px solid #111827;border-bottom:1px solid #111827;padding:7px;font-size:12px}.cell b{display:block;font-size:10px;text-transform:uppercase;color:#475569}
+      .section{margin-top:18px}.section-title{font-size:12px;font-weight:800;text-transform:uppercase;margin-top:14px}.box{border:1px solid #111827;padding:12px;min-height:70px;font-size:12px;line-height:1.45}.recepcion{width:100%;border-collapse:collapse;margin-top:16px}.recepcion th,.recepcion td{border:1px solid #111827;padding:6px;font-size:11px;text-align:left;vertical-align:middle}.recepcion th{background:#e5e7eb}.recepcion th:nth-child(3),.recepcion td:nth-child(3){width:180px;text-align:center}.qr{width:108px;height:108px;object-fit:contain}.qr-url{font-size:7px;line-height:1.2;color:#475569;word-break:break-all;margin-top:4px}.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.sign-card{display:flex;flex-direction:column}.signature-slot{height:96px;display:flex;align-items:flex-end;justify-content:center}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px;min-height:38px}
       .photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,140px));gap:8px;margin-top:10px}.photos figure{margin:0;break-inside:avoid}.photos img{width:100%;height:92px;object-fit:contain;border:1px solid #cbd5e1;background:#f8fafc}.photos figcaption{font-size:9px;color:#64748b;margin-top:3px;word-break:break-word}.firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto 8px}
       @media print{button{display:none}body{padding:0}}
       </style></head><body><div class="page">
-      <div class="top"><div><div class="brand">Vaicmedical</div><div class="muted">Mantencion y Reparacion de Equipos Medicos<br/>servicios@vaicmedical.cl</div></div><div class="muted">Codigo de Referencia:<br/><b>${orden.folio || ''}</b><br/>Fecha: ${orden.fecha || ''}</div></div>
-      <h1>MANT. CORRECTIVO EJECUTADO</h1>
+      <div class="head"><div class="logo-box"><img class="logo" src="${empresaMembrete}" alt="Membrete empresa"/></div><div class="company"><div class="brand">${htmlText(empresaNombre)}</div><div>RUT: ${htmlText(empresaRut)}</div><div>Giro: ${htmlText(empresaGiro)}</div><div>Correo: ${htmlText(empresaMail)}</div></div><div class="meta"><span class="folio-label">Folio</span><span class="folio-value">${htmlText(orden.folio || '')}</span>Fecha: ${htmlText(fechaInforme)}</div></div>
+      <h1>${correctivaTitle}</h1>
       <div class="grid">
         <div class="cell"><b>Cliente</b>${cliente?.name || ''}</div><div class="cell"><b>RUT</b>${cliente?.rut || ''}</div>
         <div class="cell"><b>Licitacion convenio</b>${lic?.id_licitacion || lic?.name || ''}</div><div class="cell"><b>Servicio</b>${orden.ubicacion_area || ''}</div>
@@ -1584,17 +2444,16 @@ const HistorialMantenciones = ({ tipo }) => {
         <div class="cell"><b>Modelo</b>${orden.modelo || ''}</div><div class="cell"><b>Serie / Inventario</b>${orden.numero_serie || ''} / ${orden.numero_inventario || ''}</div>
       </div>
       <div class="section"><h3>Condicion inicial de equipo</h3><div class="box">${htmlText(correctiva.condicionInicial || correctivaText(correctiva))}</div></div>
-      <div class="section"><h3>Informacion de diagnosticos</h3><div class="box">${htmlText(correctiva.diagnostico)}</div></div>
-      <div class="section"><h3>Informacion de solucion</h3><div class="box">${htmlText(correctiva.conclusion || 'La solucion corresponde a cambio, ajuste o reparacion de componentes segun diagnostico tecnico.')}</div></div>
-      <div class="section"><h3>Condicion final</h3><div class="box">${htmlText(correctiva.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA)}</div></div>
+      <div class="section"><h3>Informacion de diagnostico</h3><div class="box">${diagnosticoHtml}</div></div>
+      ${showCorrectivaCondicionFinal ? `<div class="section"><h3>Condicion final</h3><div class="box">${htmlText(correctiva.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA)}</div></div>` : ''}
       ${correctivaFotos ? `<div class="section"><h3>Registro fotografico</h3>${correctivaFotos}</div>` : ''}
-      <div class="section"><h3>Estado final</h3><div class="box">${orden.estado || orden.estado_equipo || ''}</div></div>
-      <div class="sign"><div class="line">Nombre y firma quien recepciona</div><div>${correctivaFirma}<div class="line">Tecnico en Mantenimiento Equipo Medico</div></div></div>
+      ${recepcionHtml}
+      <div class="sign"><div class="sign-card"><div class="signature-slot">${correctivaFirmaRecepcion}</div><div class="line">Firma y Recepcion Conforme</div></div><div class="sign-card"><div class="signature-slot">${correctivaFirma}</div><div class="line">Tecnico en Mantenimiento Equipo Medico</div></div></div>
       <button onclick="window.print()">Imprimir / Guardar PDF</button>
       </div></body></html>`;
   };
 
-  const openReportWindow = async (orden) => {
+  const prepareReportOrden = async (orden) => {
     let reportOrden = orden;
     if (isPreventivo && orden.id) {
       const parsed = parsePreventivaObservaciones(orden.observaciones);
@@ -1609,12 +2468,96 @@ const HistorialMantenciones = ({ tipo }) => {
         reportOrden = { ...orden, preventivaChecklist };
       }
     }
+    return reportOrden;
+  };
+
+  const openReportWindow = async (orden) => {
+    const reportOrden = await prepareReportOrden(orden);
     const win = window.open('', '_blank');
     win.document.write(buildReportHtml(reportOrden));
     win.document.close();
     win.focus();
     return win;
   };
+
+  const reportInnerHtml = (html) => {
+    const body = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || html;
+    return body.replace(/<button[\s\S]*?<\/button>/gi, '');
+  };
+
+  const reportStyle = (html) => html.match(/<style>([\s\S]*?)<\/style>/i)?.[1] || '';
+
+  const buildBulkReportsHtml = (reports) => {
+    const firstHtml = reports[0]?.html || '';
+    const styles = `${reportStyle(firstHtml)}
+      .bulk-report{break-after:page;page-break-after:always}
+      .bulk-report:last-child{break-after:auto;page-break-after:auto}
+      @media print{.bulk-actions{display:none}}`;
+    const pages = reports.map(report => `<section class="bulk-report">${reportInnerHtml(report.html)}</section>`).join('');
+    return `<html><head><title>Informes ${isPreventivo ? 'preventivos' : 'correctivos'}</title><style>${styles}</style></head><body><div class="bulk-actions"><button onclick="window.print()">Imprimir / Guardar PDF masivo</button></div>${pages}</body></html>`;
+  };
+
+  const recordsForMassAction = () => selectedOrdenes.length > 0 ? selectedOrdenes : filteredOrdenes;
+
+  const downloadBulkPdfs = async () => {
+    const targets = recordsForMassAction();
+    if (targets.length === 0) {
+      alert('No hay registros para descargar.');
+      return;
+    }
+    const prepared = await Promise.all(targets.map(async (orden) => {
+      const reportOrden = await prepareReportOrden(orden);
+      return { orden: reportOrden, html: buildReportHtml(reportOrden) };
+    }));
+    const win = window.open('', '_blank');
+    win.document.write(buildBulkReportsHtml(prepared));
+    win.document.close();
+    win.focus();
+  };
+
+  const exportHistorialExcel = () => {
+    const targets = recordsForMassAction();
+    if (targets.length === 0) {
+      alert('No hay registros para exportar.');
+      return;
+    }
+    const rows = targets.map((orden) => {
+      const cliente = getCliente(orden);
+      const lic = getLicitacion(orden);
+      return {
+        Folio: orden.folio || '',
+        Fecha: formatPdfDate(orden.fecha),
+        Cliente: cliente?.name || '',
+        RUT: cliente?.rut || '',
+        Licitacion: lic?.id_licitacion || lic?.name || '',
+        Equipo: orden.tipo_equipo || '',
+        Marca: orden.marca || '',
+        Modelo: orden.modelo || '',
+        Serie: orden.numero_serie || '',
+        Inventario: orden.numero_inventario || '',
+        Servicio: orden.ubicacion_area || '',
+        'Solicitado por': orden.solicitado_por || '',
+        'Estado interno': orden.estado || '',
+        'Estado equipo': orden.estado_equipo || '',
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, isPreventivo ? 'Preventivo' : 'Correctivo');
+    const suffix = new Date().toISOString().replace(/\D/g, '').slice(0, 12);
+    XLSX.writeFile(wb, `historial_${isPreventivo ? 'preventivo' : 'correctivo'}_${suffix}.xlsx`);
+  };
+
+  useEffect(() => {
+    if (!isPreventivo || verifiedReportOpened.current || loading || (!verifyOrderId && !verifyFolio)) return;
+    const target = ordenes.find(orden =>
+      (verifyOrderId && String(orden.id) === String(verifyOrderId)) ||
+      (verifyFolio && String(orden.folio || '').toLowerCase() === String(verifyFolio).toLowerCase())
+    );
+    if (!target) return;
+    verifiedReportOpened.current = true;
+    openReportWindow(target);
+  }, [isPreventivo, loading, ordenes, verifyOrderId, verifyFolio]);
 
   const handleMail = async (orden) => {
     const email = getContactEmail(orden);
@@ -1651,28 +2594,31 @@ const HistorialMantenciones = ({ tipo }) => {
       alert('No se pudieron cargar los repuestos del informe: ' + friendlyError(error));
       return;
     }
+    const correctiva = parseCorrectivaObservaciones(orden.observaciones);
+    const garantiaIds = new Set((correctiva.repuestosGarantia || []).map(item => String(item.id || '')));
     const repuestoItems = (usados || []).map((usado) => {
       const repuesto = repuestos.find(r => r.id === usado.repuesto_id) || {};
+      const esGarantia = Boolean(usado.garantia) || garantiaIds.has(String(usado.repuesto_id || ''));
       return {
         codigo: repuesto.sku || '',
         parte: repuesto.part_number || '',
         descripcion: repuesto.name || 'Repuesto sin descripcion',
         unidad: 'Uns',
         cantidad: usado.cantidad || 1,
-        precio: repuesto.valor_neto || 0,
+        precio: esGarantia ? 0 : (repuesto.valor_neto || 0),
         dcto: 0,
       };
     });
     setCotizacionDraft({
-      numero: orden.folio?.replace(/\D/g, '').slice(-6) || '',
+      numero: nextCotizacionNumero(cotizacionesHistorial),
       fecha: new Date().toISOString().split('T')[0],
       cliente: cliente?.name || '',
       rut: cliente?.rut || '',
-      direccion: '',
-      comuna: '',
-      telefono: '',
+      direccion: clienteDireccion(cliente),
+      comuna: clienteComuna(cliente),
+      telefono: clienteTelefono(cliente),
       solicitadoPor: orden.solicitado_por || '',
-      vendedor: 'Catalina Ramos',
+      vendedor: '',
       idLicitacion: getLicitacion(orden)?.id_licitacion || getLicitacion(orden)?.name || '',
       referencia: orden.folio || '',
       glosa: `${orden.tipo_equipo || ''} ${orden.marca || ''} ${orden.modelo || ''}`.trim(),
@@ -1718,15 +2664,18 @@ const HistorialMantenciones = ({ tipo }) => {
     const items = selectedOrdenes.flatMap((orden) => {
       const repuestosOrden = usados.filter(u => u.orden_id === orden.id);
       if (!isPreventivo && repuestosOrden.length > 0) {
+        const correctiva = parseCorrectivaObservaciones(orden.observaciones);
+        const garantiaIds = new Set((correctiva.repuestosGarantia || []).map(item => String(item.id || '')));
         const repuestoItems = repuestosOrden.map((usado) => {
           const repuesto = repuestos.find(r => r.id === usado.repuesto_id) || {};
+          const esGarantia = Boolean(usado.garantia) || garantiaIds.has(String(usado.repuesto_id || ''));
           return {
             codigo: repuesto.sku || '',
             parte: repuesto.part_number || '',
             descripcion: repuesto.name || 'Repuesto sin descripcion',
             unidad: 'Uns',
             cantidad: usado.cantidad || 1,
-            precio: repuesto.valor_neto || 0,
+            precio: esGarantia ? 0 : (repuesto.valor_neto || 0),
             dcto: 0,
           };
         });
@@ -1744,15 +2693,15 @@ const HistorialMantenciones = ({ tipo }) => {
     });
     setCotizacionDraft({
       masiva: true,
-      numero: `MAS-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}`,
+      numero: nextCotizacionNumero(cotizacionesHistorial),
       fecha: new Date().toISOString().split('T')[0],
       cliente: clientesUnicos.length === 1 ? clientesUnicos[0] : 'Cotizacion masiva - multiples clientes',
       rut: clientesUnicos.length === 1 ? firstCliente.rut || '' : '',
-      direccion: '',
-      comuna: '',
-      telefono: '',
+      direccion: clientesUnicos.length === 1 ? clienteDireccion(firstCliente) : '',
+      comuna: clientesUnicos.length === 1 ? clienteComuna(firstCliente) : '',
+      telefono: clientesUnicos.length === 1 ? clienteTelefono(firstCliente) : '',
       solicitadoPor: selectedOrdenes[0]?.solicitado_por || '',
-      vendedor: 'Catalina Ramos',
+      vendedor: '',
       idLicitacion: Array.from(new Set(selectedOrdenes.map(o => getLicitacion(o)?.id_licitacion || getLicitacion(o)?.name).filter(Boolean))).join(', '),
       referencia: `Cotizacion masiva ${isPreventivo ? 'preventiva' : 'correctiva'}`,
       glosa: `${selectedOrdenes.length} informe(s): ${folios.join(', ')}`,
@@ -1774,8 +2723,37 @@ const HistorialMantenciones = ({ tipo }) => {
     setSelectedIds([]);
   };
 
-  const openEdit = (orden) => setEditModal({ ...orden });
+  const openEdit = (orden) => setEditModal({
+    ...orden,
+    editCorrectiva: !isPreventivo ? parseCorrectivaObservaciones(orden.observaciones) : null,
+    editPreventiva: isPreventivo ? parsePreventivaObservaciones(orden.observaciones) : null,
+  });
   const saveEdit = async () => {
+    const nextObservaciones = isPreventivo
+      ? buildPreventivaObservaciones({
+          observaciones: editModal.editPreventiva?.observaciones || '',
+          checklist: editModal.editPreventiva?.checklist || {},
+          firma: editModal.editPreventiva?.firma || '',
+          firmaRecepcion: editModal.editPreventiva?.firmaRecepcion || '',
+          recibidoPor: editModal.editPreventiva?.recibidoPor || '',
+          cargoRecepcion: editModal.editPreventiva?.cargoRecepcion || '',
+          tecnicoNombre: editModal.editPreventiva?.tecnicoNombre || '',
+          tecnicoRut: editModal.editPreventiva?.tecnicoRut || '',
+        })
+      : buildCorrectivaObservaciones({
+          condicionInicial: editModal.editCorrectiva?.condicionInicial || '',
+          diagnostico: editModal.editCorrectiva?.diagnostico || '',
+          conclusion: editModal.editCorrectiva?.conclusion || '',
+          condicionFinal: editModal.editCorrectiva?.condicionFinal || '',
+          fotos: editModal.editCorrectiva?.fotos || [],
+          firma: editModal.editCorrectiva?.firma || '',
+          firmaRecepcion: editModal.editCorrectiva?.firmaRecepcion || '',
+          recibidoPor: editModal.editCorrectiva?.recibidoPor || '',
+          cargoRecepcion: editModal.editCorrectiva?.cargoRecepcion || '',
+          garantiaContrato: editModal.editCorrectiva?.garantiaContrato || false,
+          origenGarantiaFolio: editModal.editCorrectiva?.origenGarantiaFolio || '',
+          repuestosGarantia: editModal.editCorrectiva?.repuestosGarantia || [],
+        });
     const payload = {
       tipo_equipo: editModal.tipo_equipo,
       marca: editModal.marca,
@@ -1785,7 +2763,7 @@ const HistorialMantenciones = ({ tipo }) => {
       ubicacion_area: editModal.ubicacion_area,
       solicitado_por: editModal.solicitado_por,
       fecha: editModal.fecha,
-      observaciones: editModal.observaciones,
+      observaciones: nextObservaciones,
       estado: editModal.estado,
       estado_equipo: editModal.estado_equipo,
     };
@@ -1799,13 +2777,17 @@ const HistorialMantenciones = ({ tipo }) => {
   };
 
   const reopenFlow = async (orden) => {
+    if (!canReopenOrden(orden)) {
+      alert('Este mantenimiento correctivo ya fue Ejecutado y solo puede reabrirlo personal autorizado.');
+      return;
+    }
     const cliente = getCliente(orden);
     const lic = getLicitacion(orden);
     const preventiva = isPreventivo
       ? parsePreventivaObservaciones(orden.observaciones)
       : { observaciones: '', checklist: {}, firma: '' };
     const correctiva = isPreventivo
-      ? { condicionInicial: '', diagnostico: '', conclusion: '', condicionFinal: '', fotos: [], firma: '' }
+      ? { condicionInicial: '', diagnostico: '', conclusion: '', condicionFinal: '', fotos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '' }
       : parseCorrectivaObservaciones(orden.observaciones);
     let preventivaChecklist = preventiva.checklist || {};
     if (isPreventivo && orden.id && Object.keys(preventivaChecklist).length === 0) {
@@ -1830,13 +2812,17 @@ const HistorialMantenciones = ({ tipo }) => {
         alert('No se pudieron cargar los repuestos del correctivo: ' + friendlyError(error));
         return;
       }
+      const garantiaIds = new Set((correctiva.repuestosGarantia || []).map(item => String(item.id || '')));
       correctivaRepuestos = (data || []).map((item, index) => {
         const repuesto = repuestos.find(r => r.id === item.repuesto_id) || {};
+        const esGarantia = Boolean(item.garantia) || garantiaIds.has(String(item.repuesto_id || repuesto.id || ''));
         return {
           ...repuesto,
           id: item.repuesto_id || repuesto.id,
           qty: item.cantidad || 1,
           toBodega: Boolean(item.desde_bodega),
+          garantia: esGarantia,
+          lockedQty: esGarantia,
           tempId: `${item.repuesto_id || 'rep'}-${Date.now()}-${index}`
         };
       }).filter(item => item.id);
@@ -1862,6 +2848,9 @@ const HistorialMantenciones = ({ tipo }) => {
       preventivaObservaciones: preventiva.observaciones,
       preventivaEstadoEquipo: orden.estado_equipo || orden.estado || 'Operativo',
       preventivaFirma: preventiva.firma,
+      preventivaFirmaRecepcion: preventiva.firmaRecepcion,
+      preventivaRecibidoPor: preventiva.recibidoPor,
+      preventivaCargoRecepcion: preventiva.cargoRecepcion,
       correctivaCondicionInicial: correctiva.condicionInicial,
       correctivaDiagnostico: correctiva.diagnostico,
       correctivaConclusion: correctiva.conclusion,
@@ -1869,6 +2858,12 @@ const HistorialMantenciones = ({ tipo }) => {
       correctivaFotos: correctiva.fotos,
       correctivaFirma: correctiva.firma,
       correctivaRepuestos,
+      correctivaEstadoInterno: orden.estado || '',
+      correctivaFirmaRecepcion: correctiva.firmaRecepcion,
+      correctivaRecibidoPor: correctiva.recibidoPor,
+      correctivaCargoRecepcion: correctiva.cargoRecepcion,
+      correctivaGarantiaContrato: correctiva.garantiaContrato,
+      correctivaOrigenGarantiaFolio: correctiva.origenGarantiaFolio,
     });
     setActiveModule(isPreventivo ? 'operaciones-preventiva' : 'operaciones-correctiva');
   };
@@ -1887,11 +2882,42 @@ const HistorialMantenciones = ({ tipo }) => {
             <Input label="Area / Servicio" value={editModal.ubicacion_area || ''} onChange={e => setEditModal(m => ({ ...m, ubicacion_area: e.target.value }))} />
             <Input label="Solicitado por" value={editModal.solicitado_por || ''} onChange={e => setEditModal(m => ({ ...m, solicitado_por: e.target.value }))} />
             <Input label="Fecha" type="date" value={editModal.fecha || ''} onChange={e => setEditModal(m => ({ ...m, fecha: e.target.value }))} />
-            <div className="md:col-span-3 flex flex-col gap-1.5">
-              <label className="text-sm font-semibold text-slate-700">Observaciones</label>
-              <textarea value={editModal.observaciones || ''} onChange={e => setEditModal(m => ({ ...m, observaciones: e.target.value }))}
-                className="min-h-36 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
-            </div>
+            {isPreventivo ? (
+              <div className="md:col-span-3 flex flex-col gap-1.5">
+                <label className="text-sm font-semibold text-slate-700">Observaciones</label>
+                <textarea value={editModal.editPreventiva?.observaciones || ''} onChange={e => setEditModal(m => ({ ...m, editPreventiva: { ...(m.editPreventiva || {}), observaciones: e.target.value } }))}
+                  className="min-h-36 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+              </div>
+            ) : (
+              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2 flex flex-col gap-1.5">
+                  <label className="text-sm font-semibold text-slate-700">Condición inicial</label>
+                  <textarea value={editModal.editCorrectiva?.condicionInicial || ''} onChange={e => setEditModal(m => ({ ...m, editCorrectiva: { ...(m.editCorrectiva || {}), condicionInicial: e.target.value } }))}
+                    className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-semibold text-slate-700">Diagnóstico</label>
+                  <textarea value={editModal.editCorrectiva?.diagnostico || ''} onChange={e => setEditModal(m => ({ ...m, editCorrectiva: { ...(m.editCorrectiva || {}), diagnostico: e.target.value } }))}
+                    className="min-h-28 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-semibold text-slate-700">Conclusión</label>
+                  <textarea value={editModal.editCorrectiva?.conclusion || ''} onChange={e => setEditModal(m => ({ ...m, editCorrectiva: { ...(m.editCorrectiva || {}), conclusion: e.target.value } }))}
+                    className="min-h-28 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                </div>
+                <div className="md:col-span-2 flex flex-col gap-1.5">
+                  <label className="text-sm font-semibold text-slate-700">Condición final</label>
+                  <textarea value={editModal.editCorrectiva?.condicionFinal || ''} onChange={e => setEditModal(m => ({ ...m, editCorrectiva: { ...(m.editCorrectiva || {}), condicionFinal: e.target.value } }))}
+                    className="min-h-20 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                </div>
+                {(isEstadoEjecutado(editModal.estado) || editModal.editCorrectiva?.recibidoPor || editModal.editCorrectiva?.cargoRecepcion) && (
+                  <>
+                    <Input label="Recibido por" value={editModal.editCorrectiva?.recibidoPor || ''} onChange={e => setEditModal(m => ({ ...m, editCorrectiva: { ...(m.editCorrectiva || {}), recibidoPor: e.target.value } }))} />
+                    <Input label="Cargo recepción" value={editModal.editCorrectiva?.cargoRecepcion || ''} onChange={e => setEditModal(m => ({ ...m, editCorrectiva: { ...(m.editCorrectiva || {}), cargoRecepcion: e.target.value } }))} />
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-3 pt-6 mt-6 border-t">
             <Button variant="secondary" onClick={() => setEditModal(null)}>Cancelar</Button>
@@ -1906,20 +2932,42 @@ const HistorialMantenciones = ({ tipo }) => {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative w-full lg:max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por folio, cliente, equipo, marca, modelo, serie, inventario o estado..."
-              className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-4">
+          <div className="grid w-full grid-cols-1 gap-3 md:grid-cols-[minmax(220px,360px)_160px_160px]">
+            <div className="relative self-end">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por folio, cliente, equipo, marca, modelo, serie, inventario o estado..."
+                className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+            <label className="space-y-1">
+              <span className="block text-[10px] font-bold uppercase text-slate-400">Fecha desde</span>
+              <input
+                type="date"
+                value={fechaDesde}
+                onChange={(e) => setFechaDesde(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-[10px] font-bold uppercase text-slate-400">Fecha hasta</span>
+              <input
+                type="date"
+                value={fechaHasta}
+                onChange={(e) => setFechaHasta(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </label>
           </div>
           {selectedIds.length > 0 && (
-            <div className="flex flex-col gap-2 rounded-lg border border-blue-100 bg-blue-50 p-2 sm:flex-row sm:items-center">
-              <span className="px-2 text-sm font-semibold text-blue-700">{selectedIds.length} registro(s) seleccionado(s)</span>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 p-2">
+              <span className="shrink-0 px-2 text-sm font-semibold text-blue-700">{selectedIds.length} registro(s) seleccionado(s)</span>
+              <Button variant="secondary" className="text-xs" onClick={exportHistorialExcel} icon={FileSpreadsheet}>Excel seleccionados</Button>
+              <Button variant="secondary" className="text-xs" onClick={downloadBulkPdfs} icon={Download}>PDFs seleccionados</Button>
               <Button variant="accent" className="text-xs" onClick={generarCotizacionMasiva} icon={FileText}>Cotizacion masiva</Button>
               <Button variant="secondary" className="text-xs text-red-600" onClick={handleBulkDelete} icon={Trash2}>Eliminar seleccionados</Button>
             </div>
@@ -1933,17 +2981,24 @@ const HistorialMantenciones = ({ tipo }) => {
                   <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection}
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                 </th>
-                {['Folio', 'Cliente', 'Equipo', 'Marca', 'Modelo', 'Serie', 'Inventario', 'Estado Interno', 'Acciones'].map(h => (
-                  <th key={h} className="p-3 text-[10px] font-bold uppercase text-slate-500">{h}</th>
-                ))}
+                <SortableHeader label="Fecha" sortKey="fecha" />
+                <SortableHeader label="Folio" sortKey="folio" />
+                <SortableHeader label="Cliente" sortKey="cliente" />
+                <SortableHeader label="Equipo" sortKey="equipo" />
+                <SortableHeader label="Marca" sortKey="marca" />
+                <SortableHeader label="Modelo" sortKey="modelo" />
+                <SortableHeader label="Serie" sortKey="serie" />
+                <SortableHeader label="Inventario" sortKey="inventario" />
+                <SortableHeader label="Estado Interno" sortKey="estado" />
+                <th className="p-3 text-[10px] font-bold uppercase text-slate-500">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="10" className="px-6 py-12 text-center text-slate-400 italic">Cargando historial...</td></tr>
-              ) : filteredOrdenes.length === 0 ? (
-                <tr><td colSpan="10" className="px-6 py-12 text-center text-slate-400 italic">{ordenes.length === 0 ? 'No hay registros.' : 'No hay registros que coincidan con la busqueda.'}</td></tr>
-              ) : filteredOrdenes.map(orden => {
+                <tr><td colSpan="11" className="px-6 py-12 text-center text-slate-400 italic">Cargando historial...</td></tr>
+              ) : sortedOrdenes.length === 0 ? (
+                <tr><td colSpan="11" className="px-6 py-12 text-center text-slate-400 italic">{ordenes.length === 0 ? 'No hay registros.' : 'No hay registros que coincidan con la busqueda.'}</td></tr>
+              ) : sortedOrdenes.map(orden => {
                 const cliente = getCliente(orden);
                 return (
                   <tr key={orden.id} className="border-b hover:bg-slate-50">
@@ -1951,6 +3006,7 @@ const HistorialMantenciones = ({ tipo }) => {
                       <input type="checkbox" checked={selectedIds.includes(orden.id)} onChange={() => toggleRowSelection(orden.id)}
                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                     </td>
+                    <td className="p-3 font-mono text-xs">{formatPdfDate(orden.fecha)}</td>
                     <td className="p-3 font-mono text-xs">{orden.folio}</td>
                     <td className="p-3 font-medium">{cliente?.name || '—'}</td>
                     <td className="p-3">{orden.tipo_equipo || '—'}</td>
@@ -1962,8 +3018,7 @@ const HistorialMantenciones = ({ tipo }) => {
                     <td className="p-3">
                       <div className="flex items-center justify-end gap-1">
                         <button onClick={() => handleMail(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Enviar por mail"><Mail size={14} /></button>
-                        <button onClick={() => openEdit(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Modificar informacion"><Pencil size={14} /></button>
-                        <button onClick={() => reopenFlow(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Reabrir formulario"><ClipboardList size={14} /></button>
+                        <button onClick={() => reopenFlow(orden)} disabled={!canReopenOrden(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30" title={canReopenOrden(orden) ? 'Reabrir formulario' : 'Correctiva ejecutada: requiere permiso'}><ClipboardList size={14} /></button>
                         <button onClick={() => handleDelete(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar registro"><Trash2 size={14} /></button>
                         <button onClick={() => openPdf(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Visualizar PDF"><FileDown size={14} /></button>
                         <button onClick={() => generarCotizacion(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-green-50 hover:text-green-600" title="Generar cotizacion"><FileText size={14} /></button>
@@ -1981,9 +3036,9 @@ const HistorialMantenciones = ({ tipo }) => {
 };
 
 const Cotizaciones = () => {
-  const { cotizacionDraft, setCotizacionDraft, setActiveModule, cotizacionesHistorial, setCotizacionesHistorial } = useContext(ERPContext);
+  const { cotizacionDraft, setCotizacionDraft, setActiveModule, cotizacionesHistorial, setCotizacionesHistorial, currentEmpresa } = useContext(ERPContext);
   const [draft, setDraft] = useState(cotizacionDraft || {
-    numero: '', fecha: new Date().toISOString().split('T')[0], cliente: '', rut: '', direccion: '',
+    numero: nextCotizacionNumero(cotizacionesHistorial), fecha: new Date().toISOString().split('T')[0], cliente: '', rut: '', direccion: '',
     comuna: '', telefono: '', solicitadoPor: '', vendedor: '', referencia: '', glosa: '', detalles: '',
     idLicitacion: '', unidadNegocio: 'Casa Matriz', centroCosto: 'Operaciones',
     items: [{ codigo: '', parte: '', descripcion: '', unidad: 'Uns', cantidad: 1, precio: 0, dcto: 0 }],
@@ -2009,13 +3064,14 @@ const Cotizaciones = () => {
   const { neto, iva, total } = cotizacionTotals(draft.items);
 
   const openPrintable = () => {
-    openHtmlDocument(buildCotizacionHtml(draft));
+    openHtmlDocument(buildCotizacionHtml(draft, currentEmpresa));
   };
 
   const saveCotizacion = () => {
     const totals = cotizacionTotals(draft.items);
     const record = {
       ...draft,
+      numero: draft.numero || nextCotizacionNumero(cotizacionesHistorial),
       id: draft.id || `cot-${Date.now()}`,
       estado: draft.estado || 'Emitida',
       neto: totals.neto,
@@ -2113,7 +3169,7 @@ const Cotizaciones = () => {
 };
 
 const HistorialCotizaciones = () => {
-  const { cotizacionesHistorial, setCotizacionesHistorial, setCotizacionDraft, setActiveModule, setOcRecibidas } = useContext(ERPContext);
+  const { cotizacionesHistorial, setCotizacionesHistorial, setCotizacionDraft, setActiveModule, setOcRecibidas, currentEmpresa } = useContext(ERPContext);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [ocModal, setOcModal] = useState(null);
@@ -2130,7 +3186,7 @@ const HistorialCotizaciones = () => {
   const toggleAllVisible = () => setSelectedIds(prev => allVisibleSelected
     ? prev.filter(id => !filteredIds.includes(id))
     : Array.from(new Set([...prev, ...filteredIds])));
-  const openPdf = (cotizacion) => openHtmlDocument(buildCotizacionHtml(cotizacion));
+  const openPdf = (cotizacion) => openHtmlDocument(buildCotizacionHtml(cotizacion, currentEmpresa));
   const mailCotizacion = (cotizacion) => {
     openPdf(cotizacion);
     const subject = encodeURIComponent(`Cotizacion ${cotizacion.numero || ''}`);
@@ -2138,7 +3194,7 @@ const HistorialCotizaciones = () => {
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
   const downloadPdf = (cotizacion) => {
-    const win = openHtmlDocument(buildCotizacionHtml(cotizacion));
+    const win = openHtmlDocument(buildCotizacionHtml(cotizacion, currentEmpresa));
     setTimeout(() => win.print(), 300);
   };
   const editCotizacion = (cotizacion) => {
@@ -3445,16 +4501,26 @@ const MantenedoresClientesProveedores = () => {
     if (!data.rut || !data.razonSocial) { alert('RUT y Razón Social son obligatorios.'); return; }
     const duplicate = clientes.some(c => c.empresaId === activeEmpresaId && normalizeKey(c.rut) === normalizeKey(data.rut) && c.id !== data.id);
     if (duplicate) { alert('Ya existe un cliente/proveedor con ese RUT en la empresa activa.'); return; }
-    const payload = { name: data.razonSocial, rut: data.rut, empresa_id: activeEmpresaId };
+
+    const isColError = (msg) => msg && (msg.includes('column') || msg.includes('schema cache'));
+    const extPayload  = clienteFullPayload(data);
+    const basePayload = clienteBasePayload(data);
+
     if (modal.mode === 'new') {
-      const { data: row, error } = await supabase.from('clientes').insert([payload]).select().single();
+      let { data: row, error } = await supabase.from('clientes').insert([extPayload]).select().single();
+      if (error && isColError(error.message)) {
+        ({ data: row, error } = await supabase.from('clientes').insert([basePayload]).select().single());
+      }
       if (error) { alert('Error al guardar: ' + error.message); return; }
       const normalized = { ...normalizeCliente(row), ...data, empresaId: activeEmpresaId };
       setClientes(prev => [normalized, ...prev]);
     } else {
-      const { error } = await supabase.from('clientes').update(payload).eq('id_RUT', data.id);
+      let { error } = await supabase.from('clientes').update(extPayload).eq('id_RUT', data.id);
+      if (error && isColError(error.message)) {
+        ({ error } = await supabase.from('clientes').update(basePayload).eq('id_RUT', data.id));
+      }
       if (error) { alert('Error al guardar: ' + error.message); return; }
-      setClientes(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
+      setClientes(prev => prev.map(c => c.id === data.id ? { ...c, ...normalizeCliente({ ...c, ...data }) } : c));
     }
     closeModal();
   };
@@ -3645,7 +4711,9 @@ const MIGRATION_SQL = `ALTER TABLE licitaciones
   ADD COLUMN IF NOT EXISTS fecha_inicio  DATE,
   ADD COLUMN IF NOT EXISTS fecha_termino DATE,
   ADD COLUMN IF NOT EXISTS monto         BIGINT,
-  ADD COLUMN IF NOT EXISTS estado        TEXT DEFAULT 'Activa';`;
+  ADD COLUMN IF NOT EXISTS estado        TEXT DEFAULT 'Activa',
+  ADD COLUMN IF NOT EXISTS garantia_preventiva_meses INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS garantia_correctiva_meses INTEGER DEFAULT 0;`;
 
 const isSchemaError = (msg) => msg && (msg.includes('schema cache') || msg.includes('column'));
 
@@ -3666,7 +4734,7 @@ const MantenedoresLicitaciones = () => {
 
   // Detecta si las columnas extendidas existen en el esquema
   useEffect(() => {
-    supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado').limit(1)
+    supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado, garantia_preventiva_meses, garantia_correctiva_meses').limit(1)
       .then(({ error }) => { if (error && isSchemaError(error.message)) setSchemaMissing(true); });
   }, []);
 
@@ -3683,7 +4751,7 @@ const MantenedoresLicitaciones = () => {
   };
 
   // ---- CRUD manual ----
-  const emptyForm = { id_licitacion: '', name: '', cliente_id: '', fecha_inicio: '', fecha_termino: '', monto: '', estado: 'Activa' };
+  const emptyForm = { id_licitacion: '', name: '', cliente_id: '', fecha_inicio: '', fecha_termino: '', monto: '', estado: 'Activa', garantia_preventiva_meses: '', garantia_correctiva_meses: '' };
   const openNew  = () => setModal({ mode: 'new', data: { ...emptyForm } });
   const openEdit = (l) => setModal({ mode: 'edit', data: {
     id: l.id,
@@ -3694,6 +4762,8 @@ const MantenedoresLicitaciones = () => {
     fecha_termino: l.fecha_termino || '',
     monto:         l.monto != null  ? String(l.monto) : '',
     estado:        l.estado        || 'Activa',
+    garantia_preventiva_meses: l.garantia_preventiva_meses != null ? String(l.garantia_preventiva_meses) : '',
+    garantia_correctiva_meses: l.garantia_correctiva_meses != null ? String(l.garantia_correctiva_meses) : '',
   }});
   const closeModal = () => { setModal(null); setSaving(false); };
   const setField = (key, val) => setModal(m => ({ ...m, data: { ...m.data, [key]: val } }));
@@ -3706,9 +4776,11 @@ const MantenedoresLicitaciones = () => {
     fecha_termino: data.fecha_termino || null,
     monto:         data.monto ? Number(String(data.monto).replace(/\D/g, '')) || null : null,
     estado:        data.estado        || 'Activa',
+    garantia_preventiva_meses: data.garantia_preventiva_meses ? Number(data.garantia_preventiva_meses) || 0 : 0,
+    garantia_correctiva_meses: data.garantia_correctiva_meses ? Number(data.garantia_correctiva_meses) || 0 : 0,
   });
   const basePayload = (data) => ({ name: data.name, cliente_id: data.cliente_id });
-  const hasExtendedData = (r) => Boolean(r.id_licitacion || r.fecha_inicio || r.fecha_termino || r.monto || (r.estado && r.estado !== 'Activa'));
+  const hasExtendedData = (r) => Boolean(r.id_licitacion || r.fecha_inicio || r.fecha_termino || r.monto || r.garantia_preventiva_meses || r.garantia_correctiva_meses || (r.estado && r.estado !== 'Activa'));
 
   // Intenta con payload completo; si falla por schema, reintenta con columnas base
   const safeInsert = async (data) => {
@@ -3807,15 +4879,17 @@ const MantenedoresLicitaciones = () => {
     { key: 'fecha_inicio',  label: 'Fecha Inicio',      required: false, hint: 'dd/mm/aaaa' },
     { key: 'fecha_termino', label: 'Fecha Término',     required: false, hint: 'dd/mm/aaaa' },
     { key: 'monto',         label: 'Monto Contrato',    required: false, hint: 'Solo números, sin puntos ni $' },
+    { key: 'garantia_preventiva_meses', label: 'Garantia Preventiva Meses', required: false, hint: 'Meses cobertura preventiva, ej: 3' },
+    { key: 'garantia_correctiva_meses', label: 'Garantia Correctiva Meses', required: false, hint: 'Meses cobertura correctiva, ej: 6' },
     { key: 'estado',        label: 'Estado',            required: false, hint: 'Activa / Vencida / En revisión / Cancelada / Suspendida' },
   ];
 
   const exportTemplate = () => {
     const hintRow   = COLUMNS.map(c => c.hint);
-    const exampleRow = ['LIC-001', 'Contrato Mantención 2025', '76.123.456-K', '01/01/2025', '31/12/2025', '5000000', 'Activa'];
+    const exampleRow = ['LIC-001', 'Contrato Mantención 2025', '76.123.456-K', '01/01/2025', '31/12/2025', '5000000', '3', '6', 'Activa'];
 
     const ws = XLSX.utils.aoa_to_sheet([COLUMNS.map(c => c.label), hintRow, exampleRow]);
-    ws['!cols'] = [{ wch: 14 }, { wch: 38 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }];
+    ws['!cols'] = [{ wch: 14 }, { wch: 38 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 24 }, { wch: 14 }];
 
     const clientesData = [['Nombre Cliente', 'RUT Cliente']];
     clientes.forEach(c => clientesData.push([c.name, c.rut]));
@@ -3864,7 +4938,7 @@ const MantenedoresLicitaciones = () => {
       });
 
       const mapped = rows.map((row, idx) => {
-        const entry = { id_licitacion: '', name: '', rut_cliente: '', fecha_inicio: '', fecha_termino: '', monto: '', estado: 'Activa', _row: idx + 2 };
+        const entry = { id_licitacion: '', name: '', rut_cliente: '', fecha_inicio: '', fecha_termino: '', monto: '', garantia_preventiva_meses: '', garantia_correctiva_meses: '', estado: 'Activa', _row: idx + 2 };
         const keys = Object.keys(row);
         COLUMNS.forEach(col => {
           const wanted = normalizeHeader(col.label);
@@ -3900,14 +4974,14 @@ const MantenedoresLicitaciones = () => {
     if (previewErrors.length > 0) return;
     setImporting(true);
     try {
-      const schemaProbe = await supabaseRequest(() => supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado').limit(1));
+      const schemaProbe = await supabaseRequest(() => supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado, garantia_preventiva_meses, garantia_correctiva_meses').limit(1));
       const missingExtendedSchema = schemaMissing || (schemaProbe.error && isSchemaError(schemaProbe.error.message));
 
       if (missingExtendedSchema && preview.some(hasExtendedData)) {
         setSchemaMissing(true);
         setImportResult({
           ok: false,
-          message: 'La tabla licitaciones no tiene columnas para ID, fechas, monto o estado. Copia y ejecuta el SQL amarillo de arriba en Supabase y vuelve a importar el Excel.',
+          message: 'La tabla licitaciones no tiene columnas para ID, fechas, monto, estado o garantias. Copia y ejecuta el SQL amarillo de arriba en Supabase y vuelve a importar el Excel.',
         });
         return;
       }
@@ -3919,6 +4993,8 @@ const MantenedoresLicitaciones = () => {
         fecha_inicio:  r.fecha_inicio  || null,
         fecha_termino: r.fecha_termino || null,
         monto:         r.monto ? Number(String(r.monto).replace(/\D/g, '')) || null : null,
+        garantia_preventiva_meses: r.garantia_preventiva_meses ? Number(String(r.garantia_preventiva_meses).replace(/\D/g, '')) || 0 : 0,
+        garantia_correctiva_meses: r.garantia_correctiva_meses ? Number(String(r.garantia_correctiva_meses).replace(/\D/g, '')) || 0 : 0,
         estado:        r.estado        || 'Activa',
       });
       const buildBaseRow = (r) => ({ name: r.name, cliente_id: resolveClienteId(r.rut_cliente) });
@@ -4062,6 +5138,12 @@ const MantenedoresLicitaciones = () => {
             </div>
             <Input label="Monto Contrato (CLP)" type="number" value={modal.data.monto}
               onChange={e => setField('monto', e.target.value)} placeholder="5000000" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="Garantia preventiva (meses)" type="number" value={modal.data.garantia_preventiva_meses}
+                onChange={e => setField('garantia_preventiva_meses', e.target.value)} placeholder="0" />
+              <Input label="Garantia correctiva (meses)" type="number" value={modal.data.garantia_correctiva_meses}
+                onChange={e => setField('garantia_correctiva_meses', e.target.value)} placeholder="0" />
+            </div>
             <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
               <Button variant="secondary" onClick={closeModal}>Cancelar</Button>
               <Button variant="accent" icon={saving ? Cpu : CheckCircle} onClick={handleSave}
@@ -4237,6 +5319,8 @@ const MantenedoresLicitaciones = () => {
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Fecha Inicio</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Fecha Término</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Monto Contrato</th>
+                <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Garantia Prev.</th>
+                <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Garantia Corr.</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Estado</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Acciones</th>
               </tr>
@@ -4244,7 +5328,7 @@ const MantenedoresLicitaciones = () => {
             <tbody className="divide-y divide-slate-50">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan="10" className="px-6 py-12 text-center text-slate-400 italic">
+                  <td colSpan="12" className="px-6 py-12 text-center text-slate-400 italic">
                     {licitaciones.length === 0 ? 'No hay licitaciones. Usa "Nueva Licitación" o carga un Excel.' : 'Sin resultados para la búsqueda.'}
                   </td>
                 </tr>
@@ -4266,6 +5350,8 @@ const MantenedoresLicitaciones = () => {
                     <td className="px-4 py-4 text-slate-700">
                       {l.monto ? `$${Number(l.monto).toLocaleString('es-CL')}` : '—'}
                     </td>
+                    <td className="px-4 py-4 text-slate-500 text-xs">{l.garantia_preventiva_meses ? `${l.garantia_preventiva_meses} mes(es)` : '—'}</td>
+                    <td className="px-4 py-4 text-slate-500 text-xs">{l.garantia_correctiva_meses ? `${l.garantia_correctiva_meses} mes(es)` : '—'}</td>
                     <td className="px-4 py-4 text-right">
                       <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${estadoBadge(l.estado)}`}>
                         {l.estado || 'Activa'}
@@ -5260,16 +6346,11 @@ const MantenedoresUsuarios = () => {
         return parentAllowed ? mod : null;
       }).filter(Boolean);
 
-  const toSupabasePayload = (data) => ({
-    id: data.id || crypto.randomUUID(),
-    usuario: data.usuario.trim(),
-    nombre: data.nombre.trim(),
-    rut: data.rut.trim(),
-    cargo: data.cargo || '',
-    contrasena: data.contrasena || '',
+  const toSupabasePayload = (data, options) => usuarioPayload({
+    ...data,
     accesos: buildAccessUnion(data),
-    permisos_empresas: data.permisosEmpresas || {},
-  });
+    permisosEmpresas: data.permisosEmpresas || {},
+  }, options);
 
   const handleSave = async () => {
     const { mode, data } = modal;
@@ -5281,19 +6362,25 @@ const MantenedoresUsuarios = () => {
     if (rutDup) { alert(`El RUT ${data.rut} ya está registrado.`); return; }
     setSaving(true);
     try {
-      const payload = toSupabasePayload(data);
       if (mode === 'new') {
-        const { data: row, error } = await supabase.from('usuarios').insert([payload]).select().single();
+        const { data: row, error } = await insertUsuario({
+          ...data,
+          accesos: buildAccessUnion(data),
+          permisosEmpresas: data.permisosEmpresas || {},
+        });
         if (error) throw error;
-        setUsuarios(prev => [{ ...row, accesos: row.accesos || [], permisosEmpresas: row.permisos_empresas || {} }, ...prev]);
+        setUsuarios(prev => [normalizeUsuario(row), ...prev]);
       } else {
-        const { data: row, error } = await supabase.from('usuarios').update(payload).eq('id', data.id).select().single();
+        const payload = toSupabasePayload(data, { includeId: false });
+        const { data: row, error } = await supabaseRequest(() =>
+          supabase.from('usuarios').update(payload).eq('id', data.id).select().single()
+        );
         if (error) throw error;
-        setUsuarios(prev => prev.map(u => u.id === row.id ? { ...row, accesos: row.accesos || [], permisosEmpresas: row.permisos_empresas || {} } : u));
+        setUsuarios(prev => prev.map(u => u.id === row.id ? normalizeUsuario(row) : u));
       }
       closeModal();
     } catch (err) {
-      alert('Error al guardar usuario: ' + (err.message || err));
+      alert('Error al guardar usuario: ' + friendlyError(err));
     } finally {
       setSaving(false);
     }
@@ -5482,6 +6569,20 @@ const MantenedoresUsuarios = () => {
                       )}
                     </div>
                   ))}
+                  <div className="rounded-xl border border-amber-100 bg-amber-50 overflow-hidden">
+                    <label className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-amber-100 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={selectedEmpresaAccesos().includes(PERM_MODIFICAR_CORRECTIVA_EJECUTADA)}
+                        onChange={() => toggleAcceso(PERM_MODIFICAR_CORRECTIVA_EJECUTADA)}
+                        className="w-4 h-4 rounded border-slate-300 accent-amber-600"
+                      />
+                      <span className="text-sm font-bold text-slate-700">Autorizar modificacion de correctivas ejecutadas</span>
+                    </label>
+                    <div className="border-t border-amber-100 bg-white px-4 py-2 text-xs text-slate-500">
+                      Permite reabrir un mantenimiento correctivo guardado con estado interno Ejecutado.
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -5512,6 +6613,7 @@ const emptyEmpresa = () => ({
   correoContacto: '', telefono: '', claveTributaria: '', direccion: '', comuna: '', ciudad: '', region: 'Metropolitana',
   pais: 'Chile', codigoActividad: '', rutRepresentante: '', nombreRepresentante: '',
   fechaResolucionSII: '', resolucionSII: '', sucursalResolucionSII: '',
+  membreteImagen: '', membreteNombre: '',
   unidadesNegocio: [], centrosCosto: [], bodegas: [], modulosPermitidos: [],
 });
 
@@ -5526,24 +6628,69 @@ const ConfigEmpresas = () => {
   const [form, setForm] = useState(emptyEmpresa());
   const [activeEmpresaTab, setActiveEmpresaTab] = useState('datos');
   const [search, setSearch] = useState('');
+  const [savingEmpresa, setSavingEmpresa] = useState(false);
 
   const normalizeText = (v) => String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const filtered = empresas.filter(e => normalizeText([e.rut, e.razonSocial, e.nombreFantasia, e.giro].join(' ')).includes(normalizeText(search)));
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const handleMembreteFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Debes seleccionar un archivo de imagen.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxWidth = 1200;
+        const maxHeight = 500;
+        const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const dataUrl = mime === 'image/png' ? canvas.toDataURL(mime) : canvas.toDataURL(mime, 0.88);
+        setForm(f => ({
+          ...f,
+          membreteImagen: dataUrl,
+          membreteNombre: file.name,
+        }));
+      };
+      img.onerror = () => alert('No se pudo leer la imagen seleccionada.');
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  const removeMembrete = () => setForm(f => ({ ...f, membreteImagen: '', membreteNombre: '' }));
 
   const openNew  = () => { setForm(emptyEmpresa()); setActiveEmpresaTab('datos'); setView('form'); };
   const openEdit = (e) => { setForm({ ...emptyEmpresa(), ...e, modulosPermitidos: e.modulosPermitidos || [] }); setActiveEmpresaTab('datos'); setView('form'); };
   const cancel   = () => setView('list');
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.rut || !form.razonSocial) { alert('RUT y Razón Social son obligatorios.'); return; }
-    if (form.id) {
-      setEmpresas(prev => prev.map(e => e.id === form.id ? { ...form } : e));
-    } else {
-      setEmpresas(prev => [{ ...form, id: Date.now().toString() }, ...prev]);
+    setSavingEmpresa(true);
+    try {
+      const savedForm = form.id ? { ...form } : { ...form, id: Date.now().toString() };
+      const nextEmpresas = form.id
+        ? empresas.map(e => e.id === form.id ? savedForm : e)
+        : [savedForm, ...empresas];
+      const { error } = await saveAppDataToSupabase('empresas', nextEmpresas);
+      if (error) {
+        alert('No se pudo guardar el membrete para otros usuarios: ' + friendlyError(error));
+        return;
+      }
+      localStorage.setItem(APP_DATA_KEYS.empresas, JSON.stringify(nextEmpresas));
+      setEmpresas(nextEmpresas);
+      setView('list');
+    } finally {
+      setSavingEmpresa(false);
     }
-    setView('list');
   };
 
   const handleDelete = (emp) => {
@@ -5598,8 +6745,8 @@ const ConfigEmpresas = () => {
         </div>
         <div className="flex gap-2">
           <button onClick={cancel} className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-100 transition-colors">Cancelar</button>
-          <button onClick={handleSave} className="flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-colors">
-            <CheckCircle size={15}/> Guardar Empresa
+          <button onClick={handleSave} disabled={savingEmpresa} className="flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
+            <CheckCircle size={15}/> {savingEmpresa ? 'Guardando...' : 'Guardar Empresa'}
           </button>
         </div>
       </div>
@@ -5609,6 +6756,10 @@ const ConfigEmpresas = () => {
           <button onClick={() => setActiveEmpresaTab('datos')}
             className={`px-4 py-2 text-xs font-bold rounded-t-lg border border-b-0 ${activeEmpresaTab === 'datos' ? 'bg-white text-blue-700 border-slate-200' : 'bg-slate-50 text-slate-500 border-transparent hover:text-slate-700'}`}>
             Datos de la empresa
+          </button>
+          <button onClick={() => setActiveEmpresaTab('membrete')}
+            className={`px-4 py-2 text-xs font-bold rounded-t-lg border border-b-0 ${activeEmpresaTab === 'membrete' ? 'bg-white text-blue-700 border-slate-200' : 'bg-slate-50 text-slate-500 border-transparent hover:text-slate-700'}`}>
+            Membrete
           </button>
           <button onClick={() => setActiveEmpresaTab('modulos')}
             className={`px-4 py-2 text-xs font-bold rounded-t-lg border border-b-0 ${activeEmpresaTab === 'modulos' ? 'bg-white text-blue-700 border-slate-200' : 'bg-slate-50 text-slate-500 border-transparent hover:text-slate-700'}`}>
@@ -5743,6 +6894,51 @@ const ConfigEmpresas = () => {
         </div>
       </div>
       </>
+      ) : activeEmpresaTab === 'membrete' ? (
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div>
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Membrete de documentos</h3>
+          <p className="mt-1 text-sm text-slate-500">Carga la imagen que se usará en el encabezado de los documentos de esta empresa.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
+          <div className="space-y-3">
+            <label className="flex min-h-48 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center text-slate-400 transition-colors hover:border-blue-300 hover:text-blue-600">
+              <Upload size={24} />
+              <span className="mt-2 text-sm font-bold">Cargar imagen</span>
+              <span className="mt-1 text-xs">PNG, JPG o JPEG</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/jpg"
+                className="hidden"
+                onChange={e => handleMembreteFile(e.target.files?.[0])}
+              />
+            </label>
+            {form.membreteImagen && (
+              <button onClick={removeMembrete} className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-100 bg-red-50 px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-100">
+                <Trash2 size={14}/> Quitar imagen
+              </button>
+            )}
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase text-slate-400">Vista previa</p>
+                <p className="text-sm font-semibold text-slate-700">{form.membreteNombre || 'Sin imagen cargada'}</p>
+              </div>
+            </div>
+            <div className="flex min-h-52 items-center justify-center rounded-lg bg-slate-50 p-4">
+              {form.membreteImagen ? (
+                <img src={form.membreteImagen} alt="Membrete de empresa" className="max-h-48 max-w-full object-contain" />
+              ) : (
+                <div className="text-center text-sm text-slate-400">
+                  <FileText size={28} className="mx-auto mb-2" />
+                  No hay imagen de membrete cargada.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
       ) : (
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100">
@@ -6209,10 +7405,12 @@ const TDInputField = ({ label, field, formObj, setFn, type='text' }) => (
 );
 
 const ConfigTipoDocumentos = () => {
-  const { tipoDocumentos, setTipoDocumentos, empresas } = useContext(ERPContext);
+  const { tipoDocumentos, setTipoDocumentos, empresas, protocolosPreventivos, setProtocolosPreventivos } = useContext(ERPContext);
   const [view, setView]         = useState('list');
   const [form, setForm]         = useState(emptyTipoDoc());
   const [activeTab, setActiveTab] = useState('tipo-doc');
+  const [mainTab, setMainTab] = useState('documentos');
+  const [selectedProtocolKey, setSelectedProtocolKey] = useState('camas');
   const [search, setSearch]     = useState('');
   const [subModal, setSubModal] = useState(null);
   const [importModal, setImportModal] = useState(null);
@@ -6223,6 +7421,61 @@ const ConfigTipoDocumentos = () => {
   const filtered = tipoDocumentos.filter(d =>
     norm([d.tipDoc, d.descripcion, d.ciclo].join(' ')).includes(norm(search))
   );
+  const selectedProtocol = normalizePreventiveProtocol(protocolosPreventivos?.[selectedProtocolKey], selectedProtocolKey);
+  const updateSelectedProtocol = (nextProtocol) => {
+    setProtocolosPreventivos(prev => ({
+      ...defaultPreventiveProtocolsConfig(),
+      ...(prev || {}),
+      [selectedProtocolKey]: normalizePreventiveProtocol(nextProtocol, selectedProtocolKey),
+    }));
+  };
+  const updateProtocolTitle = (value) => updateSelectedProtocol({ ...selectedProtocol, title: value });
+  const updateProtocolSectionName = (sectionIndex, value) => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: selectedProtocol.sections.map((section, index) => index === sectionIndex ? { ...section, section: value } : section),
+  });
+  const updateProtocolItem = (sectionIndex, itemIndex, value) => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: selectedProtocol.sections.map((section, index) => index === sectionIndex
+      ? { ...section, items: section.items.map((item, i) => i === itemIndex ? { ...item, label: value } : item) }
+      : section),
+  });
+  const updateProtocolItemCriticidad = (sectionIndex, itemIndex, criticidad) => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: selectedProtocol.sections.map((section, index) => index === sectionIndex
+      ? { ...section, items: section.items.map((item, i) => i === itemIndex ? { ...item, criticidad } : item) }
+      : section),
+  });
+  const updateProtocolItemRequired = (sectionIndex, itemIndex, obligatorio) => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: selectedProtocol.sections.map((section, index) => index === sectionIndex
+      ? { ...section, items: section.items.map((item, i) => i === itemIndex ? { ...item, obligatorio } : item) }
+      : section),
+  });
+  const addProtocolSection = () => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: [...selectedProtocol.sections, { section: 'Nueva seccion', items: [{ label: 'Nueva actividad', criticidad: 'No critico', obligatorio: false }] }],
+  });
+  const removeProtocolSection = (sectionIndex) => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: selectedProtocol.sections.filter((_, index) => index !== sectionIndex),
+  });
+  const addProtocolItem = (sectionIndex) => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: selectedProtocol.sections.map((section, index) => index === sectionIndex
+      ? { ...section, items: [...section.items, { label: 'Nueva actividad', criticidad: 'No critico', obligatorio: false }] }
+      : section),
+  });
+  const removeProtocolItem = (sectionIndex, itemIndex) => updateSelectedProtocol({
+    ...selectedProtocol,
+    sections: selectedProtocol.sections.map((section, index) => index === sectionIndex
+      ? { ...section, items: section.items.filter((_, i) => i !== itemIndex) }
+      : section),
+  });
+  const resetSelectedProtocol = () => {
+    if (!window.confirm('Restaurar este protocolo a su version base?')) return;
+    updateSelectedProtocol(defaultPreventiveProtocolByKey(selectedProtocolKey));
+  };
 
   const openNew  = () => { setForm(emptyTipoDoc()); setActiveTab('tipo-doc'); setView('form'); };
   const openEdit = (d) => { setForm({ ...d, empresaConfig: d.empresaConfig||[], relacionesAnt: d.relacionesAnt||[], relacionesPost: d.relacionesPost||[] }); setActiveTab('tipo-doc'); setView('form'); };
@@ -6544,7 +7797,7 @@ const ConfigTipoDocumentos = () => {
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Configuraciones</p>
           <h2 className="text-2xl font-bold text-slate-900">Tipo de Documentos</h2>
         </div>
-        <div className="flex items-center gap-2">
+        {mainTab === 'documentos' && <div className="flex items-center gap-2">
           <button onClick={handleDownloadTemplate} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-100 transition-colors">
             <Download size={14}/> Plantilla Excel
           </button>
@@ -6555,10 +7808,93 @@ const ConfigTipoDocumentos = () => {
           <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm">
             <Plus size={14}/> Nuevo Tipo
           </button>
-        </div>
+        </div>}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="flex border-b border-slate-100 overflow-x-auto">
+          {[['documentos','Documentos'],['protocolos','Protocolos'],['formatos','Formatos']].map(([id, label]) => (
+            <button key={id} onClick={() => setMainTab(id)}
+              className={mainTab === id ? tabAct : tabIna}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {mainTab === 'protocolos' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-100 grid grid-cols-1 md:grid-cols-[260px_1fr_auto] gap-4 md:items-end">
+            <div>
+              <label className={TD_LBL_CLS}>Protocolo preventivo</label>
+              <select value={selectedProtocolKey} onChange={e => setSelectedProtocolKey(e.target.value)} className={TD_SEL_CLS}>
+                {PREVENTIVE_PROTOCOL_KEYS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={TD_LBL_CLS}>Titulo del protocolo</label>
+              <input value={selectedProtocol.title} onChange={e => updateProtocolTitle(e.target.value)} className={TD_INP_CLS} />
+            </div>
+            <button onClick={resetSelectedProtocol} className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-100">
+              Restaurar base
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            {selectedProtocol.sections.map((section, sectionIndex) => (
+              <div key={`${section.section}-${sectionIndex}`} className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="grid grid-cols-[1fr_auto] gap-3 bg-slate-50 border-b border-slate-100 p-3">
+                  <input value={section.section} onChange={e => updateProtocolSectionName(sectionIndex, e.target.value)}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <button onClick={() => removeProtocolSection(sectionIndex)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar seccion">
+                    <Trash2 size={15}/>
+                  </button>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {section.items.map((item, itemIndex) => (
+                    <div key={`${item}-${itemIndex}`} className="grid grid-cols-[1fr_auto] gap-3 p-3">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_160px_140px]">
+                        <input value={protocolItemLabel(item)} onChange={e => updateProtocolItem(sectionIndex, itemIndex, e.target.value)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                        <select value={protocolItemCriticidad(item)} onChange={e => updateProtocolItemCriticidad(sectionIndex, itemIndex, e.target.value)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                          <option>Critico</option>
+                          <option>No critico</option>
+                        </select>
+                        <label className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600">
+                          <input type="checkbox" checked={protocolItemRequired(item)} onChange={e => updateProtocolItemRequired(sectionIndex, itemIndex, e.target.checked)}
+                            className="h-4 w-4 rounded border-slate-300 accent-blue-600" />
+                          Obligatorio
+                        </label>
+                      </div>
+                      <button onClick={() => removeProtocolItem(sectionIndex, itemIndex)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar actividad">
+                        <X size={15}/>
+                      </button>
+                    </div>
+                  ))}
+                  <div className="p-3">
+                    <button onClick={() => addProtocolItem(sectionIndex)} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100">
+                      <Plus size={13}/> Agregar actividad
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button onClick={addProtocolSection} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700">
+              <Plus size={14}/> Agregar seccion
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mainTab === 'formatos' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
+          <FileText size={34} className="mx-auto text-slate-300 mb-3" />
+          <p className="font-bold text-slate-700">Formatos</p>
+          <p className="mt-1 text-sm text-slate-400">Los formatos configurables se pueden incorporar aqui cuando definamos la estructura de cada documento.</p>
+        </div>
+      )}
+
+      {mainTab === 'documentos' && <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-100">
           <div className="relative w-full lg:max-w-md">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
@@ -6597,7 +7933,7 @@ const ConfigTipoDocumentos = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
 
       {/* Import modal */}
       {importModal && createPortal(
@@ -6703,6 +8039,8 @@ const emptyParametros = () => ({
   nProdTexto1:'Producto texto 1', nProdTexto2:'Producto texto 2', nProdTexto3:'Producto texto 3',
   nCLProvCaract1:'Cliente/Prov característica 1', nCLProvCaract2:'Cliente/Prov característica 2',
   nCLProvTexto1:'Cliente/Prov texto 1', nCLProvTexto2:'Cliente/Prov texto 2',
+  estadosInternosCorrectiva: DEFAULT_ESTADOS_INTERNOS_CORRECTIVA,
+  promptConclusionCorrectiva: DEFAULT_CORRECTIVA_CONCLUSION_PROMPT,
 });
 
 const PAR_MONEDAS_LOCAL = ['PESO CHILENO','DÓLAR AMERICANO','EURO','UF'];
@@ -6769,12 +8107,39 @@ const ConfigParametros = () => {
   const [activeTab, setActiveTab] = useState('general');
 
   const sf  = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const save = () => { setParametros(form); alert('Parámetros guardados correctamente.'); };
+  const save = async () => {
+    const cleanForm = {
+      ...form,
+      estadosInternosCorrectiva: ensureDefaultEstadosInternos(form.estadosInternosCorrectiva || []),
+    };
+    const result = await setParametros(cleanForm);
+    if (result?.error) {
+      alert('Parámetros guardados localmente, pero no se pudieron guardar en Supabase: ' + friendlyError(result.error));
+      return;
+    }
+    alert('Parámetros guardados correctamente.');
+  };
+  const estadosInternos = ensureDefaultEstadosInternos(form.estadosInternosCorrectiva || [], { preserveEmpty: true });
+  const setEstadosInternos = (next) => sf('estadosInternosCorrectiva', ensureDefaultEstadosInternos(next, { preserveEmpty: true }));
+  const updateEstadoInterno = (index, value) => {
+    const next = [...estadosInternos];
+    next[index] = value;
+    setEstadosInternos(next);
+  };
+  const addEstadoInterno = () => setEstadosInternos([...estadosInternos, 'Nuevo estado']);
+  const removeEstadoInterno = (index) => {
+    const target = estadosInternos[index];
+    if (isEstadoEjecutado(target)) {
+      alert('El estado Ejecutado es obligatorio para habilitar la recepcion de equipo.');
+      return;
+    }
+    setEstadosInternos(estadosInternos.filter((_, i) => i !== index));
+  };
 
   const PAR_TABS = [
     ['general','General'],['impuestos','Impuestos'],['cuentas','Cuentas contables'],
     ['tesoreria','Tesorería'],['documentos','Documentos'],['proyecto','Proyecto'],
-    ['otros','Otros'],['probabilidad','Probabilidad'],['nombre-campos','Nombre de campos'],['api','API Senegocia'],
+    ['otros','Otros'],['estado-interno','Estado Interno'],['prompt','Prompt'],['probabilidad','Probabilidad'],['nombre-campos','Nombre de campos'],['api','API Senegocia'],
   ];
   const tbBase = "px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap";
 
@@ -6937,6 +8302,74 @@ const ConfigParametros = () => {
                 <div><label className={PAR_LBL}>Texto de tag A2</label><input value={form.tagA2} onChange={e=>sf('tagA2',e.target.value)} className={`w-full ${PAR_INP}`}/></div>
                 <div><label className={PAR_LBL}>Texto de tag A55</label><input value={form.tagA55} onChange={e=>sf('tagA55',e.target.value)} className={`w-full ${PAR_INP}`}/></div>
                 <div><label className={PAR_LBL}>Texto de tag A56</label><input value={form.tagA56} onChange={e=>sf('tagA56',e.target.value)} className={`w-full ${PAR_INP}`}/></div>
+              </div>
+              <ParSaveBtn onClick={save}/>
+            </div>
+          )}
+
+          {/* ── ESTADO INTERNO ── */}
+          {activeTab==='estado-interno' && (
+            <div className="space-y-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Estados internos de mantención correctiva</h3>
+                  <p className="mt-1 text-xs text-slate-400">Estos estados aparecerán en el selector de Estado Interno de cada correctiva.</p>
+                </div>
+                <button onClick={addEstadoInterno} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors">
+                  <Plus size={14}/> Agregar
+                </button>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b">
+                      <th className="p-3 text-left text-[10px] font-bold uppercase text-slate-500">Estado</th>
+                      <th className="p-3 text-left text-[10px] font-bold uppercase text-slate-500">Comportamiento</th>
+                      <th className="p-3 w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {estadosInternos.map((estado, index) => (
+                      <tr key={`estado-interno-${index}`} className="border-b last:border-0 hover:bg-slate-50">
+                        <td className="p-3">
+                          <input value={estado} onChange={e => updateEstadoInterno(index, e.target.value)}
+                            className={`w-full ${PAR_INP}`} />
+                        </td>
+                        <td className="p-3 text-xs text-slate-500">
+                          {isEstadoEjecutado(estado)
+                            ? 'Solicita Recibido por, Cargo y firma de recepción.'
+                            : 'Estado operativo normal.'}
+                        </td>
+                        <td className="p-3 text-right">
+                          <button onClick={() => removeEstadoInterno(index)}
+                            className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            title="Eliminar estado">
+                            <Trash2 size={14}/>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ParSaveBtn onClick={save}/>
+            </div>
+          )}
+
+          {/* PROMPT */}
+          {activeTab==='prompt' && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Prompt para conclusion IA correctiva</h3>
+                <p className="mt-1 text-xs text-slate-400">Este texto se usa para generar solo la conclusion del informe. El hallazgo tecnico queda como texto escrito manualmente.</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className={PAR_LBL}>Prompt de conclusion</label>
+                <textarea
+                  value={form.promptConclusionCorrectiva || DEFAULT_CORRECTIVA_CONCLUSION_PROMPT}
+                  onChange={e => sf('promptConclusionCorrectiva', e.target.value)}
+                  className={`min-h-56 w-full ${PAR_INP}`}
+                />
               </div>
               <ParSaveBtn onClick={save}/>
             </div>
@@ -8017,13 +9450,40 @@ const AbastecimientoDocumentos = () => {
   const [filters, setFilters] = useState({ fechaDesde: defaultDocumentDateFrom(), fechaHasta: accountingDate() });
   const [search, setSearch] = useState('');
   const [internalDocs, setInternalDocs] = useState(() => readLocalList('sentauris_abastecimiento_documentos'));
+  const internalDocsLoadedRef = useRef(false);
   const [orderModal, setOrderModal] = useState(null);
   const [orderTab, setOrderTab] = useState('Encabezado');
   const [orderLine, setOrderLine] = useState(() => emptyPurchaseOrderLine(1));
   const [orderPreview, setOrderPreview] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('sentauris_abastecimiento_documentos', JSON.stringify(internalDocs));
+    const loadInternalDocs = async () => {
+      const { data, error } = await loadAppDataFromSupabase(['abastecimiento_documentos']);
+      if (error) {
+        console.error('Error cargando documentos de abastecimiento desde Supabase:', error);
+        internalDocsLoadedRef.current = true;
+        return;
+      }
+      const remoteRow = (data || []).find(row => row.key === 'abastecimiento_documentos');
+      if (remoteRow) {
+        const remoteDocs = Array.isArray(remoteRow.data) ? remoteRow.data : [];
+        setInternalDocs(remoteDocs);
+        localStorage.setItem(APP_DATA_KEYS.abastecimiento_documentos, JSON.stringify(remoteDocs));
+      } else if (internalDocs.length > 0) {
+        await saveAppDataToSupabase('abastecimiento_documentos', internalDocs);
+      }
+      internalDocsLoadedRef.current = true;
+    };
+    loadInternalDocs();
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(APP_DATA_KEYS.abastecimiento_documentos, JSON.stringify(internalDocs));
+    if (internalDocsLoadedRef.current) {
+      saveAppDataToSupabase('abastecimiento_documentos', internalDocs).then(({ error }) => {
+        if (error) console.error('Error guardando documentos de abastecimiento en Supabase:', error);
+      });
+    }
   }, [internalDocs]);
 
   const updateFilter = (field, value) => setFilters(prev => ({ ...prev, [field]: value }));
@@ -8966,19 +10426,19 @@ const LoginPage = () => {
         .from('usuarios')
         .select('*')
         .ilike('usuario', user)
-        .single();
+        .maybeSingle();
 
       if (dbError || !data) {
-        setError('Usuario no encontrado.');
+        setError(dbError ? `No se pudo consultar usuarios: ${friendlyError(dbError)}` : 'Usuario no encontrado.');
         return;
       }
       if ((data.contrasena || '').trim() !== pass) {
         setError('Contraseña incorrecta.');
         return;
       }
-      doLogin({ ...data, accesos: data.accesos || [], permisosEmpresas: data.permisos_empresas || {}, isSuperadmin: false });
-    } catch {
-      setError('Error al conectar con el servidor.');
+      doLogin({ ...normalizeUsuario(data), isSuperadmin: false });
+    } catch (err) {
+      setError('Error al conectar con el servidor: ' + friendlyError(err));
     } finally {
       setChecking(false);
     }
@@ -9318,8 +10778,225 @@ const CompanySessionModal = () => {
   );
 };
 
+const buildPreventivePublicReportHtml = ({ orden, cliente, lic, empresa, protocolosPreventivos }) => {
+  const empresaInforme = empresa || {};
+  const empresaNombre = empresaInforme.razonSocial || empresaInforme.nombreFantasia || 'Vaicmedical';
+  const empresaRut = empresaInforme.rut || empresaInforme.RUT || '77.573.229-6';
+  const empresaGiro = empresaInforme.giro || 'Mantencion y Reparacion de Equipos Medicos';
+  const empresaMail = empresaInforme.correoContacto || empresaInforme.email || 'servicios@vaicmedical.cl';
+  const empresaMembrete = empresaInforme.membreteImagen || '/logo-vaic-pdf.jpeg';
+  const protocolo = getPreventiveProtocol(orden.tipo_equipo, protocolosPreventivos);
+  const preventiva = parsePreventivaObservaciones(orden.observaciones);
+  const checklist = orden.preventivaChecklist || preventiva.checklist || {};
+  const isStructuredPreventiva = String(orden.observaciones || '').startsWith(PREVENTIVA_OBS_PREFIX);
+  const obs = htmlText(isStructuredPreventiva ? preventiva.observaciones : (preventiva.observaciones || orden.observaciones || ''));
+  const mark = (item, status) => preventiveEntryMatches(checklist[item], status) ? 'X' : '';
+  const criticidad = (item) => normalizePreventiveChecklistEntry(checklist[item]).criticidad;
+  const firmaPreventiva = preventiva.firma ? `<img class="firma-img" src="${preventiva.firma}" alt="Firma tecnico"/>` : '';
+  const firmaRecepcionPreventiva = preventiva.firmaRecepcion ? `<img class="firma-img" src="${preventiva.firmaRecepcion}" alt="Firma recepcion"/>` : '';
+  const verificationUrl = preventiveVerificationUrl(orden);
+  const tecnicoNombre = preventiva.tecnicoNombre || '';
+  const tecnicoRut = preventiva.tecnicoRut || '';
+
+  return `
+    <style>
+      body{font-family:Arial,sans-serif;color:#111827;margin:0;padding:24px;background:#fff}.page{max-width:960px;margin:auto}
+      .print-btn{margin-bottom:12px;padding:8px 14px;border:0;background:#0f172a;color:white;border-radius:8px;font-weight:700}
+      .head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta{text-align:right;font-size:12px;line-height:1.5}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;margin-bottom:8px}
+      h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase}.grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #111827;border-bottom:0}.cell{border-bottom:1px solid #111827;border-right:1px solid #111827;padding:7px;font-size:12px}.cell b{display:block;font-size:10px;text-transform:uppercase;color:#475569}
+      table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #111827;padding:6px;font-size:11px}.mark{text-align:center;font-weight:800}th{background:#e5e7eb}.obs{border:1px solid #111827;padding:10px;min-height:70px;margin-top:12px;font-size:12px}
+      .section-title{font-size:12px;font-weight:800;text-transform:uppercase;margin-top:14px}.recepcion th,.recepcion td{text-align:left;vertical-align:middle}.recepcion th:nth-child(3),.recepcion td:nth-child(3){width:180px;text-align:center}.qr{width:108px;height:108px;object-fit:contain}.qr-url{font-size:7px;line-height:1.2;color:#475569;word-break:break-all;margin-top:4px}
+      .firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto}.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.sign-card{display:flex;flex-direction:column}.signature-slot{height:96px;display:flex;align-items:flex-end;justify-content:center}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px;min-height:38px}
+      @media print{.print-btn{display:none}body{padding:0}}
+    </style>
+    <div class="page">
+      <button class="print-btn" onclick="window.print()">Imprimir / Guardar PDF</button>
+      <div class="head"><div><img class="logo" src="${empresaMembrete}" alt="Membrete empresa"/></div><div class="company"><div class="brand">${htmlText(empresaNombre)}</div><div>RUT: ${htmlText(empresaRut)}</div><div>Giro: ${htmlText(empresaGiro)}</div><div>Correo: ${htmlText(empresaMail)}</div></div><div class="meta"><span class="folio-label">Folio</span><span class="folio-value">${htmlText(orden.folio || '')}</span>Fecha: ${htmlText(formatPdfDate(orden.fecha))}</div></div>
+      <h1>${htmlText(protocolo.title)}</h1>
+      <div class="grid">
+        <div class="cell"><b>Cliente</b>${htmlText(cliente?.name || '')}</div><div class="cell"><b>RUT</b>${htmlText(cliente?.rut || '')}</div><div class="cell"><b>Licitacion</b>${htmlText(lic?.id_licitacion || lic?.name || '')}</div>
+        <div class="cell"><b>Equipo</b>${htmlText(orden.tipo_equipo || '')}</div><div class="cell"><b>Marca</b>${htmlText(orden.marca || '')}</div><div class="cell"><b>Modelo</b>${htmlText(orden.modelo || '')}</div>
+        <div class="cell"><b>Serie</b>${htmlText(orden.numero_serie || '')}</div><div class="cell"><b>Inventario</b>${htmlText(orden.numero_inventario || '')}</div><div class="cell"><b>Servicio</b>${htmlText(orden.ubicacion_area || '')}</div>
+      </div>
+      <table><thead><tr><th>Accion</th><th>Criticidad</th><th>Si</th><th>No</th><th>N/A</th><th>Falla</th></tr></thead><tbody>
+      ${protocolo.sections.flatMap(s => [`<tr><th colspan="6">${htmlText(s.section)}</th></tr>`, ...s.items.map(i => {
+        const itemLabel = protocolItemLabel(i);
+        const itemKey = `${s.section} - ${itemLabel}`;
+        return `<tr><td>${htmlText(itemLabel)}</td><td>${htmlText(criticidad(itemKey))}</td><td class="mark">${mark(itemKey, 'Si')}</td><td class="mark">${mark(itemKey, 'No')}</td><td class="mark">${mark(itemKey, 'N/A')}</td><td class="mark">${mark(itemKey, 'Falla')}</td></tr>`;
+      })]).join('')}
+      </tbody></table>
+      <div class="obs"><b>Observaciones</b><br/>${obs}</div>
+      <p><b>Estado final:</b> ${htmlText(orden.estado_equipo || orden.estado || '')}</p>
+      <div class="section-title">Recepcion del equipo</div><table class="recepcion"><thead><tr><th>Nombre</th><th>Cargo</th><th>Verificacion QR</th></tr></thead><tbody><tr><td>${htmlText(preventiva.recibidoPor || '')}</td><td>${htmlText(preventiva.cargoRecepcion || '')}</td><td><img class="qr" src="${qrImageUrl(verificationUrl)}" alt="QR verificacion"/><div class="qr-url">${htmlText(verificationUrl)}</div></td></tr></tbody></table>
+      <div class="sign"><div class="sign-card"><div class="signature-slot">${firmaRecepcionPreventiva}</div><div class="line">Firma y Recepcion Conforme</div></div><div class="sign-card"><div class="signature-slot">${firmaPreventiva}</div><div class="line">Tecnico en Mantenimiento Equipo Medico${tecnicoNombre ? `<br/>${htmlText(tecnicoNombre)}` : ''}${tecnicoRut ? ` - RUT: ${htmlText(tecnicoRut)}` : ''}</div></div></div>
+    </div>`;
+};
+
+const PublicPreventiveReport = ({ verifyOrderId = '', verifyFolio = '' }) => {
+  const [state, setState] = useState({ loading: true, error: '', html: '' });
+
+  useEffect(() => {
+    const loadReport = async () => {
+      setState({ loading: true, error: '', html: '' });
+      let query = supabase.from('ordenes_trabajo').select('*').eq('tipo_mantencion', 'preventiva').limit(1);
+      query = verifyOrderId ? query.eq('id', verifyOrderId) : query.eq('folio', verifyFolio);
+      const { data: ordenesData, error: ordenError } = await supabaseRequest(() => query);
+      const orden = ordenesData?.[0];
+      if (ordenError || !orden) {
+        setState({ loading: false, error: 'No se encontro el informe preventivo solicitado.', html: '' });
+        return;
+      }
+
+      const [{ data: clientesData }, { data: licData }, { data: checklistData }, { data: appData }] = await Promise.all([
+        supabase.from('clientes').select('*').eq('id_RUT', orden.cliente_id).maybeSingle(),
+        supabase.from('licitaciones').select('*').eq('id', orden.licitacion_id).maybeSingle(),
+        supabase.from('orden_checklist').select('*').eq('orden_id', orden.id),
+        supabase.from('app_data').select('key, data').in('key', ['empresas', 'protocolos_preventivos']),
+      ]);
+      const checklist = (checklistData || []).reduce((acc, item) => {
+        acc[item.item] = item.estado;
+        return acc;
+      }, {});
+      const appRows = appData || [];
+      const empresas = appRows.find(row => row.key === 'empresas')?.data || [];
+      const protocolosPreventivos = appRows.find(row => row.key === 'protocolos_preventivos')?.data || {};
+      const html = buildPreventivePublicReportHtml({
+        orden: { ...orden, preventivaChecklist: Object.keys(checklist).length ? checklist : undefined },
+        cliente: clientesData,
+        lic: licData,
+        empresa: Array.isArray(empresas) ? empresas[0] : null,
+        protocolosPreventivos,
+      });
+      setState({ loading: false, error: '', html });
+    };
+    loadReport();
+  }, [verifyOrderId, verifyFolio]);
+
+  if (state.loading) return <div className="min-h-screen grid place-items-center bg-white text-slate-500">Cargando informe...</div>;
+  if (state.error) return <div className="min-h-screen grid place-items-center bg-white p-6 text-center text-slate-700">{state.error}</div>;
+  return <div dangerouslySetInnerHTML={{ __html: state.html }} />;
+};
+
+const buildCorrectivePublicReportHtml = ({ orden, cliente, lic, empresa }) => {
+  const empresaInforme = empresa || {};
+  const empresaNombre = empresaInforme.razonSocial || empresaInforme.nombreFantasia || 'Vaicmedical';
+  const empresaRut = empresaInforme.rut || empresaInforme.RUT || '77.573.229-6';
+  const empresaGiro = empresaInforme.giro || 'Mantencion y Reparacion de Equipos Medicos';
+  const empresaMail = empresaInforme.correoContacto || empresaInforme.email || 'servicios@vaicmedical.cl';
+  const empresaMembrete = empresaInforme.membreteImagen || '/logo-vaic-pdf.jpeg';
+  const correctiva = parseCorrectivaObservaciones(orden.observaciones);
+  const estado = String(orden.estado || '').trim();
+  const estadoKey = normalizeKey(estado);
+  const title = correctiva.garantiaContrato || estadoKey === 'garantia'
+    ? 'MANT. CORRECTIVO. - GARANTIA'
+    : isEstadoEjecutado(estado)
+      ? 'MANT. CORRECTIVO - EJECUTADO'
+      : estadoKey === 'ingresado'
+        ? 'MANT. CORRECTIVO - DIAGNOSTICO'
+        : estado
+          ? `MANT. CORRECTIVO - ${estado.toUpperCase()}`
+          : 'MANT. CORRECTIVO';
+  const showCondicionFinal = ['garantia', 'sugerencia de baja'].includes(estadoKey) || isEstadoEjecutado(estado);
+  const verificationUrl = reportVerificationUrl('correctiva', orden);
+  const firmaTecnico = correctiva.firma ? `<img class="firma-img" src="${correctiva.firma}" alt="Firma tecnico"/>` : '';
+  const firmaRecepcion = correctiva.firmaRecepcion ? `<img class="firma-img" src="${correctiva.firmaRecepcion}" alt="Firma recepcion"/>` : '';
+  const fotos = correctiva.fotos?.length
+    ? `<div class="photos">${correctiva.fotos.map(f => `<figure><img src="${f.src}" alt="${htmlText(f.name || 'foto')}"/><figcaption>${htmlText(f.name || '')}</figcaption></figure>`).join('')}</div>`
+    : '';
+  const diagnosticoHtml = correctiva.conclusion ? htmlText(correctiva.conclusion) : '';
+
+  return `
+    <style>
+      body{font-family:Arial,sans-serif;color:#111827;margin:0;padding:24px;background:#fff}.page{max-width:960px;margin:auto}.print-btn{margin-bottom:12px;padding:8px 14px;border:0;background:#0f172a;color:white;border-radius:8px;font-weight:700}
+      .head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta{text-align:right;font-size:12px;line-height:1.5}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;margin-bottom:8px}
+      h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase;letter-spacing:.06em}.grid{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid #111827;border-bottom:0}.cell{border-bottom:1px solid #111827;border-right:1px solid #111827;padding:7px;font-size:12px}.cell b{display:block;font-size:10px;text-transform:uppercase;color:#475569}
+      .section{margin-top:18px}.section-title{font-size:12px;font-weight:800;text-transform:uppercase;margin-top:14px}.box{border:1px solid #111827;padding:12px;min-height:70px;font-size:12px;line-height:1.45}.recepcion{width:100%;border-collapse:collapse;margin-top:16px}.recepcion th,.recepcion td{border:1px solid #111827;padding:6px;font-size:11px;text-align:left;vertical-align:middle}.recepcion th{background:#e5e7eb}.recepcion th:nth-child(3),.recepcion td:nth-child(3){width:180px;text-align:center}.qr{width:108px;height:108px;object-fit:contain}.qr-url{font-size:7px;line-height:1.2;color:#475569;word-break:break-all;margin-top:4px}
+      .photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,140px));gap:8px;margin-top:10px}.photos figure{margin:0;break-inside:avoid}.photos img{width:100%;height:92px;object-fit:contain;border:1px solid #cbd5e1;background:#f8fafc}.photos figcaption{font-size:9px;color:#64748b;margin-top:3px;word-break:break-word}.firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto 8px}.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.sign-card{display:flex;flex-direction:column}.signature-slot{height:96px;display:flex;align-items:flex-end;justify-content:center}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px;min-height:38px}
+      @media print{.print-btn{display:none}body{padding:0}}
+    </style>
+    <div class="page">
+      <button class="print-btn" onclick="window.print()">Imprimir / Guardar PDF</button>
+      <div class="head"><div><img class="logo" src="${empresaMembrete}" alt="Membrete empresa"/></div><div class="company"><div class="brand">${htmlText(empresaNombre)}</div><div>RUT: ${htmlText(empresaRut)}</div><div>Giro: ${htmlText(empresaGiro)}</div><div>Correo: ${htmlText(empresaMail)}</div></div><div class="meta"><span class="folio-label">Folio</span><span class="folio-value">${htmlText(orden.folio || '')}</span>Fecha: ${htmlText(formatPdfDate(orden.fecha))}</div></div>
+      <h1>${htmlText(title)}</h1>
+      <div class="grid">
+        <div class="cell"><b>Cliente</b>${htmlText(cliente?.name || '')}</div><div class="cell"><b>RUT</b>${htmlText(cliente?.rut || '')}</div>
+        <div class="cell"><b>Licitacion convenio</b>${htmlText(lic?.id_licitacion || lic?.name || '')}</div><div class="cell"><b>Servicio</b>${htmlText(orden.ubicacion_area || '')}</div>
+        <div class="cell"><b>Tipo de equipo</b>${htmlText(orden.tipo_equipo || '')}</div><div class="cell"><b>Marca</b>${htmlText(orden.marca || '')}</div>
+        <div class="cell"><b>Modelo</b>${htmlText(orden.modelo || '')}</div><div class="cell"><b>Serie / Inventario</b>${htmlText(`${orden.numero_serie || ''} / ${orden.numero_inventario || ''}`)}</div>
+      </div>
+      <div class="section"><h3>Condicion inicial de equipo</h3><div class="box">${htmlText(correctiva.condicionInicial || correctivaText(correctiva))}</div></div>
+      <div class="section"><h3>Informacion de diagnostico</h3><div class="box">${diagnosticoHtml}</div></div>
+      ${showCondicionFinal ? `<div class="section"><h3>Condicion final</h3><div class="box">${htmlText(correctiva.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA)}</div></div>` : ''}
+      ${fotos ? `<div class="section"><h3>Registro fotografico</h3>${fotos}</div>` : ''}
+      <div class="section-title">Recepcion del equipo</div><table class="recepcion"><thead><tr><th>Nombre</th><th>Cargo</th><th>Verificacion QR</th></tr></thead><tbody><tr><td>${htmlText(correctiva.recibidoPor || '')}</td><td>${htmlText(correctiva.cargoRecepcion || '')}</td><td><img class="qr" src="${qrImageUrl(verificationUrl)}" alt="QR verificacion"/><div class="qr-url">${htmlText(verificationUrl)}</div></td></tr></tbody></table>
+      <div class="sign"><div class="sign-card"><div class="signature-slot">${firmaRecepcion}</div><div class="line">Firma y Recepcion Conforme</div></div><div class="sign-card"><div class="signature-slot">${firmaTecnico}</div><div class="line">Tecnico en Mantenimiento Equipo Medico</div></div></div>
+    </div>`;
+};
+
+const PublicCorrectiveReport = ({ verifyOrderId = '', verifyFolio = '' }) => {
+  const [state, setState] = useState({ loading: true, error: '', html: '' });
+
+  useEffect(() => {
+    const loadReport = async () => {
+      setState({ loading: true, error: '', html: '' });
+      let query = supabase.from('ordenes_trabajo').select('*').eq('tipo_mantencion', 'correctiva').limit(1);
+      query = verifyOrderId ? query.eq('id', verifyOrderId) : query.eq('folio', verifyFolio);
+      const { data: ordenesData, error: ordenError } = await supabaseRequest(() => query);
+      const orden = ordenesData?.[0];
+      if (ordenError || !orden) {
+        setState({ loading: false, error: 'No se encontro el informe correctivo solicitado.', html: '' });
+        return;
+      }
+      const [{ data: clientesData }, { data: licData }, { data: appData }] = await Promise.all([
+        supabase.from('clientes').select('*').eq('id_RUT', orden.cliente_id).maybeSingle(),
+        supabase.from('licitaciones').select('*').eq('id', orden.licitacion_id).maybeSingle(),
+        supabase.from('app_data').select('key, data').in('key', ['empresas']),
+      ]);
+      const empresas = (appData || []).find(row => row.key === 'empresas')?.data || [];
+      const html = buildCorrectivePublicReportHtml({
+        orden,
+        cliente: clientesData,
+        lic: licData,
+        empresa: Array.isArray(empresas) ? empresas[0] : null,
+      });
+      setState({ loading: false, error: '', html });
+    };
+    loadReport();
+  }, [verifyOrderId, verifyFolio]);
+
+  if (state.loading) return <div className="min-h-screen grid place-items-center bg-white text-slate-500">Cargando informe...</div>;
+  if (state.error) return <div className="min-h-screen grid place-items-center bg-white p-6 text-center text-slate-700">{state.error}</div>;
+  return <div dangerouslySetInnerHTML={{ __html: state.html }} />;
+};
+
 const ContentManager = () => {
-  const { activeModule, sidebarOpen, loggedInUser, activeEmpresaId } = useContext(ERPContext);
+  const { activeModule, setActiveModule, sidebarOpen, loggedInUser, activeEmpresaId } = useContext(ERPContext);
+  const [verificationRequest] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get('verify');
+    if (!['preventiva', 'correctiva'].includes(type)) return null;
+    return {
+      type,
+      orden: params.get('orden') || '',
+      folio: params.get('folio') || '',
+    };
+  });
+
+  useEffect(() => {
+    if (verificationRequest?.type === 'preventiva') {
+      setActiveModule('operaciones-historial-preventivo');
+    } else if (verificationRequest?.type === 'correctiva') {
+      setActiveModule('operaciones-historial-correctivo');
+    }
+  }, [verificationRequest, setActiveModule]);
+
+  if (verificationRequest?.type === 'preventiva' && !loggedInUser) {
+    return <PublicPreventiveReport verifyOrderId={verificationRequest.orden} verifyFolio={verificationRequest.folio} />;
+  }
+  if (verificationRequest?.type === 'correctiva' && !loggedInUser) {
+    return <PublicCorrectiveReport verifyOrderId={verificationRequest.orden} verifyFolio={verificationRequest.folio} />;
+  }
 
   if (!loggedInUser) return <LoginPage />;
 
@@ -9354,7 +11031,7 @@ const ContentManager = () => {
       case 'operaciones-registro': return <NuevoRegistro />;
       case 'operaciones-preventiva': return <MantencionPreventiva />;
       case 'operaciones-correctiva': return <MantencionCorrectiva />;
-      case 'operaciones-historial-preventivo': return <HistorialMantenciones tipo="preventiva" />;
+      case 'operaciones-historial-preventivo': return <HistorialMantenciones tipo="preventiva" verifyOrderId={verificationRequest?.orden || ''} verifyFolio={verificationRequest?.folio || ''} />;
       case 'operaciones-historial-correctivo': return <HistorialMantenciones tipo="correctiva" />;
       case 'operaciones-cotizaciones': return <Cotizaciones />;
       case 'operaciones-historial-cotizaciones': return <HistorialCotizaciones />;
