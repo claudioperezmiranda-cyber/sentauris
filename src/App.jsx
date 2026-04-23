@@ -481,6 +481,55 @@ const htmlText = (value = '') =>
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br/>');
 
+const buildPhotoGalleryHtml = (items = [], title = '') => {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  return `
+    <div class="annex-group">
+      <h4>${htmlText(title)}</h4>
+      <div class="annex-grid">
+        ${items.map(item => `
+          <figure>
+            <div class="annex-label">${htmlText(item.label || '')}</div>
+            <img src="${item.src}" alt="${htmlText(item.name || item.label || 'respaldo')}"/>
+          </figure>
+        `).join('')}
+      </div>
+    </div>
+  `;
+};
+
+const buildCorrectivaAnnexHtml = (correctiva = {}) => {
+  const condicionInicialPhotos = Array.isArray(correctiva.fotos)
+    ? correctiva.fotos.map(photo => ({ ...photo, label: 'Condicion inicial' }))
+    : [];
+  const repuestoPhotos = Array.isArray(correctiva.repuestosDetalle)
+    ? correctiva.repuestosDetalle.flatMap(item =>
+        (Array.isArray(item.respaldos) ? item.respaldos : []).map(photo => ({
+          ...photo,
+          label: `${item.name || 'Repuesto'}${item.part_number ? ` - ${item.part_number}` : ''}`
+        }))
+      )
+    : [];
+  const condicionFinalPhotos = Array.isArray(correctiva.condicionFinalRespaldos)
+    ? correctiva.condicionFinalRespaldos.map(photo => ({ ...photo, label: 'Condicion final' }))
+    : [];
+
+  const content = [
+    buildPhotoGalleryHtml(condicionInicialPhotos, 'Condicion inicial'),
+    buildPhotoGalleryHtml(repuestoPhotos, 'Repuestos y servicios'),
+    buildPhotoGalleryHtml(condicionFinalPhotos, 'Condicion final'),
+  ].filter(Boolean).join('');
+
+  if (!content) return '';
+
+  return `
+    <div class="annex-page">
+      <h2>Anexos Fotograficos</h2>
+      ${content}
+    </div>
+  `;
+};
+
 const formatPdfDate = (value = '') => {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -2823,9 +2872,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
           : correctivaEstado
             ? `MANT. CORRECTIVO - ${correctivaEstado.toUpperCase()}`
             : 'MANT. CORRECTIVO';
-    const correctivaFotos = correctiva.fotos.length > 0
-      ? `<div class="photos">${correctiva.fotos.map(f => `<figure><img src="${f.src}" alt="${f.name || 'foto'}"/><figcaption>${htmlText(f.name || '')}</figcaption></figure>`).join('')}</div>`
-      : '';
+    const correctivaAnnexes = buildCorrectivaAnnexHtml(correctiva);
     const correctivaFirma = correctiva.firma
       ? `<img class="firma-img" src="${correctiva.firma}" alt="Firma tecnico"/>`
       : '';
@@ -2842,7 +2889,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       .head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo-box{display:flex;align-items:center;justify-content:flex-start}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta{text-align:right;font-size:12px;line-height:1.5;color:#111827}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;color:#0f172a;margin-bottom:8px}
       h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase;letter-spacing:.06em}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #111827;border-bottom:0}.cell{border-right:1px solid #111827;border-bottom:1px solid #111827;padding:7px;font-size:12px}.cell b{display:block;font-size:10px;text-transform:uppercase;color:#475569}
       .section{margin-top:18px}.section-title{font-size:12px;font-weight:800;text-transform:uppercase;margin-top:14px}.box{border:1px solid #111827;padding:12px;min-height:70px;font-size:12px;line-height:1.45}.recepcion{width:100%;border-collapse:collapse;margin-top:16px}.recepcion th,.recepcion td{border:1px solid #111827;padding:6px;font-size:11px;text-align:left;vertical-align:middle}.recepcion th{background:#e5e7eb}.recepcion th:nth-child(3),.recepcion td:nth-child(3){width:180px;text-align:center}.qr{width:108px;height:108px;object-fit:contain}.qr-url{font-size:7px;line-height:1.2;color:#475569;word-break:break-all;margin-top:4px}.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.sign-card{display:flex;flex-direction:column}.signature-slot{height:96px;display:flex;align-items:flex-end;justify-content:center}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px;min-height:38px}
-      .photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,140px));gap:8px;margin-top:10px}.photos figure{margin:0;break-inside:avoid}.photos img{width:100%;height:92px;object-fit:contain;border:1px solid #cbd5e1;background:#f8fafc}.photos figcaption{font-size:9px;color:#64748b;margin-top:3px;word-break:break-word}.firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto 8px}
+      .firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto 8px}.annex-page{page-break-before:always;break-before:page}.annex-page h2{font-size:18px;text-align:center;margin:0 0 18px;text-transform:uppercase}.annex-group{margin-top:18px}.annex-group h4{font-size:12px;font-weight:800;text-transform:uppercase;margin:0 0 10px}.annex-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.annex-grid figure{margin:0;border:1px solid #cbd5e1;padding:10px;background:#fff;break-inside:avoid}.annex-grid img{width:100%;height:260px;object-fit:contain;background:#f8fafc;border:1px solid #e2e8f0}.annex-label{font-size:11px;font-weight:700;margin-bottom:8px;color:#0f172a}
       @media print{button{display:none}body{padding:0}}
       </style></head><body><div class="page">
       <div class="head"><div class="logo-box"><img class="logo" src="${empresaMembrete}" alt="Membrete empresa"/></div><div class="company"><div class="brand">${htmlText(empresaNombre)}</div><div>RUT: ${htmlText(empresaRut)}</div><div>Giro: ${htmlText(empresaGiro)}</div><div>Correo: ${htmlText(empresaMail)}</div></div><div class="meta"><span class="folio-label">Folio</span><span class="folio-value">${htmlText(orden.folio || '')}</span>Fecha: ${htmlText(fechaInforme)}</div></div>
@@ -2856,10 +2903,10 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       <div class="section"><h3>Condicion inicial de equipo</h3><div class="box">${htmlText(correctiva.condicionInicial || correctivaText(correctiva))}</div></div>
       <div class="section"><h3>Informacion de diagnostico</h3><div class="box">${diagnosticoHtml}</div></div>
       ${showCorrectivaCondicionFinal ? `<div class="section"><h3>Condicion final</h3><div class="box">${htmlText(correctiva.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA)}</div></div>` : ''}
-      ${correctivaFotos ? `<div class="section"><h3>Registro fotografico</h3>${correctivaFotos}</div>` : ''}
       ${recepcionHtml}
       <div class="sign"><div class="sign-card"><div class="signature-slot">${correctivaFirmaRecepcion}</div><div class="line">Firma y Recepcion Conforme</div></div><div class="sign-card"><div class="signature-slot">${correctivaFirma}</div><div class="line">Tecnico en Mantenimiento Equipo Medico</div></div></div>
       <button onclick="window.print()">Imprimir / Guardar PDF</button>
+      ${correctivaAnnexes}
       </div></body></html>`;
   };
 
@@ -13262,9 +13309,7 @@ const buildCorrectivePublicReportHtml = ({ orden, cliente, lic, empresa }) => {
   const verificationUrl = reportVerificationUrl('correctiva', orden);
   const firmaTecnico = correctiva.firma ? `<img class="firma-img" src="${correctiva.firma}" alt="Firma tecnico"/>` : '';
   const firmaRecepcion = correctiva.firmaRecepcion ? `<img class="firma-img" src="${correctiva.firmaRecepcion}" alt="Firma recepcion"/>` : '';
-  const fotos = correctiva.fotos?.length
-    ? `<div class="photos">${correctiva.fotos.map(f => `<figure><img src="${f.src}" alt="${htmlText(f.name || 'foto')}"/><figcaption>${htmlText(f.name || '')}</figcaption></figure>`).join('')}</div>`
-    : '';
+  const annexes = buildCorrectivaAnnexHtml(correctiva);
   const diagnosticoHtml = correctiva.conclusion ? htmlText(correctiva.conclusion) : '';
 
   return `
@@ -13273,7 +13318,7 @@ const buildCorrectivePublicReportHtml = ({ orden, cliente, lic, empresa }) => {
       .head{display:grid;grid-template-columns:150px 1fr 176px;border:2px solid #111827;padding:12px;align-items:center;gap:18px}.logo{display:block;width:136px;max-height:88px;object-fit:contain}.brand{font-weight:800;font-size:18px}.company{text-align:center;font-size:11px;line-height:1.5;color:#334155}.meta{text-align:right;font-size:12px;line-height:1.5}.folio-label{font-size:10px;text-transform:uppercase;color:#475569;font-weight:700}.folio-value{display:block;font-size:22px;line-height:1.1;font-weight:900;margin-bottom:8px}
       h1{font-size:16px;text-align:center;margin:16px 0;text-transform:uppercase;letter-spacing:.06em}.grid{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid #111827;border-bottom:0}.cell{border-bottom:1px solid #111827;border-right:1px solid #111827;padding:7px;font-size:12px}.cell b{display:block;font-size:10px;text-transform:uppercase;color:#475569}
       .section{margin-top:18px}.section-title{font-size:12px;font-weight:800;text-transform:uppercase;margin-top:14px}.box{border:1px solid #111827;padding:12px;min-height:70px;font-size:12px;line-height:1.45}.recepcion{width:100%;border-collapse:collapse;margin-top:16px}.recepcion th,.recepcion td{border:1px solid #111827;padding:6px;font-size:11px;text-align:left;vertical-align:middle}.recepcion th{background:#e5e7eb}.recepcion th:nth-child(3),.recepcion td:nth-child(3){width:180px;text-align:center}.qr{width:108px;height:108px;object-fit:contain}.qr-url{font-size:7px;line-height:1.2;color:#475569;word-break:break-all;margin-top:4px}
-      .photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,140px));gap:8px;margin-top:10px}.photos figure{margin:0;break-inside:avoid}.photos img{width:100%;height:92px;object-fit:contain;border:1px solid #cbd5e1;background:#f8fafc}.photos figcaption{font-size:9px;color:#64748b;margin-top:3px;word-break:break-word}.firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto 8px}.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.sign-card{display:flex;flex-direction:column}.signature-slot{height:96px;display:flex;align-items:flex-end;justify-content:center}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px;min-height:38px}
+      .firma-img{display:block;max-width:240px;max-height:90px;margin:0 auto 8px}.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}.sign-card{display:flex;flex-direction:column}.signature-slot{height:96px;display:flex;align-items:flex-end;justify-content:center}.line{border-top:1px solid #111827;text-align:center;padding-top:8px;font-size:11px;min-height:38px}.annex-page{page-break-before:always;break-before:page}.annex-page h2{font-size:18px;text-align:center;margin:0 0 18px;text-transform:uppercase}.annex-group{margin-top:18px}.annex-group h4{font-size:12px;font-weight:800;text-transform:uppercase;margin:0 0 10px}.annex-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.annex-grid figure{margin:0;border:1px solid #cbd5e1;padding:10px;background:#fff;break-inside:avoid}.annex-grid img{width:100%;height:260px;object-fit:contain;background:#f8fafc;border:1px solid #e2e8f0}.annex-label{font-size:11px;font-weight:700;margin-bottom:8px;color:#0f172a}
       @media print{.print-btn{display:none}body{padding:0}}
     </style>
     <div class="page">
@@ -13289,9 +13334,9 @@ const buildCorrectivePublicReportHtml = ({ orden, cliente, lic, empresa }) => {
       <div class="section"><h3>Condicion inicial de equipo</h3><div class="box">${htmlText(correctiva.condicionInicial || correctivaText(correctiva))}</div></div>
       <div class="section"><h3>Informacion de diagnostico</h3><div class="box">${diagnosticoHtml}</div></div>
       ${showCondicionFinal ? `<div class="section"><h3>Condicion final</h3><div class="box">${htmlText(correctiva.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA)}</div></div>` : ''}
-      ${fotos ? `<div class="section"><h3>Registro fotografico</h3>${fotos}</div>` : ''}
       <div class="section-title">Recepcion del equipo</div><table class="recepcion"><thead><tr><th>Nombre</th><th>Cargo</th><th>Verificacion QR</th></tr></thead><tbody><tr><td>${htmlText(correctiva.recibidoPor || '')}</td><td>${htmlText(correctiva.cargoRecepcion || '')}</td><td><img class="qr" src="${qrImageUrl(verificationUrl)}" alt="QR verificacion"/><div class="qr-url">${htmlText(verificationUrl)}</div></td></tr></tbody></table>
       <div class="sign"><div class="sign-card"><div class="signature-slot">${firmaRecepcion}</div><div class="line">Firma y Recepcion Conforme</div></div><div class="sign-card"><div class="signature-slot">${firmaTecnico}</div><div class="line">Tecnico en Mantenimiento Equipo Medico</div></div></div>
+      ${annexes}
     </div>`;
 };
 
