@@ -11713,6 +11713,7 @@ const Planificacion = () => {
   const { clientes, usuarios, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('tecnicos');
   const [weekOffset, setWeekOffset] = useState(0);
+  const [addingClienteId, setAddingClienteId] = useState('');
 
   const tabBase = 'px-4 py-2 text-sm font-bold border-b-2 transition-colors';
   const tabAct  = `${tabBase} border-blue-600 text-blue-700`;
@@ -11741,21 +11742,54 @@ const Planificacion = () => {
   const weekDays = getWeekDays(weekOffset);
   const dateStr = (d) => d.toISOString().split('T')[0];
   const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-
   const weekLabel = () => {
     const fmt = (d) => d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' });
     return `${fmt(weekDays[0])} – ${fmt(weekDays[6])}, ${weekDays[6].getFullYear()}`;
   };
 
-  const clientesList = clientes.filter(c => (c.razonSocial || c.name || c.nombre || '').trim());
+  const allClientes = clientes.filter(c => (c.razonSocial || c.name || c.nombre || '').trim());
   const usuariosList = usuarios.filter(u => (u.nombre || '').trim());
 
-  const getAsignacion = (cId, d) => (planificacionTecnicos || {})[`${cId}-${dateStr(d)}`] || '';
-  const setAsignacion = (cId, d, userId) => {
+  const data = planificacionTecnicos || {};
+  const selectedIds = Array.isArray(data._selectedClientes) ? data._selectedClientes : [];
+  const selectedClientes = selectedIds.map(id => allClientes.find(c => c.id === id)).filter(Boolean);
+  const clientesDisponibles = allClientes.filter(c => !selectedIds.includes(c.id));
+
+  // Cell value is always an array; handle legacy single-string format
+  const getCellUsers = (cId, d) => {
+    const raw = data[`${cId}-${dateStr(d)}`];
+    if (!raw) return [];
+    return Array.isArray(raw) ? raw : [raw];
+  };
+
+  const updateData = (next) => setPlanificacionTecnicos(next);
+
+  const addCliente = () => {
+    if (!addingClienteId || selectedIds.includes(addingClienteId)) return;
+    updateData({ ...data, _selectedClientes: [...selectedIds, addingClienteId] });
+    setAddingClienteId('');
+  };
+
+  const removeCliente = (clienteId) => {
+    const next = { ...data, _selectedClientes: selectedIds.filter(id => id !== clienteId) };
+    Object.keys(next).forEach(k => { if (k.startsWith(`${clienteId}-`)) delete next[k]; });
+    updateData(next);
+  };
+
+  const addUserToCell = (cId, d, userId) => {
+    if (!userId) return;
     const key = `${cId}-${dateStr(d)}`;
-    const next = { ...(planificacionTecnicos || {}) };
-    if (userId) next[key] = userId; else delete next[key];
-    setPlanificacionTecnicos(next);
+    const current = getCellUsers(cId, d);
+    if (current.includes(userId)) return;
+    updateData({ ...data, [key]: [...current, userId] });
+  };
+
+  const removeUserFromCell = (cId, d, userId) => {
+    const key = `${cId}-${dateStr(d)}`;
+    const next = { ...data };
+    const remaining = getCellUsers(cId, d).filter(id => id !== userId);
+    if (remaining.length > 0) next[key] = remaining; else delete next[key];
+    updateData(next);
   };
 
   return (
@@ -11772,6 +11806,7 @@ const Planificacion = () => {
 
         {activeTab === 'tecnicos' && (
           <div className="p-4 space-y-3">
+            {/* Navegación de semana */}
             <div className="flex items-center justify-between">
               <button onClick={() => setWeekOffset(w => w - 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                 <ChevronLeft size={18} />
@@ -11781,13 +11816,38 @@ const Planificacion = () => {
                 <ChevronRight size={18} />
               </button>
             </div>
+
+            {/* Selector para agregar cliente */}
+            {canEdit && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={addingClienteId}
+                  onChange={e => setAddingClienteId(e.target.value)}
+                  className="flex-1 text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                >
+                  <option value="">Seleccionar cliente para agregar…</option>
+                  {clientesDisponibles.map(c => (
+                    <option key={c.id} value={c.id}>{c.razonSocial || c.name || c.nombre}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={addCliente}
+                  disabled={!addingClienteId}
+                  className="flex items-center gap-1 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-40 hover:bg-blue-700 transition-colors whitespace-nowrap"
+                >
+                  <Plus size={15} /> Agregar
+                </button>
+              </div>
+            )}
+
+            {/* Tabla Gantt */}
             <div className="overflow-x-auto border border-slate-200 rounded-xl">
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-slate-50">
-                    <th className="sticky left-0 z-10 bg-slate-50 border-b border-r border-slate-200 px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider" style={{minWidth:'180px'}}>Cliente</th>
+                    <th className="sticky left-0 z-10 bg-slate-50 border-b border-r border-slate-200 px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider" style={{minWidth:'200px'}}>Cliente</th>
                     {weekDays.map((d, i) => (
-                      <th key={i} className="border-b border-r border-slate-200 px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider" style={{minWidth:'130px'}}>
+                      <th key={i} className="border-b border-r border-slate-200 px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider" style={{minWidth:'150px'}}>
                         <div>{DAY_NAMES[i]}</div>
                         <div className="text-slate-400 font-normal normal-case mt-0.5">{d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}</div>
                       </th>
@@ -11795,36 +11855,62 @@ const Planificacion = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {clientesList.length === 0 && (
-                    <tr><td colSpan={8} className="p-10 text-center text-slate-400 text-sm">No hay clientes registrados.</td></tr>
+                  {selectedClientes.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="p-10 text-center text-slate-400 text-sm">
+                        {canEdit ? 'Selecciona un cliente y presiona "Agregar" para comenzar.' : 'No hay clientes en la planificación.'}
+                      </td>
+                    </tr>
                   )}
-                  {clientesList.map((cliente, idx) => {
+                  {selectedClientes.map((cliente) => {
                     const nombre = cliente.razonSocial || cliente.name || cliente.nombre || '';
-                    const cId = cliente.id || String(idx);
+                    const cId = cliente.id;
                     return (
                       <tr key={cId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="sticky left-0 z-10 bg-white border-r border-slate-100 px-4 py-2 font-medium text-slate-700 text-sm">{nombre}</td>
+                        {/* Columna cliente */}
+                        <td className="sticky left-0 z-10 bg-white border-r border-slate-100 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-slate-700 text-sm">{nombre}</span>
+                            {canEdit && (
+                              <button onClick={() => removeCliente(cId)} title="Quitar cliente" className="p-1 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
+                                <X size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        {/* Celdas de días */}
                         {weekDays.map((d, di) => {
-                          const assigned = getAsignacion(cId, d);
-                          const assignedUser = usuariosList.find(u => (u.id || u.usuario) === assigned);
+                          const assignedIds = getCellUsers(cId, d);
+                          const assignedUsers = assignedIds.map(id => usuariosList.find(u => (u.id || u.usuario) === id)).filter(Boolean);
+                          const availableUsers = usuariosList.filter(u => !assignedIds.includes(u.id || u.usuario));
                           return (
-                            <td key={di} className="border-r border-slate-100 px-2 py-1.5">
-                              {canEdit ? (
-                                <select
-                                  value={assigned}
-                                  onChange={e => setAsignacion(cId, d, e.target.value)}
-                                  className="w-full text-xs rounded-lg border border-slate-200 px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                                >
-                                  <option value="">—</option>
-                                  {usuariosList.map(u => (
-                                    <option key={u.id || u.usuario} value={u.id || u.usuario}>{u.nombre}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <span className={`block text-center text-xs px-2 py-1 rounded-lg ${assigned ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-300'}`}>
-                                  {assignedUser ? assignedUser.nombre : '—'}
-                                </span>
-                              )}
+                            <td key={di} className="border-r border-slate-100 px-2 py-1.5 align-top">
+                              <div className="space-y-1">
+                                {/* Tags de usuarios asignados */}
+                                {assignedUsers.map(u => (
+                                  <div key={u.id || u.usuario} className="flex items-center gap-1 bg-blue-50 border border-blue-100 text-blue-700 text-xs rounded-lg px-2 py-1">
+                                    <span className="flex-1 truncate font-medium">{u.nombre}</span>
+                                    {canEdit && (
+                                      <button onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-blue-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                        <X size={11} />
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                                {/* Select para agregar usuario */}
+                                {canEdit && availableUsers.length > 0 && (
+                                  <select
+                                    value=""
+                                    onChange={e => { if (e.target.value) addUserToCell(cId, d, e.target.value); }}
+                                    className="w-full text-xs rounded border border-dashed border-slate-300 px-1 py-1 text-slate-400 bg-transparent cursor-pointer hover:border-blue-400 hover:text-blue-500 focus:outline-none focus:border-blue-400 transition-colors"
+                                  >
+                                    <option value="">+ Agregar</option>
+                                    {availableUsers.map(u => (
+                                      <option key={u.id || u.usuario} value={u.id || u.usuario}>{u.nombre}</option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
                             </td>
                           );
                         })}
