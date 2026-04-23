@@ -2895,10 +2895,10 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
     const correctiva = parseCorrectivaObservaciones(orden.observaciones);
     const correctivaEstado = String(orden.estado || '').trim();
     const correctivaEstadoKey = normalizeKey(correctivaEstado);
-    const correctivaTitle = correctiva.garantiaContrato || correctivaEstadoKey === 'garantia'
-      ? 'MANT. CORRECTIVO. - GARANTIA'
-      : correctivaEstadoKey === 'sugerenciadebaja'
-        ? 'MANT. CORRECTIVA - SUGERENCIA DE BAJA'
+    const correctivaTitle = correctivaEstadoKey === 'sugerenciadebaja'
+      ? 'MANT. CORRECTIVA - SUGERENCIA DE BAJA'
+      : correctiva.garantiaContrato || correctivaEstadoKey === 'garantia'
+        ? 'MANT. CORRECTIVO. - GARANTIA'
       : isEstadoEjecutado(orden.estado)
         ? 'MANT. CORRECTIVO - EJECUTADO'
         : correctivaEstadoKey === 'ingresado'
@@ -13410,10 +13410,10 @@ const buildCorrectivePublicReportHtml = ({ orden, cliente, lic, empresa }) => {
   const correctiva = parseCorrectivaObservaciones(orden.observaciones);
   const estado = String(orden.estado || '').trim();
   const estadoKey = normalizeKey(estado);
-  const title = correctiva.garantiaContrato || estadoKey === 'garantia'
-    ? 'MANT. CORRECTIVO. - GARANTIA'
-    : estadoKey === 'sugerenciadebaja'
-      ? 'MANT. CORRECTIVA - SUGERENCIA DE BAJA'
+  const title = estadoKey === 'sugerenciadebaja'
+    ? 'MANT. CORRECTIVA - SUGERENCIA DE BAJA'
+    : correctiva.garantiaContrato || estadoKey === 'garantia'
+      ? 'MANT. CORRECTIVO. - GARANTIA'
     : isEstadoEjecutado(estado)
       ? 'MANT. CORRECTIVO - EJECUTADO'
       : estadoKey === 'ingresado'

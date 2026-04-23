@@ -36,8 +36,8 @@ const isExecutedState = (value = '') => normalizeStateKey(value) === 'ejecutado'
 const buildCorrectiveTitle = (report = {}) => {
   const correctivaEstado = String(report?.estado || '').trim();
   const correctivaEstadoKey = normalizeStateKey(correctivaEstado);
-  if (report?.correctiva?.garantiaContrato || correctivaEstadoKey === 'garantia') return 'MANT. CORRECTIVO - GARANTIA';
   if (correctivaEstadoKey === 'sugerenciadebaja') return 'MANT. CORRECTIVA - SUGERENCIA DE BAJA';
+  if (report?.correctiva?.garantiaContrato || correctivaEstadoKey === 'garantia') return 'MANT. CORRECTIVO - GARANTIA';
   if (isExecutedState(report?.estado)) return 'MANT. CORRECTIVO - EJECUTADO';
   if (correctivaEstadoKey === 'ingresado') return 'MANT. CORRECTIVO - DIAGNOSTICO';
   if (correctivaEstado) return `MANT. CORRECTIVO - ${correctivaEstado.toUpperCase()}`;
