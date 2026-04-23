@@ -2693,6 +2693,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [mailingOrderId, setMailingOrderId] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
   const verifiedReportOpened = useRef(false);
   const isPreventivo = tipo === 'preventiva';
@@ -2797,6 +2798,32 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
     const lic = getLicitacion(orden);
     const cliente = getCliente(orden);
     return lic?.email_contacto || lic?.email || cliente?.email_contacto || cliente?.email || '';
+  };
+
+  const buildCorrectiveMailPayload = (orden) => {
+    const cliente = getCliente(orden);
+    const licitacion = getLicitacion(orden);
+    const correctiva = parseCorrectivaObservaciones(orden.observaciones);
+    return {
+      recipientEmail: getContactEmail(orden),
+      report: {
+        empresa: currentEmpresa || {},
+        cliente: cliente || {},
+        licitacion: licitacion || {},
+        estado: orden.estado || '',
+        orden: {
+          folio: orden.folio || '',
+          fecha: orden.fecha || '',
+          tipo_equipo: orden.tipo_equipo || '',
+          marca: orden.marca || '',
+          modelo: orden.modelo || '',
+          numero_serie: orden.numero_serie || '',
+          numero_inventario: orden.numero_inventario || '',
+          ubicacion_area: orden.ubicacion_area || '',
+        },
+        correctiva,
+      },
+    };
   };
 
   const buildReportHtml = (orden) => {
@@ -3022,10 +3049,32 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       alert('No se encontro email de contacto para esta licitacion o cliente.');
       return;
     }
-    await openReportWindow(orden);
-    const subject = encodeURIComponent(`Informe ${orden.folio}`);
-    const body = encodeURIComponent(`Estimados,\n\nSe genero el informe ${orden.folio} para ${orden.tipo_equipo || 'equipo'} ${orden.marca || ''} ${orden.modelo || ''}.\n\nEl informe se abrio en una pestaña para imprimir/guardar como PDF y adjuntarlo al correo.\n\nSaludos.`);
-    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+
+    if (isPreventivo) {
+      await openReportWindow(orden);
+      const subject = encodeURIComponent(`Informe ${orden.folio}`);
+      const body = encodeURIComponent(`Estimados,\n\nSe genero el informe ${orden.folio} para ${orden.tipo_equipo || 'equipo'} ${orden.marca || ''} ${orden.modelo || ''}.\n\nEl informe se abrio en una pestaña para imprimir/guardar como PDF y adjuntarlo al correo.\n\nSaludos.`);
+      window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+      return;
+    }
+
+    try {
+      setMailingOrderId(String(orden.id || orden.folio || 'sending'));
+      const response = await fetch('/api/reports/send-corrective-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildCorrectiveMailPayload(orden)),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'No fue posible enviar el informe adjunto.');
+      }
+      alert(`Correo enviado correctamente a ${email} con el informe PDF adjunto.`);
+    } catch (error) {
+      alert('No se pudo enviar el correo con el PDF adjunto: ' + friendlyError(error));
+    } finally {
+      setMailingOrderId('');
+    }
   };
 
   const handleDelete = async (orden) => {
@@ -3466,6 +3515,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
                 <tr><td colSpan="11" className="px-6 py-12 text-center text-slate-400 italic">{ordenes.length === 0 ? 'No hay registros.' : 'No hay registros que coincidan con la busqueda.'}</td></tr>
               ) : sortedOrdenes.map(orden => {
                 const cliente = getCliente(orden);
+                const isSendingMail = mailingOrderId === String(orden.id || orden.folio || '');
                 return (
                   <tr key={orden.id} className="border-b hover:bg-slate-50">
                     <td className="p-3">
@@ -3483,7 +3533,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
                     <td className="p-3">{orden.estado || orden.estado_equipo || '—'}</td>
                     <td className="p-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => handleMail(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Enviar por mail"><Mail size={14} /></button>
+                        <button onClick={() => handleMail(orden)} disabled={isSendingMail} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40" title={isSendingMail ? 'Enviando informe por mail' : 'Enviar por mail'}><Mail size={14} /></button>
                         <button onClick={() => reopenFlow(orden)} disabled={!canReopenOrden(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30" title={canReopenOrden(orden) ? 'Reabrir formulario' : 'Correctiva ejecutada: requiere permiso'}><ClipboardList size={14} /></button>
                         <button onClick={() => handleDelete(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar registro"><Trash2 size={14} /></button>
                         <button onClick={() => openPdf(orden)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Visualizar PDF"><FileDown size={14} /></button>
