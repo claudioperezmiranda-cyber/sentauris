@@ -11673,6 +11673,46 @@ const RegistroCompras = () => {
   );
 };
 
+const Planificacion = () => {
+  const [activeTab, setActiveTab] = useState('tecnicos');
+  const tabBase = 'px-4 py-2 text-sm font-bold border-b-2 transition-colors';
+  const tabAct  = `${tabBase} border-blue-600 text-blue-700`;
+  const tabIna  = `${tabBase} border-transparent text-slate-400 hover:text-slate-600`;
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-2">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Operaciones</p>
+        <h2 className="text-2xl font-bold text-slate-900">Planificación</h2>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="flex gap-2 border-b border-slate-100 px-4 pt-4">
+          <button onClick={() => setActiveTab('tecnicos')} className={activeTab === 'tecnicos' ? tabAct : tabIna}>Tecnicos</button>
+          <button onClick={() => setActiveTab('preventivas')} className={activeTab === 'preventivas' ? tabAct : tabIna}>Preventivas</button>
+        </div>
+        {activeTab === 'tecnicos' && (
+          <div className="p-6 flex flex-col items-center justify-center py-24 text-center space-y-3">
+            <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
+              <Wrench size={28} className="text-slate-400"/>
+            </div>
+            <p className="text-slate-600 font-semibold">Planificación de Técnicos</p>
+            <p className="text-slate-400 text-sm max-w-xs">Este módulo estará disponible próximamente.</p>
+          </div>
+        )}
+        {activeTab === 'preventivas' && (
+          <div className="p-6 flex flex-col items-center justify-center py-24 text-center space-y-3">
+            <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
+              <Wrench size={28} className="text-slate-400"/>
+            </div>
+            <p className="text-slate-600 font-semibold">Planificación de Preventivas</p>
+            <p className="text-slate-400 text-sm max-w-xs">Este módulo estará disponible próximamente.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const ConfigPlaceholder = ({ titulo, descripcion }) => (
   <div className="w-full max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-2">
     <div className="mb-6">
@@ -12343,6 +12383,7 @@ const ContentManager = () => {
     if (!canAccess(activeModule)) return <AccessDenied />;
     switch (activeModule) {
       case 'dashboard': return <Dashboard />;
+      case 'operaciones-planificacion': return <Planificacion />;
       case 'operaciones-registro': return <NuevoRegistro />;
       case 'operaciones-preventiva': return <MantencionPreventiva />;
       case 'operaciones-correctiva': return <MantencionCorrectiva />;
