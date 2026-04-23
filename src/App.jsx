@@ -11031,7 +11031,7 @@ const buildBalanceHtml = (rows, filters) => {
     </tbody></table></body></html>`;
 };
 
-const ACTIVOS_FIJOS_FIELDS = [
+const ACTIVOS_FIJOS_CREATE_FIELDS = [
   { key: 'idActivo', label: 'ID Activo', type: 'text', required: true },
   { key: 'nombreActivo', label: 'Nombre Activo', type: 'text', required: true },
   { key: 'categoria', label: 'Categoria', type: 'text' },
@@ -11045,18 +11045,93 @@ const ACTIVOS_FIJOS_FIELDS = [
   { key: 'metodoTributario', label: 'Metodo Tributario', type: 'select', options: ['Lineal', 'Instantaneo', 'Acelerado'] },
   { key: 'centroCosto', label: 'Centro de Costo', type: 'text' },
   { key: 'estado', label: 'Estado', type: 'select', options: ['Vigente', 'Depreciado', 'Baja', 'En revision'] },
-  { key: 'valorLibroIfrs', label: 'Valor Libro IFRS', type: 'number', step: '0.01' },
-  { key: 'depIfrsMensual', label: 'Dep. IFRS Mensual', type: 'number', step: '0.01' },
-  { key: 'depAcumIfrs', label: 'Dep. Acum IFRS', type: 'number', step: '0.01' },
-  { key: 'depAcumIfrsMesAnterior', label: 'Dep. Acum IFRS Mes Anterior', type: 'number', step: '0.01' },
-  { key: 'depTributaria', label: 'Dep. Tributaria', type: 'number', step: '0.01' },
-  { key: 'depAcumTributaria', label: 'Dep Acum Tributaria', type: 'number', step: '0.01' },
-  { key: 'depAcumTributariaMesAnterior', label: 'Dep Acum Tributaria Mes Anterior', type: 'number', step: '0.01' },
-  { key: 'valorTributario', label: 'Valor Tributario', type: 'number', step: '0.01' },
-  { key: 'diferenciaTemp', label: 'Diferencia Temp', type: 'number', step: '0.01' },
-  { key: 'factorCm', label: 'Factor CM', type: 'number', step: '0.0001' },
-  { key: 'valorTributarioCorregido', label: 'Valor Tributario Corregido', type: 'number', step: '0.01' },
 ];
+
+const ACTIVOS_FIJOS_TABLE_COLUMNS = [
+  { id: 'idActivo', label: 'ID Activo', align: 'left' },
+  { id: 'nombreActivo', label: 'Nombre Activo', align: 'left' },
+  { id: 'categoria', label: 'Categoria', align: 'left' },
+  { id: 'fechaAdquisicion', label: 'Fecha Adquisicion', align: 'left' },
+  { id: 'fechaInicioUso', label: 'Fecha Inicio Uso', align: 'left' },
+  { id: 'centroCosto', label: 'Centro de Costo', align: 'left' },
+  { id: 'estado', label: 'Estado', align: 'left' },
+  { id: 'costoHistorico', label: 'Costo Historico', align: 'right' },
+  { id: 'valorResidual', label: 'Valor Residual', align: 'right' },
+  { id: 'vidaUtilIfrsMeses', label: 'Vida Util IFRS', align: 'right' },
+  { id: 'vidaUtilTributariaMeses', label: 'Vida Util Tributaria', align: 'right' },
+  { id: 'depIfrsMensual', label: 'Dep. IFRS Mensual', align: 'right' },
+  { id: 'depAcumIfrs', label: 'Dep. Acum IFRS', align: 'right' },
+  { id: 'depAcumIfrsMesAnterior', label: 'Dep. Acum IFRS Mes Anterior', align: 'right' },
+  { id: 'valorLibroIfrs', label: 'Valor Libro IFRS', align: 'right' },
+  { id: 'depTributaria', label: 'Dep. Tributaria', align: 'right' },
+  { id: 'depAcumTributaria', label: 'Dep. Acum Tributaria', align: 'right' },
+  { id: 'depAcumTributariaMesAnterior', label: 'Dep. Acum Tributaria Mes Anterior', align: 'right' },
+  { id: 'valorTributario', label: 'Valor Tributario', align: 'right' },
+  { id: 'diferenciaTemp', label: 'Diferencia Temp', align: 'right' },
+  { id: 'factorCm', label: 'Factor CM', align: 'right' },
+  { id: 'valorTributarioCorregido', label: 'Valor Tributario Corregido', align: 'right' },
+  { id: 'fechaCierreDepreciacion', label: 'Fecha de Cierre', align: 'left' },
+];
+
+const ACTIVOS_FIJOS_COLUMN_STORAGE_KEY = 'sentauris_activos_fijos_columns';
+
+const toPositiveInt = (value) => {
+  const parsed = Math.floor(Number(value) || 0);
+  return parsed > 0 ? parsed : 0;
+};
+
+const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+const monthsBetweenInclusive = (fromDate, toDate) => {
+  if (!fromDate || !toDate) return 0;
+  const from = new Date(fromDate);
+  const to = new Date(toDate);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 0;
+  if (to < from) return 0;
+  return ((to.getFullYear() - from.getFullYear()) * 12) + (to.getMonth() - from.getMonth()) + 1;
+};
+
+const calculateDepreciationValue = (costoHistorico, valorResidual, vidaUtilMeses) => {
+  const base = Math.max(0, toAmount(costoHistorico) - toAmount(valorResidual));
+  const life = toPositiveInt(vidaUtilMeses);
+  if (!life || base <= 0) return 0;
+  return roundMoney(base / life);
+};
+
+const normalizeActivoFijoComputed = (asset = {}, fechaCierre = '') => {
+  const costoHistorico = toAmount(asset.costoHistorico);
+  const valorResidual = Math.max(0, toAmount(asset.valorResidual || 1));
+  const depreciableBase = Math.max(0, costoHistorico - valorResidual);
+  const depIfrsMensual = calculateDepreciationValue(costoHistorico, valorResidual, asset.vidaUtilIfrsMeses);
+  const depTributaria = calculateDepreciationValue(costoHistorico, valorResidual, asset.vidaUtilTributariaMeses);
+  const mesesDepreciados = monthsBetweenInclusive(asset.fechaAdquisicion, fechaCierre);
+  const depAcumIfrs = roundMoney(Math.min(depreciableBase, depIfrsMensual * mesesDepreciados));
+  const depAcumTributaria = roundMoney(Math.min(depreciableBase, depTributaria * mesesDepreciados));
+  const depAcumIfrsMesAnterior = roundMoney(Math.max(0, depAcumIfrs - depIfrsMensual));
+  const depAcumTributariaMesAnterior = roundMoney(Math.max(0, depAcumTributaria - depTributaria));
+  const valorLibroIfrs = roundMoney(Math.max(valorResidual, costoHistorico - depAcumIfrs));
+  const valorTributario = roundMoney(Math.max(valorResidual, costoHistorico - depAcumTributaria));
+  const factorCm = toAmount(asset.factorCm);
+  const valorTributarioCorregido = roundMoney(factorCm > 0 ? valorTributario * factorCm : valorTributario);
+  const diferenciaTemp = roundMoney(valorLibroIfrs - valorTributario);
+  return {
+    ...asset,
+    costoHistorico: roundMoney(costoHistorico),
+    valorResidual: roundMoney(valorResidual),
+    depIfrsMensual,
+    depAcumIfrs,
+    depAcumIfrsMesAnterior,
+    valorLibroIfrs,
+    depTributaria,
+    depAcumTributaria,
+    depAcumTributariaMesAnterior,
+    valorTributario,
+    diferenciaTemp,
+    factorCm: roundMoney(factorCm),
+    valorTributarioCorregido,
+    fechaCierreDepreciacion: fechaCierre || asset.fechaCierreDepreciacion || '',
+  };
+};
 
 const emptyActivoFijo = () => ({
   id: '',
@@ -11066,7 +11141,7 @@ const emptyActivoFijo = () => ({
   fechaAdquisicion: '',
   fechaInicioUso: '',
   costoHistorico: '',
-  valorResidual: '',
+  valorResidual: 1,
   vidaUtilIfrsMeses: '',
   vidaUtilTributariaMeses: '',
   metodoIfrs: 'Lineal',
@@ -11092,19 +11167,65 @@ const ActivosFijosContabilidad = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [draft, setDraft] = useState(emptyActivoFijo);
   const [error, setError] = useState('');
+  const [isCentralizeOpen, setIsCentralizeOpen] = useState(false);
+  const [fechaCierre, setFechaCierre] = useState(accountingDate());
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [visibleColumnIds, setVisibleColumnIds] = useState(() => {
+    const saved = readLocalList(ACTIVOS_FIJOS_COLUMN_STORAGE_KEY);
+    return saved.length ? saved : ['idActivo', 'nombreActivo', 'categoria', 'fechaAdquisicion', 'centroCosto', 'estado', 'costoHistorico', 'valorLibroIfrs', 'depIfrsMensual', 'depTributaria'];
+  });
+
+  useEffect(() => {
+    localStorage.setItem(ACTIVOS_FIJOS_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumnIds));
+  }, [visibleColumnIds]);
 
   const filteredAssets = activosFijos
     .filter(asset => Object.values(asset || {}).join(' ').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
   const updateDraft = (field, value) => {
-    setDraft(prev => ({ ...prev, [field]: value }));
+    setDraft(prev => {
+      const next = { ...prev, [field]: value };
+      if (field === 'fechaAdquisicion' && (!prev.fechaInicioUso || prev.fechaInicioUso === prev.fechaAdquisicion)) {
+        next.fechaInicioUso = value;
+      }
+      return next;
+    });
   };
 
   const closeModal = () => {
     setDraft(emptyActivoFijo());
     setError('');
     setIsModalOpen(false);
+  };
+
+  const toggleColumn = (columnId) => {
+    setVisibleColumnIds(prev => prev.includes(columnId)
+      ? prev.filter(id => id !== columnId)
+      : [...prev, columnId]);
+  };
+
+  const visibleColumns = ACTIVOS_FIJOS_TABLE_COLUMNS.filter(col => visibleColumnIds.includes(col.id));
+
+  const renderAssetCell = (asset, columnId) => {
+    if (columnId === 'estado') {
+      return (
+        <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${
+          normalizeKey(asset.estado) === 'vigente'
+            ? 'bg-emerald-50 text-emerald-700'
+            : normalizeKey(asset.estado) === 'baja'
+              ? 'bg-red-50 text-red-700'
+              : 'bg-slate-100 text-slate-600'
+        }`}>
+          {asset.estado || '-'}
+        </span>
+      );
+    }
+    if (['costoHistorico', 'valorResidual', 'depIfrsMensual', 'depAcumIfrs', 'depAcumIfrsMesAnterior', 'valorLibroIfrs', 'depTributaria', 'depAcumTributaria', 'depAcumTributariaMesAnterior', 'valorTributario', 'diferenciaTemp', 'valorTributarioCorregido'].includes(columnId)) {
+      return money(asset[columnId]);
+    }
+    if (columnId === 'factorCm') return asset.factorCm || '-';
+    return asset[columnId] || '-';
   };
 
   const saveAsset = () => {
@@ -11118,12 +11239,26 @@ const ActivosFijosContabilidad = () => {
       return;
     }
     const payload = {
-      ...draft,
+      ...normalizeActivoFijoComputed({
+        ...draft,
+        fechaInicioUso: draft.fechaInicioUso || draft.fechaAdquisicion,
+        valorResidual: draft.valorResidual || 1,
+      }),
       id: `af-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
     setActivosFijos(prev => [payload, ...prev]);
     closeModal();
+  };
+
+  const registrarCentralizacion = () => {
+    if (!fechaCierre) {
+      setError('Debe seleccionar una fecha de cierre para centralizar la depreciación.');
+      return;
+    }
+    setActivosFijos(prev => prev.map(asset => normalizeActivoFijoComputed(asset, fechaCierre)));
+    setError('');
+    setIsCentralizeOpen(false);
   };
 
   const summary = {
@@ -11140,7 +11275,10 @@ const ActivosFijosContabilidad = () => {
           <h2 className="text-2xl font-black text-slate-900">Activos Fijos</h2>
           <p className="mt-2 text-sm text-slate-500">Registro de activos con los mismos campos operativos definidos en la planilla de control.</p>
         </div>
-        <Button variant="accent" icon={Plus} onClick={() => setIsModalOpen(true)}>Crear activo fijo</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" icon={FileText} onClick={() => setIsCentralizeOpen(true)}>Centralizar depreciacion</Button>
+          <Button variant="accent" icon={Plus} onClick={() => setIsModalOpen(true)}>Crear activo fijo</Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -11169,48 +11307,55 @@ const ActivosFijosContabilidad = () => {
               className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Campos: {ACTIVOS_FIJOS_FIELDS.length}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Columnas visibles: {visibleColumns.length}</p>
+            <div className="relative">
+              <button type="button" onClick={() => setColumnsOpen(v => !v)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-blue-600" title="Configurar columnas visibles">
+                <Settings size={16}/>
+              </button>
+              {columnsOpen && createPortal(
+                <div className="fixed bottom-6 right-6 top-24 z-[130] w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">Columnas</p>
+                    <button type="button" onClick={() => setColumnsOpen(false)} className="p-1 rounded text-slate-400 hover:bg-slate-100"><X size={14}/></button>
+                  </div>
+                  <div className="space-y-1 h-[calc(100%-2.5rem)] overflow-y-auto pr-1">
+                    {ACTIVOS_FIJOS_TABLE_COLUMNS.map(col => {
+                      const checked = visibleColumnIds.includes(col.id);
+                      return (
+                        <label key={col.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                          <input type="checkbox" checked={checked} disabled={checked && visibleColumnIds.length === 1} onChange={() => toggleColumn(col.id)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                          <span>{col.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>,
+                document.body
+              )}
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="p-3 text-left">ID Activo</th>
-                <th className="p-3 text-left">Nombre Activo</th>
-                <th className="p-3 text-left">Categoria</th>
-                <th className="p-3 text-left">Fecha Adquisicion</th>
-                <th className="p-3 text-left">Centro de Costo</th>
-                <th className="p-3 text-left">Estado</th>
-                <th className="p-3 text-right">Costo Historico</th>
-                <th className="p-3 text-right">Valor Libro IFRS</th>
+                {visibleColumns.map(col => <th key={col.id} className={`p-3 ${col.align === 'right' ? 'text-right' : 'text-left'}`}>{col.label}</th>)}
               </tr>
             </thead>
             <tbody>
               {filteredAssets.map(asset => (
                 <tr key={asset.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="p-3 font-semibold text-slate-800">{asset.idActivo || '-'}</td>
-                  <td className="p-3 min-w-64">{asset.nombreActivo || '-'}</td>
-                  <td className="p-3">{asset.categoria || '-'}</td>
-                  <td className="p-3 font-mono">{asset.fechaAdquisicion || '-'}</td>
-                  <td className="p-3">{asset.centroCosto || '-'}</td>
-                  <td className="p-3">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                      normalizeKey(asset.estado) === 'vigente'
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : normalizeKey(asset.estado) === 'baja'
-                          ? 'bg-red-50 text-red-700'
-                          : 'bg-slate-100 text-slate-600'
-                    }`}>
-                      {asset.estado || '-'}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right font-mono">{money(asset.costoHistorico)}</td>
-                  <td className="p-3 text-right font-mono">{money(asset.valorLibroIfrs)}</td>
+                  {visibleColumns.map(col => (
+                    <td key={col.id} className={`p-3 ${col.align === 'right' ? 'text-right font-mono' : col.id === 'nombreActivo' ? 'min-w-64' : col.id.includes('fecha') ? 'font-mono' : ''}`}>
+                      {renderAssetCell(asset, col.id)}
+                    </td>
+                  ))}
                 </tr>
               ))}
               {filteredAssets.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="p-10 text-center text-sm text-slate-400">
+                  <td colSpan={visibleColumns.length} className="p-10 text-center text-sm text-slate-400">
                     No hay activos fijos registrados todavia. Usa el boton Crear para ingresar el primer activo.
                   </td>
                 </tr>
@@ -11240,7 +11385,7 @@ const ActivosFijosContabilidad = () => {
                 </div>
               )}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {ACTIVOS_FIJOS_FIELDS.map(field => (
+                {ACTIVOS_FIJOS_CREATE_FIELDS.map(field => (
                   <div key={field.key} className={field.key === 'nombreActivo' ? 'md:col-span-2 xl:col-span-2 2xl:col-span-2' : ''}>
                     {field.type === 'select' ? (
                       <Select
@@ -11264,6 +11409,33 @@ const ActivosFijosContabilidad = () => {
             <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
               <Button variant="secondary" onClick={closeModal}>Cancelar</Button>
               <Button variant="accent" icon={CheckCircle} onClick={saveAsset}>Guardar activo fijo</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isCentralizeOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Centralizacion</p>
+                <h3 className="text-xl font-black text-slate-900">Centralizar depreciacion</h3>
+                <p className="mt-1 text-sm text-slate-500">Se recalcularan depreciaciones IFRS y tributarias usando la fecha de cierre seleccionada.</p>
+              </div>
+              <button type="button" onClick={() => setIsCentralizeOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <Input label="Fecha de cierre" type="date" value={fechaCierre} onChange={e => setFechaCierre(e.target.value)} />
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-600">
+                La depreciacion mensual se calculara como `(Costo Historico - Valor Residual) / Vida Util`, y los acumulados se actualizaran segun los meses transcurridos hasta la fecha de cierre.
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+              <Button variant="secondary" onClick={() => setIsCentralizeOpen(false)}>Cancelar</Button>
+              <Button variant="accent" icon={CheckCircle} onClick={registrarCentralizacion}>Registrar</Button>
             </div>
           </div>
         </div>
