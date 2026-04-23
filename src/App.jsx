@@ -2797,8 +2797,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
   };
   const getContactEmail = (orden) => {
     const lic = getLicitacion(orden);
-    const cliente = getCliente(orden);
-    return lic?.email || lic?.email_contacto || cliente?.email_contacto || cliente?.email || '';
+    return lic?.email || '';
   };
 
   const buildCorrectiveMailPayload = (orden) => {
@@ -3823,15 +3822,19 @@ const HistorialCotizaciones = () => {
     ? prev.filter(id => !filteredIds.includes(id))
     : Array.from(new Set([...prev, ...filteredIds])));
   const openPdf = (cotizacion) => openHtmlDocument(buildCotizacionHtml(cotizacion, currentEmpresa));
+  const resolveCotizacionLicitacion = (cotizacion) => licitaciones.find(l =>
+    String(l.id || '') === String(cotizacion.licitacionId || '') ||
+    normalizeKey(l.id_licitacion) === normalizeKey(cotizacion.idLicitacion) ||
+    normalizeKey(l.name) === normalizeKey(cotizacion.idLicitacion)
+  ) || null;
   const getCotizacionRecipientEmail = (cotizacion) => {
-    const licitacion = licitaciones.find(l => String(l.id || '') === String(cotizacion.licitacionId || ''));
-    const cliente = clientes.find(c => String(c.id || c.id_RUT || '') === String(cotizacion.clienteId || ''));
-    return licitacion?.email || licitacion?.email_contacto || cliente?.email_contacto || cliente?.email || '';
+    const licitacion = resolveCotizacionLicitacion(cotizacion);
+    return licitacion?.email || '';
   };
   const mailCotizacion = async (cotizacion) => {
     const recipientEmail = getCotizacionRecipientEmail(cotizacion);
     if (!recipientEmail) {
-      alert('No se encontro email de contacto para esta cotizacion.');
+      alert('No se encontro un email configurado en la licitacion asociada a esta cotizacion.');
       return;
     }
     const fallbackLogoSrc = typeof window !== 'undefined' ? `${window.location.origin}/logo-vaic-pdf.jpeg` : '';
