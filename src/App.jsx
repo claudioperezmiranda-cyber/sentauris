@@ -2190,6 +2190,7 @@ const MantencionCorrectiva = () => {
   const availableRepuestos = repuestos.filter(r => r.licitacion_id === formData.licitacionId);
   const garantiaHabilitada = Boolean(formData.correctivaGarantiaContrato);
   const estadoEsEjecutado = isEstadoEjecutado(estadoInterno);
+  const lockReceptionSignature = isReopenedCorrectiva && estadoEsEjecutado;
   const estadoInternoKey = normalizeKey(estadoInterno);
   const muestraCondicionFinal = ['garantia', 'sugerencia de baja'].includes(estadoInternoKey) || estadoEsEjecutado;
 
@@ -2489,6 +2490,7 @@ const MantencionCorrectiva = () => {
             signerName={recibidoPor || 'Pendiente de receptor'}
             initialValue={firmaRecepcion}
             onChange={setFirmaRecepcion}
+            disabled={lockReceptionSignature}
           />
         </Card>
       )}
