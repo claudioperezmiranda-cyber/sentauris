@@ -11721,10 +11721,12 @@ const RegistroCompras = () => {
 };
 
 const Planificacion = () => {
-  const { clientes, usuarios, equipos, licitaciones, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
+  const { clientes, usuarios, equipos, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('tecnicos');
   const [weekOffset, setWeekOffset] = useState(0);
   const [preventiveYear, setPreventiveYear] = useState(() => new Date().getFullYear());
+  const [preventiveMonth, setPreventiveMonth] = useState(() => new Date().getMonth());
+  const [collapsedPreventiveGroups, setCollapsedPreventiveGroups] = useState({});
   const [preventiveOrders, setPreventiveOrders] = useState([]);
   const [addingClienteId, setAddingClienteId] = useState('');
 
@@ -11849,7 +11851,7 @@ const Planificacion = () => {
     updateData(next);
   };
 
-  const monthNames = Array.from({ length: 12 }, (_, i) => new Date(preventiveYear, i, 1).toLocaleDateString('es-CL', { month: 'short' }));
+  const monthNames = Array.from({ length: 12 }, (_, i) => new Date(preventiveYear, i, 1).toLocaleDateString('es-CL', { month: 'long' }));
   const firstMondayOnOrBefore = (date) => {
     const d = new Date(date);
     const dow = d.getDay();
@@ -11881,11 +11883,12 @@ const Planificacion = () => {
     }
     return weeks;
   };
-  const preventiveMonths = Array.from({ length: 12 }, (_, monthIndex) => ({
+  const allPreventiveMonths = Array.from({ length: 12 }, (_, monthIndex) => ({
     monthIndex,
     label: monthNames[monthIndex],
     weeks: monthWeeks(preventiveYear, monthIndex),
   }));
+  const preventiveMonths = [allPreventiveMonths[preventiveMonth]];
   const preventiveWeeks = preventiveMonths.flatMap(month => month.weeks);
   const preventiveEquipoId = (equipo) => equipo?.id || [
     equipo?.licitacion_id,
@@ -11898,7 +11901,7 @@ const Planificacion = () => {
   const weekKeyForDate = (isoDate) => {
     const date = new Date(`${String(isoDate || '').slice(0, 10)}T12:00:00`);
     if (!isoDate || Number.isNaN(date.getTime()) || date.getFullYear() !== preventiveYear) return '';
-    const month = preventiveMonths[date.getMonth()];
+    const month = allPreventiveMonths[date.getMonth()];
     const week = month?.weeks.find(item => date >= item.start && date <= item.end);
     return week ? `${date.getMonth() + 1}-${week.index}` : '';
   };
@@ -11950,6 +11953,14 @@ const Planificacion = () => {
       b.numero_inventario,
     ].map(value => value || '').join('|'), 'es'));
   const preventiveGroupKey = (equipo) => [equipo.tipo_equipo, equipo.marca, equipo.modelo].map(value => normalizeEquipmentMatchValue(value)).join('|');
+  const togglePreventiveGroup = (groupKey) => {
+    setCollapsedPreventiveGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
+  const resetPreventivePeriod = () => {
+    const now = new Date();
+    setPreventiveYear(now.getFullYear());
+    setPreventiveMonth(now.getMonth());
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-2">
@@ -12109,16 +12120,34 @@ const Planificacion = () => {
           <div className="p-4 space-y-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Carta Gantt anual</p>
-                <h3 className="text-lg font-bold text-slate-800">Mantenciones preventivas {preventiveYear}</h3>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Carta Gantt mensual</p>
+                <h3 className="text-lg font-bold text-slate-800">
+                  Mantenciones preventivas {monthNames[preventiveMonth]} {preventiveYear}
+                </h3>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setPreventiveYear(y => y - 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors" title="Año anterior">
-                  <ChevronLeft size={18} />
-                </button>
-                <span className="w-20 text-center text-sm font-bold text-slate-700">{preventiveYear}</span>
-                <button onClick={() => setPreventiveYear(y => y + 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors" title="Año siguiente">
-                  <ChevronRight size={18} />
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={preventiveMonth}
+                  onChange={e => setPreventiveMonth(Number(e.target.value))}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  aria-label="Filtrar mes de preventivas"
+                >
+                  {monthNames.map((month, index) => (
+                    <option key={month} value={index}>{month}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  value={preventiveYear}
+                  onChange={e => setPreventiveYear(Number(e.target.value) || new Date().getFullYear())}
+                  className="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  aria-label="Filtrar año de preventivas"
+                />
+                <button
+                  onClick={resetPreventivePeriod}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Mes actual
                 </button>
               </div>
             </div>
@@ -12163,54 +12192,67 @@ const Planificacion = () => {
                   )}
                   {groupedEquipos.map((equipo, index) => {
                     const previous = groupedEquipos[index - 1];
-                    const showGroup = !previous || preventiveGroupKey(previous) !== preventiveGroupKey(equipo);
+                    const groupKey = preventiveGroupKey(equipo);
+                    const showGroup = !previous || preventiveGroupKey(previous) !== groupKey;
+                    const collapsed = Boolean(collapsedPreventiveGroups[groupKey]);
+                    if (!showGroup && collapsed) return null;
                     const estimatedSet = estimatedWeeksForEquipo(equipo);
                     return (
                       <React.Fragment key={preventiveEquipoId(equipo)}>
                         {showGroup && (
                           <tr className="bg-slate-100/80">
                             <td colSpan={preventiveWeeks.length + 5} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
-                              {equipo.tipo_equipo || 'Equipo'} / {equipo.marca || 'Sin marca'} / {equipo.modelo || 'Sin modelo'}
+                              <button
+                                type="button"
+                                onClick={() => togglePreventiveGroup(groupKey)}
+                                className="flex w-full items-center gap-2 text-left hover:text-blue-700 transition-colors"
+                                title={collapsed ? 'Expandir grupo' : 'Colapsar grupo'}
+                              >
+                                <ChevronRight size={14} className={`transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+                                <span>{equipo.tipo_equipo || 'Equipo'} / {equipo.marca || 'Sin marca'} / {equipo.modelo || 'Sin modelo'}</span>
+                              </button>
                             </td>
                           </tr>
                         )}
-                        <tr className="border-b border-slate-100 hover:bg-slate-50">
-                          <td className="sticky left-0 z-20 bg-white border-r border-slate-100 px-3 py-2 font-semibold text-slate-700" style={{ minWidth: '160px' }}>{equipo.tipo_equipo || '—'}</td>
-                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 text-slate-600" style={{ minWidth: '120px', left: '160px' }}>{equipo.marca || '—'}</td>
-                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 text-slate-600" style={{ minWidth: '140px', left: '280px' }}>{equipo.modelo || '—'}</td>
-                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 font-mono text-[11px] text-slate-500" style={{ minWidth: '130px', left: '420px' }}>{equipo.numero_serie || '—'}</td>
-                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 font-mono text-[11px] text-slate-500" style={{ minWidth: '130px', left: '550px' }}>{equipo.numero_inventario || '—'}</td>
-                          {preventiveWeeks.map(week => {
-                            const overrideKey = preventiveOverrideKey(equipo, week);
-                            const hasOverride = Object.prototype.hasOwnProperty.call(preventiveOverrides, overrideKey);
-                            const marked = isPreventiveMarked(equipo, week, estimatedSet);
-                            const estimated = estimatedSet.has(week.key);
-                            const title = marked
-                              ? `${hasOverride ? 'Marcada manualmente' : 'Mantención preventiva estimada'}`
-                              : `${canEdit ? 'Marcar mantención preventiva' : 'Sin mantención preventiva'}`;
-                            return (
-                              <td key={week.key} className="border-r border-slate-100 px-1 py-1 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => togglePreventiveCell(equipo, week, estimatedSet)}
-                                  disabled={!canEdit}
-                                  title={title}
-                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:cursor-default ${
-                                    marked
-                                      ? hasOverride
-                                        ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                                        : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                      : estimated && hasOverride
-                                      ? 'border-slate-200 bg-white text-slate-300'
-                                      : 'border-transparent bg-transparent text-slate-200 hover:border-slate-200 hover:text-slate-400'
-                                  }`}
-                                >
-                                  {marked ? <Wrench size={13} /> : <Plus size={12} />}
-                                </button>
-                              </td>
-                            );
-                          })}
-                        </tr>
+                        {!collapsed && (
+                          <tr className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="sticky left-0 z-20 bg-white border-r border-slate-100 px-3 py-2 font-semibold text-slate-700" style={{ minWidth: '160px' }}>{equipo.tipo_equipo || '—'}</td>
+                            <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 text-slate-600" style={{ minWidth: '120px', left: '160px' }}>{equipo.marca || '—'}</td>
+                            <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 text-slate-600" style={{ minWidth: '140px', left: '280px' }}>{equipo.modelo || '—'}</td>
+                            <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 font-mono text-[11px] text-slate-500" style={{ minWidth: '130px', left: '420px' }}>{equipo.numero_serie || '—'}</td>
+                            <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 font-mono text-[11px] text-slate-500" style={{ minWidth: '130px', left: '550px' }}>{equipo.numero_inventario || '—'}</td>
+                            {preventiveWeeks.map(week => {
+                              const overrideKey = preventiveOverrideKey(equipo, week);
+                              const hasOverride = Object.prototype.hasOwnProperty.call(preventiveOverrides, overrideKey);
+                              const marked = isPreventiveMarked(equipo, week, estimatedSet);
+                              const estimated = estimatedSet.has(week.key);
+                              const title = marked
+                                ? `${hasOverride ? 'Marcada manualmente' : 'Mantención preventiva estimada'}`
+                                : `${canEdit ? 'Marcar mantención preventiva' : 'Sin mantención preventiva'}`;
+                              return (
+                                <td key={week.key} className="border-r border-slate-100 px-1 py-1 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => togglePreventiveCell(equipo, week, estimatedSet)}
+                                    disabled={!canEdit}
+                                    title={title}
+                                    className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:cursor-default ${
+                                      marked
+                                        ? hasOverride
+                                          ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                        : estimated && hasOverride
+                                        ? 'border-slate-200 bg-white text-slate-300'
+                                        : 'border-transparent bg-transparent text-slate-200 hover:border-slate-200 hover:text-slate-400'
+                                    }`}
+                                  >
+                                    {marked ? <Wrench size={13} /> : <Plus size={12} />}
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        )}
                       </React.Fragment>
                     );
                   })}
