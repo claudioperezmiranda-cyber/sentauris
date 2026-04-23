@@ -705,6 +705,7 @@ const APP_DATA_KEYS = {
   productos_rendiciones: 'sentauris_productos_rendiciones',
   comprobantes: 'sentauris_comprobantes',
   activos_fijos: 'sentauris_activos_fijos',
+  calidad_mantenimientos: 'sentauris_calidad_mantenimientos',
   registro_compras: 'sentauris_registro_compras',
   empresas: 'sentauris_empresas',
   plan_cuentas: 'sentauris_plan_cuentas',
@@ -906,6 +907,7 @@ const ERPProvider = ({ children }) => {
   const [productosRendiciones, setProductosRendiciones] = useState(() => readLocalList('sentauris_productos_rendiciones'));
   const [comprobantes, setComprobantes] = useState(() => readLocalList('sentauris_comprobantes'));
   const [activosFijos, setActivosFijos] = useState(() => readLocalList('sentauris_activos_fijos'));
+  const [calidadMantenimientos, setCalidadMantenimientos] = useState(() => readLocalList('sentauris_calidad_mantenimientos'));
   const [registroCompras, setRegistroCompras] = useState(() => readLocalList('sentauris_registro_compras'));
   const [usuarios, setUsuarios] = useState(() => readLocalList('sentauris_usuarios'));
   const [empresas, setEmpresas] = useState(() => readLocalList('sentauris_empresas'));
@@ -976,6 +978,7 @@ const ERPProvider = ({ children }) => {
             productos_rendiciones: setProductosRendiciones,
             comprobantes: setComprobantes,
             activos_fijos: setActivosFijos,
+            calidad_mantenimientos: setCalidadMantenimientos,
             registro_compras: setRegistroCompras,
             empresas: setEmpresas,
             plan_cuentas: setPlanCuentas,
@@ -1069,6 +1072,10 @@ const ERPProvider = ({ children }) => {
   useEffect(() => {
     persistAppData('activos_fijos', APP_DATA_KEYS.activos_fijos, activosFijos);
   }, [activosFijos]);
+
+  useEffect(() => {
+    persistAppData('calidad_mantenimientos', APP_DATA_KEYS.calidad_mantenimientos, calidadMantenimientos);
+  }, [calidadMantenimientos]);
 
   useEffect(() => {
     persistAppData('registro_compras', APP_DATA_KEYS.registro_compras, registroCompras);
@@ -1203,6 +1210,7 @@ const ERPProvider = ({ children }) => {
       productosRendiciones, setProductosRendiciones,
       comprobantes, setComprobantes,
       activosFijos, setActivosFijos,
+      calidadMantenimientos, setCalidadMantenimientos,
       registroCompras, setRegistroCompras,
       usuarios, setUsuarios,
       empresas, setEmpresas, activeEmpresaId, setActiveEmpresaId,
@@ -7347,7 +7355,11 @@ const MODULES_TREE = [
       { id: 'contabilidad-estados-financieros', label: 'Estados Financieros' },
     ],
   },
-  { id: 'calidad',     label: 'Calidad',              sub: [] },
+  {
+    id: 'calidad', label: 'Calidad', sub: [
+      { id: 'calidad-mantenimientos-calibraciones', label: 'Mantenimientos y/o Calibraciones' },
+    ],
+  },
   { id: 'personas',    label: 'Gestión de Personas',  sub: [] },
   {
     id: 'mantenedores', label: 'Mantenedores', sub: [
@@ -11165,11 +11177,19 @@ const emptyActivoFijo = () => ({
   valorTributarioCorregido: '',
 });
 
+const emptyCalidadMantenimiento = () => ({
+  assetId: '',
+  fechaMantenimiento: '',
+  responsable: '',
+  estadoActivo: '',
+});
+
 const ActivosFijosContabilidad = () => {
   const { activosFijos, setActivosFijos, planCuentas, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [draft, setDraft] = useState(emptyActivoFijo);
+  const [editingAssetId, setEditingAssetId] = useState('');
   const [error, setError] = useState('');
   const [fechaCierre, setFechaCierre] = useState(accountingDate());
   const [previewAssets, setPreviewAssets] = useState(null);
@@ -11218,6 +11238,7 @@ const ActivosFijosContabilidad = () => {
 
   const closeModal = () => {
     setDraft(emptyActivoFijo());
+    setEditingAssetId('');
     setError('');
     setIsModalOpen(false);
   };
@@ -11261,19 +11282,36 @@ const ActivosFijosContabilidad = () => {
       setError('Ya existe un activo fijo con ese ID Activo.');
       return;
     }
+    const currentAsset = editingAssetId ? activosFijos.find(asset => asset.id === editingAssetId) : null;
     const payload = {
       ...normalizeActivoFijoComputed({
         ...draft,
+        ...currentAsset,
         fechaInicioUso: draft.fechaInicioUso || draft.fechaAdquisicion,
         valorResidual: draft.valorResidual || 1,
-      }),
-      id: `af-${Date.now()}`,
-      createdAt: new Date().toISOString(),
+      }, previewFechaCierre || currentAsset?.fechaCierreDepreciacion || ''),
+      id: editingAssetId || `af-${Date.now()}`,
+      createdAt: currentAsset?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    setActivosFijos(prev => [payload, ...prev]);
-    setPreviewAssets(null);
+    setActivosFijos(prev => editingAssetId
+      ? prev.map(asset => asset.id === editingAssetId ? payload : asset)
+      : [payload, ...prev]);
+    setPreviewAssets(prev => prev
+      ? (editingAssetId ? prev.map(asset => asset.id === editingAssetId ? payload : asset) : [payload, ...prev])
+      : null);
     setPreviewFechaCierre('');
     closeModal();
+  };
+
+  const editAsset = (asset) => {
+    setDraft({
+      ...emptyActivoFijo(),
+      ...asset,
+    });
+    setEditingAssetId(asset.id);
+    setError('');
+    setIsModalOpen(true);
   };
 
   const actualizarCentralizacion = () => {
@@ -11316,7 +11354,7 @@ const ActivosFijosContabilidad = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="p-5">
           <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Activos registrados</p>
           <p className="mt-2 text-3xl font-black text-slate-900">{summary.total}</p>
@@ -11324,10 +11362,6 @@ const ActivosFijosContabilidad = () => {
         <Card className="p-5">
           <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Activos vigentes</p>
           <p className="mt-2 text-3xl font-black text-emerald-600">{summary.vigentes}</p>
-        </Card>
-        <Card className="p-5">
-          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Valor libro IFRS</p>
-          <p className="mt-2 text-3xl font-black text-slate-900">{money(summary.valorLibro)}</p>
         </Card>
       </div>
 
@@ -11392,6 +11426,7 @@ const ActivosFijosContabilidad = () => {
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
               <tr>
                 {visibleColumns.map(col => <th key={col.id} className={`p-3 ${col.align === 'right' ? 'text-right' : 'text-left'}`}>{col.label}</th>)}
+                <th className="p-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -11402,11 +11437,18 @@ const ActivosFijosContabilidad = () => {
                       {renderAssetCell(asset, col.id)}
                     </td>
                   ))}
+                  <td className="p-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <button type="button" onClick={() => editAsset(asset)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Editar activo fijo">
+                        <Pencil size={15} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {filteredAssets.length === 0 && (
                 <tr>
-                  <td colSpan={visibleColumns.length} className="p-10 text-center text-sm text-slate-400">
+                  <td colSpan={visibleColumns.length + 1} className="p-10 text-center text-sm text-slate-400">
                     No hay activos fijos registrados todavia. Usa el boton Crear para ingresar el primer activo.
                   </td>
                 </tr>
@@ -11422,7 +11464,7 @@ const ActivosFijosContabilidad = () => {
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-6 sm:py-5">
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Nuevo activo fijo</p>
-                <h3 className="text-xl font-black text-slate-900">Crear registro de activo fijo</h3>
+                <h3 className="text-xl font-black text-slate-900">{editingAssetId ? 'Editar activo fijo' : 'Crear registro de activo fijo'}</h3>
                 <p className="mt-1 text-sm text-slate-500">Se solicitaran los mismos datos presentes en la planilla de activos fijos.</p>
               </div>
               <button type="button" onClick={closeModal} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
@@ -11475,7 +11517,163 @@ const ActivosFijosContabilidad = () => {
             </div>
             <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
               <Button variant="secondary" onClick={closeModal}>Cancelar</Button>
-              <Button variant="accent" icon={CheckCircle} onClick={saveAsset}>Guardar activo fijo</Button>
+              <Button variant="accent" icon={CheckCircle} onClick={saveAsset}>{editingAssetId ? 'Actualizar activo fijo' : 'Guardar activo fijo'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CalidadMantenimientosCalibraciones = () => {
+  const { activosFijos, calidadMantenimientos, setCalidadMantenimientos } = useContext(ERPContext);
+  const [search, setSearch] = useState('');
+  const [modal, setModal] = useState(null);
+
+  const qualityRows = activosFijos
+    .map(asset => {
+      const extra = calidadMantenimientos.find(item => item.assetId === asset.id) || emptyCalidadMantenimiento();
+      return {
+        id: asset.id,
+        assetId: asset.id,
+        idActivo: asset.idActivo || '',
+        nombreActivo: asset.nombreActivo || '',
+        fechaAdquisicion: asset.fechaAdquisicion || '',
+        fechaMantenimiento: extra.fechaMantenimiento || '',
+        responsable: extra.responsable || '',
+        estadoActivo: extra.estadoActivo || asset.estado || '',
+      };
+    })
+    .filter(row => normalizeKey(Object.values(row).join(' ')).includes(normalizeKey(search)));
+
+  const openEdit = (row, maintenanceMode = false) => {
+    setModal({
+      mode: maintenanceMode ? 'maintenance' : 'edit',
+      data: {
+        assetId: row.assetId,
+        idActivo: row.idActivo,
+        nombreActivo: row.nombreActivo,
+        fechaAdquisicion: row.fechaAdquisicion,
+        fechaMantenimiento: maintenanceMode ? accountingDate() : (row.fechaMantenimiento || ''),
+        responsable: row.responsable || '',
+        estadoActivo: maintenanceMode ? (row.estadoActivo || 'En mantenimiento') : (row.estadoActivo || ''),
+      },
+    });
+  };
+
+  const saveRow = () => {
+    const data = modal?.data || {};
+    const payload = {
+      assetId: data.assetId,
+      fechaMantenimiento: data.fechaMantenimiento || '',
+      responsable: data.responsable || '',
+      estadoActivo: data.estadoActivo || '',
+      updatedAt: new Date().toISOString(),
+    };
+    setCalidadMantenimientos(prev => {
+      const exists = prev.some(item => item.assetId === payload.assetId);
+      return exists
+        ? prev.map(item => item.assetId === payload.assetId ? { ...item, ...payload } : item)
+        : [...prev, payload];
+    });
+    setModal(null);
+  };
+
+  const setField = (field, value) => {
+    setModal(prev => ({ ...prev, data: { ...prev.data, [field]: value } }));
+  };
+
+  return (
+    <div className="w-full max-w-none mx-auto animate-in fade-in slide-in-from-bottom-2 space-y-5">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad / Mantenimientos y/o Calibraciones</p>
+        <h2 className="text-2xl font-black text-slate-900">Mantenimientos y/o Calibraciones</h2>
+        <p className="mt-2 text-sm text-slate-500">Listado sincronizado con Activos Fijos, con control de mantenimiento, responsable y estado operativo del activo.</p>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-slate-100">
+          <div className="relative w-full md:max-w-xl">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por ID activo, nombre, responsable o estado"
+              className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="p-3 text-left">ID Activo</th>
+                <th className="p-3 text-left">Nombre Activo</th>
+                <th className="p-3 text-left">Fecha Adquisicion</th>
+                <th className="p-3 text-left">Fecha de Mantenimiento</th>
+                <th className="p-3 text-left">Responsable</th>
+                <th className="p-3 text-left">Estado del Activo</th>
+                <th className="p-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {qualityRows.map(row => (
+                <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="p-3 font-semibold text-slate-800">{row.idActivo || '-'}</td>
+                  <td className="p-3 min-w-64">{row.nombreActivo || '-'}</td>
+                  <td className="p-3 font-mono">{row.fechaAdquisicion || '-'}</td>
+                  <td className="p-3 font-mono">{row.fechaMantenimiento || '-'}</td>
+                  <td className="p-3">{row.responsable || '-'}</td>
+                  <td className="p-3">{row.estadoActivo || '-'}</td>
+                  <td className="p-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <button type="button" onClick={() => openEdit(row, false)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Modificar datos">
+                        <Pencil size={15} />
+                      </button>
+                      <button type="button" onClick={() => openEdit(row, true)} className="p-2 rounded-lg text-slate-400 hover:bg-emerald-50 hover:text-emerald-600" title="Registrar mantenimiento">
+                        <Wrench size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {qualityRows.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="p-10 text-center text-sm text-slate-400">
+                    No hay activos fijos disponibles para mostrar en este submodulo.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Calidad</p>
+                <h3 className="text-xl font-black text-slate-900">{modal.mode === 'maintenance' ? 'Registrar mantenimiento' : 'Modificar datos del activo'}</h3>
+                <p className="mt-1 text-sm text-slate-500">Los datos heredados de Activos Fijos son de solo lectura en este submodulo.</p>
+              </div>
+              <button type="button" onClick={() => setModal(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-6 py-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="ID Activo" value={modal.data.idActivo} disabled />
+              <Input label="Nombre Activo" value={modal.data.nombreActivo} disabled />
+              <Input label="Fecha Adquisicion" type="date" value={modal.data.fechaAdquisicion} disabled />
+              <Input label="Fecha de Mantenimiento" type="date" value={modal.data.fechaMantenimiento} onChange={e => setField('fechaMantenimiento', e.target.value)} />
+              <Input label="Responsable" value={modal.data.responsable} onChange={e => setField('responsable', e.target.value)} />
+              <Select label="Estado del Activo" value={modal.data.estadoActivo} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+              <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
+              <Button variant="accent" icon={CheckCircle} onClick={saveRow}>{modal.mode === 'maintenance' ? 'Guardar mantenimiento' : 'Guardar cambios'}</Button>
             </div>
           </div>
         </div>
@@ -13585,10 +13783,14 @@ const Sidebar = () => {
     'Monedas e Indicadores': 'mantenedores-monedas-indicadores',
     'Usuarios': 'mantenedores-usuarios',
   }[label] || 'mantenedores-clientes');
+  const calidadSubId = (label) => ({
+    'Mantenimientos y/o Calibraciones': 'calidad-mantenimientos-calibraciones',
+  }[label] || 'calidad-mantenimientos-calibraciones');
 
   const subIdFor = (item, label) => {
     if (item.id.startsWith('operaciones'))     return opSubId(label);
     if (item.id.startsWith('abastecimiento'))  return abastecimientoSubId(label);
+    if (item.id.startsWith('calidad'))         return calidadSubId(label);
     if (item.id.startsWith('mantenedores'))    return mantenedorSubId(label);
     if (item.id.startsWith('configuraciones')) return configSubId(label);
     if (item.id.startsWith('contabilidad')) {
@@ -13613,7 +13815,7 @@ const Sidebar = () => {
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
     { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Activos Fijos', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
-    { id: 'calidad', label: 'Calidad', icon: CheckCircle2 },
+    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Mantenimientos y/o Calibraciones'] },
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
   const menuBottom = [
@@ -13728,6 +13930,7 @@ const Header = () => {
     'contabilidad-informes-tributarios': 'Contabilidad / Informes Tributarios',
     'contabilidad-analiticos': 'Contabilidad / Analiticos',
     'contabilidad-estados-financieros': 'Contabilidad / Estados Financieros',
+    'calidad-mantenimientos-calibraciones': 'Calidad / Mantenimientos y/o Calibraciones',
     'mantenedores-clientes': 'Mantenedores / Clientes y/o Proveedores',
     'mantenedores-licitaciones': 'Mantenedores / Licitaciones',
     'mantenedores-equipos': 'Mantenedores / Equipos',
@@ -14065,6 +14268,7 @@ const ContentManager = () => {
     'contabilidad-informes-tributarios': 'contabilidad',
     'contabilidad-analiticos': 'contabilidad',
     'contabilidad-estados-financieros': 'contabilidad',
+    'calidad-mantenimientos-calibraciones': 'calidad',
     'mantenedores-monedas-indicadores': 'mantenedores-clientes',
   };
   const canAccess = (id) => {
@@ -14103,6 +14307,7 @@ const ContentManager = () => {
       case 'contabilidad-informes-tributarios': return <InformesTributarios />;
       case 'contabilidad-analiticos': return <AnaliticosContables />;
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
+      case 'calidad-mantenimientos-calibraciones': return <CalidadMantenimientosCalibraciones />;
       case 'mantenedores-clientes': return <MantenedoresClientesProveedores />;
       case 'mantenedores-licitaciones': return <MantenedoresLicitaciones />;
       case 'mantenedores-equipos': return <MantenedoresEquipos />;
