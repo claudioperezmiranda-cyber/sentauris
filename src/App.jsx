@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, User, ClipboardList, TrendingUp, FileText, Users, LogOut,
-  Search, Bell, ChevronLeft, Wrench, CheckCircle2, AlertCircle,
+  Search, Bell, ChevronLeft, ChevronRight, Wrench, CheckCircle2, AlertCircle,
   Mail, FileDown, Camera, Trash2, Cpu, Database, Upload, Download,
   FileSpreadsheet, X, CheckCircle, AlertTriangle, Plus, Pencil,
   Lock, Eye, EyeOff, ShieldAlert, Settings, MoreVertical, ArrowUpDown, Info
@@ -320,6 +320,7 @@ const PREVENTIVA_OBS_PREFIX = '__PREVENTIVA_JSON__';
 const CORRECTIVA_OBS_PREFIX = '__CORRECTIVA_JSON__';
 const DEFAULT_CORRECTIVA_CONCLUSION_PROMPT = 'Redacta la conclusion como un analisis causal tecnico del daño del repuesto o componente asociado a la falla. Explica la causa probable, el efecto sobre el funcionamiento del equipo y una solucion tecnica concreta. Usa un tono profesional y natural, sin citar textualmente el hallazgo ni mencionar instrucciones internas.';
 const PERM_MODIFICAR_CORRECTIVA_EJECUTADA = 'perm-modificar-correctiva-ejecutada';
+const PERM_PLANIFICACION_EDITAR = 'perm-planificacion-editar';
 const DEFAULT_CONDICION_FINAL_CORRECTIVA = 'Tras la ejecución de las pruebas funcionales pertinentes, se constató que el equipo opera conforme a lo especificado, lo que confirma su operatividad.';
 const DEFAULT_ESTADOS_INTERNOS_CORRECTIVA = ['Ingresado', 'Garantía', 'En revisión', 'En reparación', 'Esperando Repuestos', 'Listo para Entrega', 'Ejecutado'];
 
@@ -7229,6 +7230,31 @@ const MantenedoresUsuarios = () => {
                       Permite reabrir un mantenimiento correctivo guardado con estado interno Ejecutado.
                     </div>
                   </div>
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
+                    <div className="px-4 py-2.5">
+                      <span className="text-sm font-bold text-slate-700">Planificación de Técnicos</span>
+                    </div>
+                    <div className="border-t border-blue-100 bg-white px-4 py-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={selectedEmpresaAccesos().includes('operaciones-planificacion')}
+                          onChange={() => toggleAcceso('operaciones-planificacion')}
+                          className="w-3.5 h-3.5 rounded border-slate-300 accent-blue-600"
+                        />
+                        <span className="text-xs text-slate-600 group-hover:text-slate-900 transition-colors">Visualizar</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={selectedEmpresaAccesos().includes(PERM_PLANIFICACION_EDITAR)}
+                          onChange={() => toggleAcceso(PERM_PLANIFICACION_EDITAR)}
+                          className="w-3.5 h-3.5 rounded border-slate-300 accent-blue-600"
+                        />
+                        <span className="text-xs text-slate-600 group-hover:text-slate-900 transition-colors">Editar</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -11674,10 +11700,57 @@ const RegistroCompras = () => {
 };
 
 const Planificacion = () => {
+  const { clientes, usuarios, loggedInUser, activeEmpresaId, empresas } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('tecnicos');
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [asignaciones, setAsignaciones] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('planificacion-tecnicos') || '{}'); } catch { return {}; }
+  });
+
   const tabBase = 'px-4 py-2 text-sm font-bold border-b-2 transition-colors';
   const tabAct  = `${tabBase} border-blue-600 text-blue-700`;
   const tabIna  = `${tabBase} border-transparent text-slate-400 hover:text-slate-600`;
+
+  const canEdit = loggedInUser?.isSuperadmin || (() => {
+    const hasCompany = activeEmpresaId && loggedInUser?.permisosEmpresas && Object.keys(loggedInUser.permisosEmpresas || {}).length > 0;
+    const acc = hasCompany
+      ? (userEmpresaAccess(loggedInUser, activeEmpresaId, empresas) || [])
+      : (loggedInUser?.accesos || []);
+    return acc.length === 0 || acc.includes(PERM_PLANIFICACION_EDITAR);
+  })();
+
+  const getWeekDays = (offset) => {
+    const today = new Date();
+    const dow = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      return d;
+    });
+  };
+
+  const weekDays = getWeekDays(weekOffset);
+  const dateStr = (d) => d.toISOString().split('T')[0];
+  const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+  const weekLabel = () => {
+    const fmt = (d) => d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' });
+    return `${fmt(weekDays[0])} – ${fmt(weekDays[6])}, ${weekDays[6].getFullYear()}`;
+  };
+
+  const clientesList = clientes.filter(c => (c.razonSocial || c.name || c.nombre || '').trim());
+  const usuariosList = usuarios.filter(u => (u.nombre || '').trim());
+
+  const getAsignacion = (cId, d) => asignaciones[`${cId}-${dateStr(d)}`] || '';
+  const setAsignacion = (cId, d, userId) => {
+    const key = `${cId}-${dateStr(d)}`;
+    const next = { ...asignaciones };
+    if (userId) next[key] = userId; else delete next[key];
+    setAsignaciones(next);
+    localStorage.setItem('planificacion-tecnicos', JSON.stringify(next));
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-2">
@@ -11690,15 +11763,77 @@ const Planificacion = () => {
           <button onClick={() => setActiveTab('tecnicos')} className={activeTab === 'tecnicos' ? tabAct : tabIna}>Tecnicos</button>
           <button onClick={() => setActiveTab('preventivas')} className={activeTab === 'preventivas' ? tabAct : tabIna}>Preventivas</button>
         </div>
+
         {activeTab === 'tecnicos' && (
-          <div className="p-6 flex flex-col items-center justify-center py-24 text-center space-y-3">
-            <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
-              <Wrench size={28} className="text-slate-400"/>
+          <div className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <button onClick={() => setWeekOffset(w => w - 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
+                <ChevronLeft size={18} />
+              </button>
+              <span className="text-sm font-semibold text-slate-700 capitalize">{weekLabel()}</span>
+              <button onClick={() => setWeekOffset(w => w + 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
+                <ChevronRight size={18} />
+              </button>
             </div>
-            <p className="text-slate-600 font-semibold">Planificación de Técnicos</p>
-            <p className="text-slate-400 text-sm max-w-xs">Este módulo estará disponible próximamente.</p>
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="bg-slate-50">
+                    <th className="sticky left-0 z-10 bg-slate-50 border-b border-r border-slate-200 px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider" style={{minWidth:'180px'}}>Cliente</th>
+                    {weekDays.map((d, i) => (
+                      <th key={i} className="border-b border-r border-slate-200 px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider" style={{minWidth:'130px'}}>
+                        <div>{DAY_NAMES[i]}</div>
+                        <div className="text-slate-400 font-normal normal-case mt-0.5">{d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientesList.length === 0 && (
+                    <tr><td colSpan={8} className="p-10 text-center text-slate-400 text-sm">No hay clientes registrados.</td></tr>
+                  )}
+                  {clientesList.map((cliente, idx) => {
+                    const nombre = cliente.razonSocial || cliente.name || cliente.nombre || '';
+                    const cId = cliente.id || String(idx);
+                    return (
+                      <tr key={cId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                        <td className="sticky left-0 z-10 bg-white border-r border-slate-100 px-4 py-2 font-medium text-slate-700 text-sm">{nombre}</td>
+                        {weekDays.map((d, di) => {
+                          const assigned = getAsignacion(cId, d);
+                          const assignedUser = usuariosList.find(u => (u.id || u.usuario) === assigned);
+                          return (
+                            <td key={di} className="border-r border-slate-100 px-2 py-1.5">
+                              {canEdit ? (
+                                <select
+                                  value={assigned}
+                                  onChange={e => setAsignacion(cId, d, e.target.value)}
+                                  className="w-full text-xs rounded-lg border border-slate-200 px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                >
+                                  <option value="">—</option>
+                                  {usuariosList.map(u => (
+                                    <option key={u.id || u.usuario} value={u.id || u.usuario}>{u.nombre}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className={`block text-center text-xs px-2 py-1 rounded-lg ${assigned ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-300'}`}>
+                                  {assignedUser ? assignedUser.nombre : '—'}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {!canEdit && (
+              <p className="text-xs text-slate-400 text-center pb-2">Modo solo lectura. Solicita permisos de edición para modificar la planificación.</p>
+            )}
           </div>
         )}
+
         {activeTab === 'preventivas' && (
           <div className="p-6 flex flex-col items-center justify-center py-24 text-center space-y-3">
             <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
