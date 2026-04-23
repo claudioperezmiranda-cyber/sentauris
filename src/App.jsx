@@ -2804,10 +2804,14 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
     const cliente = getCliente(orden);
     const licitacion = getLicitacion(orden);
     const correctiva = parseCorrectivaObservaciones(orden.observaciones);
+    const fallbackLogoSrc = typeof window !== 'undefined' ? `${window.location.origin}/logo-vaic-pdf.jpeg` : '';
     return {
       recipientEmail: getContactEmail(orden),
       report: {
         empresa: currentEmpresa || {},
+        assets: {
+          logoSrc: currentEmpresa?.membreteImagen || fallbackLogoSrc,
+        },
         cliente: cliente || {},
         licitacion: licitacion || {},
         estado: orden.estado || '',
