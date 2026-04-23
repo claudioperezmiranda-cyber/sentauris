@@ -97,6 +97,11 @@ const drawWrapped = (page, text, { x, y, font, size, maxWidth, lineHeight = 12, 
   return cursorY;
 };
 
+const rowHeightForValues = (values, cols, font, size) => Math.max(
+  ...values.map((value, index) => Math.max(24, 8 + (wrapText(String(value || ''), font, size, cols[index].width - 8).length * 10))),
+  24
+);
+
 const fitFontSize = (text, font, maxWidth, preferredSize, minSize = 10) => {
   let size = preferredSize;
   while (size > minSize && font.widthOfTextAtSize(String(text || ''), size) > maxWidth) size -= 0.5;
@@ -195,35 +200,23 @@ export async function buildQuotationEmailPdf(draft = {}, empresaInforme = {}) {
   const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
   const scale = contentWidth / tableWidth;
   const cols = columns.map(col => ({ ...col, width: col.width * scale }));
-  const headerHeight = 22;
-  let x = PAGE_MARGIN;
-  cols.forEach((col) => {
-    drawBox(page, { x, y: cursorY - headerHeight, width: col.width, height: headerHeight, fillColor: LIGHT_FILL });
-    drawWrapped(page, col.label, { x: x + 4, y: cursorY - 13, font: bold, size: 8, maxWidth: col.width - 8, lineHeight: 10, align: 'center' });
-    x += col.width;
-  });
-  cursorY -= headerHeight;
+  const drawTableHeader = () => {
+    const headerHeight = 22;
+    let x = PAGE_MARGIN;
+    cols.forEach((col) => {
+      drawBox(page, { x, y: cursorY - headerHeight, width: col.width, height: headerHeight, fillColor: LIGHT_FILL });
+      drawWrapped(page, col.label, { x: x + 4, y: cursorY - 13, font: bold, size: 8, maxWidth: col.width - 8, lineHeight: 10, align: 'center' });
+      x += col.width;
+    });
+    cursorY -= headerHeight;
+  };
+  drawTableHeader();
 
   let printableItem = 0;
   for (const item of draft.items || []) {
     const isInfo = item?.tipo === 'info';
-    const rowHeight = isInfo ? 22 : Math.max(
-      24,
-      10 + (wrapText(String(item.descripcion || ''), regular, 9, cols[3].width - 8).length * 11),
-    );
-    if (cursorY - rowHeight < PAGE_MARGIN + 120) {
-      page = pdfDoc.addPage(PAGE_SIZE);
-      cursorY = pageHeight - PAGE_MARGIN;
-    }
-    if (isInfo) {
-      drawBox(page, { x: PAGE_MARGIN, y: cursorY - rowHeight, width: contentWidth, height: rowHeight, fillColor: LIGHT_FILL });
-      drawWrapped(page, String(item.descripcion || ''), { x: PAGE_MARGIN + 6, y: cursorY - 14, font: bold, size: 9, maxWidth: contentWidth - 12, lineHeight: 10 });
-      cursorY -= rowHeight;
-      continue;
-    }
-    let cellX = PAGE_MARGIN;
-    const values = [
-      String(++printableItem),
+    const values = isInfo ? [String(item.descripcion || '')] : [
+      String(printableItem + 1),
       item.codigo || '',
       item.parte || '',
       item.descripcion || '',
@@ -233,6 +226,21 @@ export async function buildQuotationEmailPdf(draft = {}, empresaInforme = {}) {
       String(item.dcto || 0),
       `$${lineTotal(item).toLocaleString('es-CL')}`,
     ];
+    const rowHeight = isInfo ? Math.max(22, 8 + (wrapText(values[0], bold, 9, contentWidth - 12).length * 10)) : rowHeightForValues(values, cols, regular, 9);
+    if (cursorY - rowHeight < PAGE_MARGIN + 120) {
+      page = pdfDoc.addPage(PAGE_SIZE);
+      cursorY = pageHeight - PAGE_MARGIN;
+      drawTableHeader();
+    }
+    if (isInfo) {
+      drawBox(page, { x: PAGE_MARGIN, y: cursorY - rowHeight, width: contentWidth, height: rowHeight, fillColor: LIGHT_FILL });
+      drawWrapped(page, String(item.descripcion || ''), { x: PAGE_MARGIN + 6, y: cursorY - 14, font: bold, size: 9, maxWidth: contentWidth - 12, lineHeight: 10 });
+      cursorY -= rowHeight;
+      continue;
+    }
+    let cellX = PAGE_MARGIN;
+    printableItem += 1;
+    values[0] = String(printableItem);
     cols.forEach((col, index) => {
       drawBox(page, { x: cellX, y: cursorY - rowHeight, width: col.width, height: rowHeight });
       drawWrapped(page, values[index], { x: cellX + 4, y: cursorY - 14, font: regular, size: 9, maxWidth: col.width - 8, lineHeight: 10, align: index === 3 ? 'left' : 'center' });
@@ -243,6 +251,10 @@ export async function buildQuotationEmailPdf(draft = {}, empresaInforme = {}) {
 
   const details = String(draft.detalles || '').trim();
   if (details) {
+    if (cursorY - 120 < PAGE_MARGIN) {
+      page = pdfDoc.addPage(PAGE_SIZE);
+      cursorY = pageHeight - PAGE_MARGIN;
+    }
     cursorY -= 14;
     page.drawText('Descripcion Adicional', { x: PAGE_MARGIN, y: cursorY, font: bold, size: 11, color: BORDER_COLOR });
     const detailsHeight = Math.max(70, 22 + (wrapText(details, regular, 10, contentWidth - 20).length * 12));
@@ -252,6 +264,10 @@ export async function buildQuotationEmailPdf(draft = {}, empresaInforme = {}) {
   }
 
   const totalsX = PAGE_MARGIN + contentWidth - 220;
+  if (cursorY - 140 < PAGE_MARGIN) {
+    page = pdfDoc.addPage(PAGE_SIZE);
+    cursorY = pageHeight - PAGE_MARGIN;
+  }
   const totalRows = [
     ['Neto', `$${neto.toLocaleString('es-CL')}`],
     ['Monto Exento', '$0'],

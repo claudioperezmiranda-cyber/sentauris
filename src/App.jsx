@@ -2835,6 +2835,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
     const licitacion = getLicitacion(orden);
     const reportOrden = await prepareReportOrden(orden);
     const preventiva = parsePreventivaObservaciones(reportOrden.observaciones);
+    const protocolo = getPreventiveProtocol(reportOrden.tipo_equipo, protocolosPreventivos);
     const fallbackLogoSrc = typeof window !== 'undefined' ? `${window.location.origin}/logo-vaic-pdf.jpeg` : '';
     return {
       recipientEmail: getContactEmail(orden),
@@ -2845,7 +2846,9 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
         },
         cliente: cliente || {},
         licitacion: licitacion || {},
-        title: getPreventiveProtocol(reportOrden.tipo_equipo, protocolosPreventivos)?.title || 'MANT. PREVENTIVO',
+        title: protocolo?.title || 'MANT. PREVENTIVO',
+        protocol: protocolo || null,
+        checklist: reportOrden.preventivaChecklist || preventiva.checklist || {},
         orden: {
           folio: reportOrden.folio || '',
           fecha: reportOrden.fecha || '',
