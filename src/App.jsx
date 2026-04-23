@@ -311,7 +311,7 @@ const createEmptyFormData = () => ({
   preventivaFirmaRecepcion: '', preventivaRecibidoPor: '', preventivaCargoRecepcion: '',
   correctivaCondicionInicial: '', correctivaDiagnostico: '',
   correctivaConclusion: '', correctivaCondicionFinal: '',
-  correctivaFotos: [], correctivaFirma: '', correctivaRepuestos: [],
+  correctivaFotos: [], correctivaCondicionFinalRespaldos: [], correctivaFirma: '', correctivaRepuestos: [],
   correctivaEstadoInterno: '', correctivaFirmaRecepcion: '',
   correctivaRecibidoPor: '', correctivaCargoRecepcion: '',
   correctivaGarantiaContrato: false, correctivaOrigenGarantiaFolio: ''
@@ -424,20 +424,22 @@ const derivePreventiveFinalStatus = (checklist = {}) => {
   return 'Operativo';
 };
 
-const buildCorrectivaObservaciones = ({ condicionInicial, diagnostico, conclusion, condicionFinal, fotos, firma, firmaRecepcion, recibidoPor, cargoRecepcion, garantiaContrato, origenGarantiaFolio, repuestosGarantia }) =>
+const buildCorrectivaObservaciones = ({ condicionInicial, diagnostico, conclusion, condicionFinal, fotos, condicionFinalRespaldos, firma, firmaRecepcion, recibidoPor, cargoRecepcion, garantiaContrato, origenGarantiaFolio, repuestosGarantia, repuestosDetalle }) =>
   `${CORRECTIVA_OBS_PREFIX}${JSON.stringify({
     condicionInicial: condicionInicial || '',
     diagnostico: diagnostico || '',
     conclusion: conclusion || '',
     condicionFinal: condicionFinal || '',
     fotos: Array.isArray(fotos) ? fotos : [],
+    condicionFinalRespaldos: Array.isArray(condicionFinalRespaldos) ? condicionFinalRespaldos : [],
     firma: firma || '',
     firmaRecepcion: firmaRecepcion || '',
     recibidoPor: recibidoPor || '',
     cargoRecepcion: cargoRecepcion || '',
     garantiaContrato: Boolean(garantiaContrato),
     origenGarantiaFolio: origenGarantiaFolio || '',
-    repuestosGarantia: Array.isArray(repuestosGarantia) ? repuestosGarantia : []
+    repuestosGarantia: Array.isArray(repuestosGarantia) ? repuestosGarantia : [],
+    repuestosDetalle: Array.isArray(repuestosDetalle) ? repuestosDetalle : []
   })}`;
 
 const parseCorrectivaObservaciones = (value = '') => {
@@ -451,20 +453,22 @@ const parseCorrectivaObservaciones = (value = '') => {
         conclusion: parsed.conclusion || '',
         condicionFinal: parsed.condicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA,
         fotos: Array.isArray(parsed.fotos) ? parsed.fotos : [],
+        condicionFinalRespaldos: Array.isArray(parsed.condicionFinalRespaldos) ? parsed.condicionFinalRespaldos : [],
         firma: parsed.firma || '',
         firmaRecepcion: parsed.firmaRecepcion || '',
         recibidoPor: parsed.recibidoPor || '',
         cargoRecepcion: parsed.cargoRecepcion || '',
         garantiaContrato: Boolean(parsed.garantiaContrato),
         origenGarantiaFolio: parsed.origenGarantiaFolio || '',
-        repuestosGarantia: Array.isArray(parsed.repuestosGarantia) ? parsed.repuestosGarantia : []
+        repuestosGarantia: Array.isArray(parsed.repuestosGarantia) ? parsed.repuestosGarantia : [],
+        repuestosDetalle: Array.isArray(parsed.repuestosDetalle) ? parsed.repuestosDetalle : []
       };
     } catch {
-      return { condicionInicial: '', diagnostico: text, conclusion: '', condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', garantiaContrato: false, origenGarantiaFolio: '', repuestosGarantia: [] };
+      return { condicionInicial: '', diagnostico: text, conclusion: '', condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], condicionFinalRespaldos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', garantiaContrato: false, origenGarantiaFolio: '', repuestosGarantia: [], repuestosDetalle: [] };
     }
   }
   const [condicionInicial = '', diagnostico = '', conclusion = ''] = text.split(/\n{2,}/);
-  return { condicionInicial, diagnostico, conclusion, condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', garantiaContrato: false, origenGarantiaFolio: '', repuestosGarantia: [] };
+  return { condicionInicial, diagnostico, conclusion, condicionFinal: DEFAULT_CONDICION_FINAL_CORRECTIVA, fotos: [], condicionFinalRespaldos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', garantiaContrato: false, origenGarantiaFolio: '', repuestosGarantia: [], repuestosDetalle: [] };
 };
 
 const correctivaText = (data) =>
@@ -2188,7 +2192,7 @@ const MantencionCorrectiva = () => {
     part_number: r.part_number || '',
     item_type: r.item_type || '',
     qty: r.qty || 1,
-    optionalNote: r.optionalNote || '',
+    respaldos: Array.isArray(r.respaldos) ? r.respaldos : [],
     toBodega: Boolean(r.toBodega),
     garantia: Boolean(r.garantia),
     lockedQty: Boolean(r.lockedQty),
@@ -2205,6 +2209,7 @@ const MantencionCorrectiva = () => {
     conclusion: formData.correctivaConclusion || ''
   });
   const [condicionFinal, setCondicionFinal] = useState(formData.correctivaCondicionFinal || DEFAULT_CONDICION_FINAL_CORRECTIVA);
+  const [condicionFinalRespaldos, setCondicionFinalRespaldos] = useState(Array.isArray(formData.correctivaCondicionFinalRespaldos) ? formData.correctivaCondicionFinalRespaldos : []);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const estadoInternoOptions = ensureDefaultEstadosInternos(parametros?.estadosInternosCorrectiva || []);
@@ -2244,6 +2249,34 @@ const MantencionCorrectiva = () => {
   };
   const updateRepuestoSeleccionado = (tempId, patch) => {
     setRepuestosSeleccionados(prev => prev.map(r => r.tempId === tempId ? { ...r, ...patch } : r));
+  };
+  const readImageFiles = (files, onLoaded) => {
+    const selected = Array.from(files || []);
+    selected.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        onLoaded({
+          id: `${file.name}-${Date.now()}-${Math.random()}`,
+          name: file.name,
+          src: event.target.result
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+  const handleRepuestoRespaldos = (tempId, files) => {
+    readImageFiles(files, (fileData) => {
+      setRepuestosSeleccionados(prev => prev.map(item =>
+        item.tempId === tempId
+          ? { ...item, respaldos: [...(item.respaldos || []), fileData] }
+          : item
+      ));
+    });
+  };
+  const handleCondicionFinalRespaldos = (files) => {
+    readImageFiles(files, (fileData) => {
+      setCondicionFinalRespaldos(prev => [...prev, fileData]);
+    });
   };
 
   const buildDiagnosticEngineInput = (workOrderId) => ({
@@ -2317,6 +2350,7 @@ const MantencionCorrectiva = () => {
           conclusion: fullReportText,
           condicionFinal: muestraCondicionFinal ? condicionFinal : '',
           fotos,
+          condicionFinalRespaldos: muestraCondicionFinal ? condicionFinalRespaldos : [],
           firma: firmaCorrectiva,
           firmaRecepcion: estadoEsEjecutado ? firmaRecepcion : '',
           recibidoPor: estadoEsEjecutado ? recibidoPor.trim() : '',
@@ -2325,7 +2359,14 @@ const MantencionCorrectiva = () => {
           origenGarantiaFolio: formData.correctivaOrigenGarantiaFolio || '',
           repuestosGarantia: repuestosSeleccionados
             .filter(r => r.garantia)
-            .map(r => ({ id: r.id, name: r.name || '', part_number: r.part_number || '', qty: Number(r.qty) || 1 }))
+            .map(r => ({ id: r.id, name: r.name || '', part_number: r.part_number || '', qty: Number(r.qty) || 1 })),
+          repuestosDetalle: repuestosSeleccionados.map(r => ({
+            id: r.id,
+            name: r.name || '',
+            part_number: r.part_number || '',
+            qty: Number(r.qty) || 1,
+            respaldos: Array.isArray(r.respaldos) ? r.respaldos : []
+          }))
         })
       });
 
@@ -2426,7 +2467,7 @@ const MantencionCorrectiva = () => {
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Código</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">P/N</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Cant.</th>
-                <th className="px-4 py-3 font-bold uppercase text-[10px]">Nota técnica</th>
+                <th className="px-4 py-3 font-bold uppercase text-[10px]">Respaldos</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Solicitar compra</th>
                 {garantiaHabilitada && <th className="px-4 py-3 font-bold uppercase text-[10px]">Garantia</th>}
                 <th className="px-4 py-3"></th>
@@ -2440,13 +2481,29 @@ const MantencionCorrectiva = () => {
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.part_number}</td>
                   <td className="px-4 py-3"><input type="number" min="1" value={r.qty ?? ''} disabled={r.lockedQty} onChange={e => updateRepuestoSeleccionado(r.tempId, { qty: e.target.value })} onBlur={e => updateRepuestoSeleccionado(r.tempId, { qty: Number(e.target.value) > 0 ? e.target.value : 1 })} className="w-16 border rounded px-1 text-center text-sm disabled:bg-slate-100 disabled:text-slate-400" /></td>
                   <td className="px-4 py-3">
-                    <input
-                      type="text"
-                      value={r.optionalNote || ''}
-                      onChange={e => updateRepuestoSeleccionado(r.tempId, { optionalNote: e.target.value })}
-                      className="w-48 border rounded px-2 py-1 text-sm"
-                      placeholder="Complemento opcional"
-                    />
+                    <div className="space-y-2">
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600">
+                        <Camera size={14} />
+                        Adjuntar
+                        <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleRepuestoRespaldos(r.tempId, e.target.files)} />
+                      </label>
+                      {(r.respaldos || []).length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {(r.respaldos || []).map(respaldo => (
+                            <div key={respaldo.id} className="relative h-12 w-12 overflow-hidden rounded border border-slate-200 bg-slate-50">
+                              <img src={respaldo.src} alt={respaldo.name} className="h-full w-full object-cover" />
+                              <button
+                                type="button"
+                                onClick={() => updateRepuestoSeleccionado(r.tempId, { respaldos: (r.respaldos || []).filter(item => item.id !== respaldo.id) })}
+                                className="absolute right-0 top-0 rounded-bl bg-white/90 p-0.5 text-red-500"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3"><input type="checkbox" checked={Boolean(r.toBodega)} onChange={e => updateRepuestoSeleccionado(r.tempId, { toBodega: e.target.checked })} className="w-4 h-4 rounded" /></td>
                   {garantiaHabilitada && <td className="px-4 py-3"><input type="checkbox" checked={Boolean(r.garantia)} onChange={e => updateRepuestoSeleccionado(r.tempId, { garantia: e.target.checked })} className="w-4 h-4 rounded accent-emerald-600" /></td>}
@@ -2493,6 +2550,29 @@ const MantencionCorrectiva = () => {
           <textarea className="w-full min-h-[96px] p-4 rounded-lg border border-slate-100 bg-slate-50 text-sm text-slate-600 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-y"
             value={condicionFinal}
             onChange={(e) => setCondicionFinal(e.target.value)} />
+          <div className="space-y-3">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600">
+              <Camera size={16} />
+              Adjuntar imagen de respaldo
+              <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleCondicionFinalRespaldos(e.target.files)} />
+            </label>
+            {condicionFinalRespaldos.length > 0 && (
+              <div className="flex flex-wrap gap-3">
+                {condicionFinalRespaldos.map(respaldo => (
+                  <div key={respaldo.id} className="relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                    <img src={respaldo.src} alt={respaldo.name} className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setCondicionFinalRespaldos(prev => prev.filter(item => item.id !== respaldo.id))}
+                      className="absolute right-1 top-1 rounded bg-white/90 p-1 text-red-500 shadow"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </Card>
       )}
 
@@ -3122,8 +3202,8 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
     const preventiva = isPreventivo
       ? parsePreventivaObservaciones(orden.observaciones)
       : { observaciones: '', checklist: {}, firma: '' };
-    const correctiva = isPreventivo
-      ? { condicionInicial: '', diagnostico: '', conclusion: '', condicionFinal: '', fotos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '' }
+      const correctiva = isPreventivo
+      ? { condicionInicial: '', diagnostico: '', conclusion: '', condicionFinal: '', fotos: [], condicionFinalRespaldos: [], firma: '', firmaRecepcion: '', recibidoPor: '', cargoRecepcion: '', repuestosDetalle: [] }
       : parseCorrectivaObservaciones(orden.observaciones);
     let preventivaChecklist = preventiva.checklist || {};
     if (isPreventivo && orden.id && Object.keys(preventivaChecklist).length === 0) {
@@ -3151,11 +3231,13 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       const garantiaIds = new Set((correctiva.repuestosGarantia || []).map(item => String(item.id || '')));
       correctivaRepuestos = (data || []).map((item, index) => {
         const repuesto = repuestos.find(r => r.id === item.repuesto_id) || {};
+        const detalle = (correctiva.repuestosDetalle || [])[index] || (correctiva.repuestosDetalle || []).find(detail => String(detail.id || '') === String(item.repuesto_id || ''));
         const esGarantia = Boolean(item.garantia) || garantiaIds.has(String(item.repuesto_id || repuesto.id || ''));
         return {
           ...repuesto,
           id: item.repuesto_id || repuesto.id,
           qty: item.cantidad || 1,
+          respaldos: Array.isArray(detalle?.respaldos) ? detalle.respaldos : [],
           toBodega: Boolean(item.desde_bodega),
           garantia: esGarantia,
           lockedQty: esGarantia,
@@ -3192,6 +3274,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       correctivaConclusion: correctiva.conclusion,
       correctivaCondicionFinal: correctiva.condicionFinal,
       correctivaFotos: correctiva.fotos,
+      correctivaCondicionFinalRespaldos: correctiva.condicionFinalRespaldos || [],
       correctivaFirma: correctiva.firma,
       correctivaRepuestos,
       correctivaEstadoInterno: orden.estado || '',
