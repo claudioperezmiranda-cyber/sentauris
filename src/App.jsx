@@ -1195,11 +1195,12 @@ const Select = ({ label, options, value, onChange, disabled, placeholder }) => (
   </div>
 );
 
-const SearchableSelect = ({ label, options = [], value, onChange, disabled, placeholder, getLabel, getSearchText }) => {
+const SearchableSelect = ({ label, options = [], value, onChange, disabled, placeholder, getLabel, getSearchText, getValue }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const ref = useRef(null);
-  const selected = options.find(opt => String(opt.id || opt) === String(value || ''));
+  const valueFor = (opt) => getValue ? getValue(opt) : (opt?.id || opt);
+  const selected = options.find(opt => String(valueFor(opt)) === String(value || ''));
   const labelFor = (opt) => getLabel ? getLabel(opt) : (opt?.name || opt);
   const searchFor = (opt) => getSearchText ? getSearchText(opt) : labelFor(opt);
 
@@ -1211,7 +1212,7 @@ const SearchableSelect = ({ label, options = [], value, onChange, disabled, plac
 
   const filtered = options.filter(opt => normalizeKey(searchFor(opt)).includes(normalizeKey(query)));
   const select = (opt) => {
-    onChange?.({ target: { value: opt.id || opt } });
+    onChange?.({ target: { value: valueFor(opt) } });
     setQuery('');
     setOpen(false);
   };
@@ -1235,7 +1236,7 @@ const SearchableSelect = ({ label, options = [], value, onChange, disabled, plac
             <li className="px-3 py-3 text-sm italic text-slate-400">Sin resultados</li>
           ) : filtered.map(opt => (
             <li
-              key={opt.id || labelFor(opt)}
+              key={valueFor(opt) || labelFor(opt)}
               onMouseDown={() => select(opt)}
               className="cursor-pointer px-3 py-2 text-sm text-slate-700 hover:bg-blue-600 hover:text-white"
             >
@@ -5949,8 +5950,12 @@ const MIGRATION_EQUIPOS_SQL = `CREATE TABLE IF NOT EXISTS equipos (
   marca TEXT,
   modelo TEXT,
   numero_serie TEXT,
-  numero_inventario TEXT
-);`;
+  numero_inventario TEXT,
+  frecuencia_mantenimiento_meses INTEGER DEFAULT 0
+);
+
+ALTER TABLE equipos
+  ADD COLUMN IF NOT EXISTS frecuencia_mantenimiento_meses INTEGER DEFAULT 0;`;
 
 const MantenedoresEquipos = () => {
   const { licitaciones, equipos, setEquipos } = useContext(ERPContext);
@@ -5973,11 +5978,12 @@ const MantenedoresEquipos = () => {
     { key: 'modelo',            label: 'Modelo',            required: false },
     { key: 'numero_serie',      label: 'Número Serie',      required: false },
     { key: 'numero_inventario', label: 'Número Inventario', required: false },
+    { key: 'frecuencia_mantenimiento_meses', label: 'Frecuencia Mantención Meses', required: false, hint: 'Ej: 6' },
   ];
 
   useEffect(() => {
-    supabaseRequest(() => supabase.from('equipos').select('id').limit(1))
-      .then(({ error }) => { if (error && isMissingTableError(error, 'equipos')) setSchemaMissing(true); });
+    supabaseRequest(() => supabase.from('equipos').select('id, frecuencia_mantenimiento_meses').limit(1))
+      .then(({ error }) => { if (error && !isNetworkFetchError(error)) setSchemaMissing(true); });
   }, []);
 
   useEffect(() => {
@@ -5996,14 +6002,14 @@ const MantenedoresEquipos = () => {
   const exportTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
       COLUMNS.map(c => c.label),
-      ['LIC-2025-01', 'CAMAS MULTIMARCA', 'Hill-Rom', 'Avant-Garde 2', 'SN987654321', 'INV-5544'],
+      ['LIC-2025-01', 'CAMAS MULTIMARCA', 'Hill-Rom', 'Avant-Garde 2', 'SN987654321', 'INV-5544', '6'],
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Equipos');
     XLSX.writeFile(wb, 'plantilla_carga_equipos.xlsx');
   };
 
-  const openNew = () => setModal({ mode: 'new', data: { licitacion_id: '', tipo_equipo: '', marca: '', modelo: '', numero_serie: '', numero_inventario: '' } });
+  const openNew = () => setModal({ mode: 'new', data: { licitacion_id: '', tipo_equipo: '', marca: '', modelo: '', numero_serie: '', numero_inventario: '', frecuencia_mantenimiento_meses: '' } });
   const openEdit = (e) => setModal({ mode: 'edit', data: { ...e } });
   const closeModal = () => setModal(null);
   const setField = (key, val) => setModal(m => ({ ...m, data: { ...m.data, [key]: val } }));
@@ -6014,7 +6020,7 @@ const MantenedoresEquipos = () => {
     setSaving(true);
     try {
       if (schemaMissing) {
-        alert('Primero crea la tabla equipos en Supabase usando el SQL amarillo de esta pantalla.');
+        alert('Primero actualiza la tabla equipos en Supabase usando el SQL amarillo de esta pantalla.');
         return;
       }
       const payload = {
@@ -6024,6 +6030,7 @@ const MantenedoresEquipos = () => {
         modelo: data.modelo || null,
         numero_serie: data.numero_serie || null,
         numero_inventario: data.numero_inventario || null,
+        frecuencia_mantenimiento_meses: data.frecuencia_mantenimiento_meses ? Number(data.frecuencia_mantenimiento_meses) || 0 : 0,
       };
       if (mode === 'new') {
         const { data: row, error } = await supabaseRequest(() => supabase.from('equipos').insert([payload]).select().single());
@@ -6120,7 +6127,7 @@ const MantenedoresEquipos = () => {
     setImporting(true);
     try {
       if (schemaMissing) {
-        setImportResult({ ok: false, message: 'Primero crea la tabla equipos en Supabase usando el SQL amarillo de esta pantalla.' });
+        setImportResult({ ok: false, message: 'Primero actualiza la tabla equipos en Supabase usando el SQL amarillo de esta pantalla.' });
         return;
       }
       const buildPayload = (r) => ({
@@ -6130,6 +6137,7 @@ const MantenedoresEquipos = () => {
         modelo: r.modelo || null,
         numero_serie: r.numero_serie || null,
         numero_inventario: r.numero_inventario || null,
+        frecuencia_mantenimiento_meses: r.frecuencia_mantenimiento_meses ? Number(String(r.frecuencia_mantenimiento_meses).replace(/\D/g, '')) || 0 : 0,
       });
 
       const findExistingEquipo = (r) => {
@@ -6219,6 +6227,7 @@ const MantenedoresEquipos = () => {
             <Input label="Modelo" value={modal.data.modelo} onChange={e => setField('modelo', e.target.value)} />
             <Input label="Nº Serie" value={modal.data.numero_serie} onChange={e => setField('numero_serie', e.target.value)} />
             <Input label="Nº Inventario" value={modal.data.numero_inventario} onChange={e => setField('numero_inventario', e.target.value)} />
+            <Input label="Frecuencia mantención (meses)" type="number" value={modal.data.frecuencia_mantenimiento_meses || ''} onChange={e => setField('frecuencia_mantenimiento_meses', e.target.value)} placeholder="Ej: 6" />
           </div>
           <div className="flex justify-end gap-3 pt-6 mt-6 border-t"><Button variant="secondary" onClick={closeModal}>Cancelar</Button><Button variant="accent" onClick={handleSave} disabled={saving}>Guardar</Button></div>
         </Modal>
@@ -6237,9 +6246,9 @@ const MantenedoresEquipos = () => {
           <div className="flex items-start gap-3">
             <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <p className="font-bold text-amber-800 text-sm">Falta la tabla <code className="font-mono">equipos</code></p>
+              <p className="font-bold text-amber-800 text-sm">Falta la tabla o columnas de <code className="font-mono">equipos</code></p>
               <p className="text-amber-700 text-xs mt-0.5">
-                Para cargar o editar equipos, crea esta tabla en <strong>Supabase - SQL Editor</strong>.
+                Para cargar o editar equipos con frecuencia de mantenimiento, ejecuta este SQL en <strong>Supabase - SQL Editor</strong>.
               </p>
             </div>
             <button onClick={copySQL}
@@ -6295,13 +6304,14 @@ const MantenedoresEquipos = () => {
                 <th className="p-3 uppercase text-[10px] font-bold">Modelo</th>
                 <th className="p-3 uppercase text-[10px] font-bold">Nro Serie</th>
                 <th className="p-3 uppercase text-[10px] font-bold">Nro Inventario</th>
+                <th className="p-3 uppercase text-[10px] font-bold">Frecuencia</th>
                 <th className="p-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-6 py-12 text-center text-slate-400 italic">
+                  <td colSpan="9" className="px-6 py-12 text-center text-slate-400 italic">
                     {equipos.length === 0 ? 'No hay equipos. Usa "Nuevo Equipo" o carga un Excel.' : 'Sin resultados para la busqueda.'}
                   </td>
                 </tr>
@@ -6320,6 +6330,7 @@ const MantenedoresEquipos = () => {
                     <td className="p-3">{e.modelo || '—'}</td>
                     <td className="p-3 font-mono text-xs">{e.numero_serie || '—'}</td>
                     <td className="p-3 font-mono text-xs">{e.numero_inventario || '—'}</td>
+                    <td className="p-3 text-xs text-slate-600">{e.frecuencia_mantenimiento_meses ? `${e.frecuencia_mantenimiento_meses} mes(es)` : '—'}</td>
                     <td className="p-3 text-right">
                       <button onClick={() => openEdit(e)} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg" title="Editar Equipo"><Pencil size={14}/></button>
                       <button onClick={() => handleDelete(e)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg ml-1" title="Borrar Equipo"><Trash2 size={14}/></button>
@@ -11710,9 +11721,11 @@ const RegistroCompras = () => {
 };
 
 const Planificacion = () => {
-  const { clientes, usuarios, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
+  const { clientes, usuarios, equipos, licitaciones, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('tecnicos');
   const [weekOffset, setWeekOffset] = useState(0);
+  const [preventiveYear, setPreventiveYear] = useState(() => new Date().getFullYear());
+  const [preventiveOrders, setPreventiveOrders] = useState([]);
   const [addingClienteId, setAddingClienteId] = useState('');
 
   const tabBase = 'px-4 py-2 text-sm font-bold border-b-2 transition-colors';
@@ -11732,7 +11745,7 @@ const Planificacion = () => {
     const dow = today.getDay();
     const monday = new Date(today);
     monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7);
-    return Array.from({ length: 7 }, (_, i) => {
+    return Array.from({ length: 5 }, (_, i) => {
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
       return d;
@@ -11741,44 +11754,75 @@ const Planificacion = () => {
 
   const weekDays = getWeekDays(weekOffset);
   const dateStr = (d) => d.toISOString().split('T')[0];
-  const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'];
   const weekLabel = () => {
     const fmt = (d) => d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' });
-    return `${fmt(weekDays[0])} – ${fmt(weekDays[6])}, ${weekDays[6].getFullYear()}`;
+    const lastWeekDay = weekDays[weekDays.length - 1];
+    return `${fmt(weekDays[0])} – ${fmt(lastWeekDay)}, ${lastWeekDay.getFullYear()}`;
   };
 
+  const clienteId = (cliente) => cliente?.id || cliente?.id_RUT || '';
   const allClientes = clientes.filter(c => (c.razonSocial || c.name || c.nombre || '').trim());
   const usuariosList = usuarios.filter(u => (u.nombre || '').trim());
 
   const data = planificacionTecnicos || {};
   const selectedIds = Array.isArray(data._selectedClientes) ? data._selectedClientes : [];
-  const selectedClientes = selectedIds.map(id => allClientes.find(c => c.id === id)).filter(Boolean);
-  const clientesDisponibles = allClientes.filter(c => !selectedIds.includes(c.id));
+  const selectedClientes = selectedIds.map(id => allClientes.find(c => String(clienteId(c)) === String(id))).filter(Boolean);
+  const clientesDisponibles = allClientes.filter(c => !selectedIds.some(id => String(id) === String(clienteId(c))));
+  const preventiveOverrides = data._preventivas || {};
 
-  // Devuelve { users: string[], inherited: bool }
-  // Si no hay datos explícitos para la fecha, busca hacia atrás semana a semana (hasta 8 semanas)
+  useEffect(() => {
+    if (activeTab !== 'preventivas') return;
+    supabaseRequest(() => supabase.from('ordenes_trabajo').select('*').eq('tipo_mantencion', 'preventiva').order('fecha', { ascending: false }).limit(2000))
+      .then(({ data: rows, error }) => {
+        if (error) {
+          console.error('Error cargando preventivas para planificación:', error);
+          setPreventiveOrders([]);
+        } else {
+          setPreventiveOrders(rows || []);
+        }
+      });
+  }, [activeTab]);
+
+  const parsePlanningDate = (key, cId) => {
+    if (!key.startsWith(`${cId}-`)) return null;
+    const raw = key.slice(String(cId).length + 1);
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  };
+
+  // Devuelve { users: string[], inherited: bool }.
+  // Si no hay datos explícitos para la fecha, usa la última asignación del mismo día de semanas anteriores.
   const getCellData = (cId, d) => {
-    const raw = data[`${cId}-${dateStr(d)}`];
+    const currentDate = dateStr(d);
+    const raw = data[`${cId}-${currentDate}`];
     if (raw !== undefined) {
       const users = Array.isArray(raw) ? raw : (raw ? [raw] : []);
       return { users, inherited: false };
     }
-    for (let w = 1; w <= 8; w++) {
-      const prev = new Date(d);
-      prev.setDate(d.getDate() - 7 * w);
-      const prevRaw = data[`${cId}-${dateStr(prev)}`];
-      if (prevRaw !== undefined) {
-        const users = Array.isArray(prevRaw) ? prevRaw : (prevRaw ? [prevRaw] : []);
-        return { users, inherited: true };
-      }
+
+    const latestPreviousDate = Object.keys(data)
+      .map(key => parsePlanningDate(key, cId))
+      .filter(day => day && day < currentDate)
+      .filter(day => {
+        const diffDays = Math.round((new Date(`${currentDate}T00:00:00`) - new Date(`${day}T00:00:00`)) / 86400000);
+        return diffDays > 0 && diffDays % 7 === 0;
+      })
+      .sort()
+      .pop();
+
+    if (latestPreviousDate) {
+      const prevRaw = data[`${cId}-${latestPreviousDate}`];
+      const users = Array.isArray(prevRaw) ? prevRaw : (prevRaw ? [prevRaw] : []);
+      return { users, inherited: true };
     }
+
     return { users: [], inherited: false };
   };
 
   const updateData = (next) => setPlanificacionTecnicos(next);
 
   const addCliente = () => {
-    if (!addingClienteId || selectedIds.includes(addingClienteId)) return;
+    if (!addingClienteId || selectedIds.some(id => String(id) === String(addingClienteId))) return;
     updateData({ ...data, _selectedClientes: [...selectedIds, addingClienteId] });
     setAddingClienteId('');
   };
@@ -11801,10 +11845,111 @@ const Planificacion = () => {
     const { users: current } = getCellData(cId, d);
     const remaining = current.filter(id => id !== userId);
     const next = { ...data };
-    if (remaining.length > 0) next[`${cId}-${dateStr(d)}`] = remaining;
-    else delete next[`${cId}-${dateStr(d)}`];
+    next[`${cId}-${dateStr(d)}`] = remaining;
     updateData(next);
   };
+
+  const monthNames = Array.from({ length: 12 }, (_, i) => new Date(preventiveYear, i, 1).toLocaleDateString('es-CL', { month: 'short' }));
+  const firstMondayOnOrBefore = (date) => {
+    const d = new Date(date);
+    const dow = d.getDay();
+    d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+    return d;
+  };
+  const monthWeeks = (year, monthIndex) => {
+    const first = new Date(year, monthIndex, 1);
+    const last = new Date(year, monthIndex + 1, 0);
+    const cursor = firstMondayOnOrBefore(first);
+    const weeks = [];
+    while (cursor <= last) {
+      const start = new Date(cursor);
+      const end = new Date(cursor);
+      end.setDate(start.getDate() + 6);
+      const visibleStart = start < first ? first : start;
+      const visibleEnd = end > last ? last : end;
+      visibleEnd.setHours(23, 59, 59, 999);
+      weeks.push({
+        key: `${monthIndex + 1}-${weeks.length + 1}`,
+        monthIndex,
+        index: weeks.length + 1,
+        start: visibleStart,
+        end: visibleEnd,
+        label: `S${weeks.length + 1}`,
+        range: `${visibleStart.getDate()}-${visibleEnd.getDate()}`,
+      });
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    return weeks;
+  };
+  const preventiveMonths = Array.from({ length: 12 }, (_, monthIndex) => ({
+    monthIndex,
+    label: monthNames[monthIndex],
+    weeks: monthWeeks(preventiveYear, monthIndex),
+  }));
+  const preventiveWeeks = preventiveMonths.flatMap(month => month.weeks);
+  const preventiveEquipoId = (equipo) => equipo?.id || [
+    equipo?.licitacion_id,
+    equipo?.tipo_equipo,
+    equipo?.marca,
+    equipo?.modelo,
+    equipo?.numero_serie,
+    equipo?.numero_inventario,
+  ].map(value => normalizeEquipmentMatchValue(value)).join('|');
+  const weekKeyForDate = (isoDate) => {
+    const date = new Date(`${String(isoDate || '').slice(0, 10)}T12:00:00`);
+    if (!isoDate || Number.isNaN(date.getTime()) || date.getFullYear() !== preventiveYear) return '';
+    const month = preventiveMonths[date.getMonth()];
+    const week = month?.weeks.find(item => date >= item.start && date <= item.end);
+    return week ? `${date.getMonth() + 1}-${week.index}` : '';
+  };
+  const lastPreventiveForEquipo = (equipo) => preventiveOrders
+    .filter(orden => sameEquipmentIdentity(orden, equipo))
+    .sort((a, b) => String(b.fecha || b.created_at || '').localeCompare(String(a.fecha || a.created_at || '')))[0] || null;
+  const estimatedWeeksForEquipo = (equipo) => {
+    const frequency = Number(equipo.frecuencia_mantenimiento_meses) || 0;
+    const lastOrden = lastPreventiveForEquipo(equipo);
+    let nextDate = addMonthsToIsoDate(lastOrden?.fecha || lastOrden?.created_at || '', frequency);
+    const marked = new Set();
+    if (!frequency || !nextDate) return marked;
+    while (nextDate && String(nextDate).slice(0, 4) < String(preventiveYear)) {
+      nextDate = addMonthsToIsoDate(nextDate, frequency);
+    }
+    while (nextDate && String(nextDate).slice(0, 4) === String(preventiveYear)) {
+      const weekKey = weekKeyForDate(nextDate);
+      if (weekKey) marked.add(weekKey);
+      nextDate = addMonthsToIsoDate(nextDate, frequency);
+    }
+    return marked;
+  };
+  const preventiveOverrideKey = (equipo, week) => `${preventiveEquipoId(equipo)}-${preventiveYear}-${week.key}`;
+  const isPreventiveMarked = (equipo, week, estimatedSet) => {
+    const key = preventiveOverrideKey(equipo, week);
+    if (Object.prototype.hasOwnProperty.call(preventiveOverrides, key)) return Boolean(preventiveOverrides[key]);
+    return estimatedSet.has(week.key);
+  };
+  const togglePreventiveCell = (equipo, week, estimatedSet) => {
+    if (!canEdit) return;
+    const key = preventiveOverrideKey(equipo, week);
+    const nextOverrides = { ...preventiveOverrides };
+    nextOverrides[key] = !isPreventiveMarked(equipo, week, estimatedSet);
+    updateData({ ...data, _preventivas: nextOverrides });
+  };
+  const groupedEquipos = [...equipos]
+    .filter(equipo => (equipo.tipo_equipo || '').trim())
+    .sort((a, b) => [
+      a.tipo_equipo,
+      a.marca,
+      a.modelo,
+      a.numero_serie,
+      a.numero_inventario,
+    ].map(value => value || '').join('|').localeCompare([
+      b.tipo_equipo,
+      b.marca,
+      b.modelo,
+      b.numero_serie,
+      b.numero_inventario,
+    ].map(value => value || '').join('|'), 'es'));
+  const preventiveGroupKey = (equipo) => [equipo.tipo_equipo, equipo.marca, equipo.modelo].map(value => normalizeEquipmentMatchValue(value)).join('|');
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-2">
@@ -11841,6 +11986,7 @@ const Planificacion = () => {
                     onChange={e => setAddingClienteId(e.target.value)}
                     getLabel={c => c.razonSocial || c.name || c.nombre || ''}
                     getSearchText={c => `${c.razonSocial || c.name || c.nombre || ''} ${c.rut || ''}`}
+                    getValue={clienteId}
                     placeholder="Buscar cliente para agregar…"
                   />
                 </div>
@@ -11879,14 +12025,14 @@ const Planificacion = () => {
                 <tbody>
                   {selectedClientes.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="p-10 text-center text-slate-400 text-sm">
+                      <td colSpan={weekDays.length + 1} className="p-10 text-center text-slate-400 text-sm">
                         {canEdit ? 'Busca un cliente y presiona "Agregar" para comenzar.' : 'No hay clientes en la planificación.'}
                       </td>
                     </tr>
                   )}
                   {selectedClientes.map((cliente) => {
                     const nombre = cliente.razonSocial || cliente.name || cliente.nombre || '';
-                    const cId = cliente.id;
+                    const cId = clienteId(cliente);
                     return (
                       <tr key={cId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                         {/* Columna cliente */}
@@ -11960,12 +12106,121 @@ const Planificacion = () => {
         )}
 
         {activeTab === 'preventivas' && (
-          <div className="p-6 flex flex-col items-center justify-center py-24 text-center space-y-3">
-            <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
-              <Wrench size={28} className="text-slate-400"/>
+          <div className="p-4 space-y-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Carta Gantt anual</p>
+                <h3 className="text-lg font-bold text-slate-800">Mantenciones preventivas {preventiveYear}</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setPreventiveYear(y => y - 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors" title="Año anterior">
+                  <ChevronLeft size={18} />
+                </button>
+                <span className="w-20 text-center text-sm font-bold text-slate-700">{preventiveYear}</span>
+                <button onClick={() => setPreventiveYear(y => y + 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors" title="Año siguiente">
+                  <ChevronRight size={18} />
+                </button>
+              </div>
             </div>
-            <p className="text-slate-600 font-semibold">Planificación de Preventivas</p>
-            <p className="text-slate-400 text-sm max-w-xs">Este módulo estará disponible próximamente.</p>
+
+            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+              <span className="flex items-center gap-1.5"><span className="inline-flex h-5 w-5 items-center justify-center rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"><Wrench size={12} /></span> Estimada por frecuencia</span>
+              <span className="flex items-center gap-1.5"><span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-50 text-blue-700 ring-1 ring-blue-200"><Wrench size={12} /></span> Marcada manualmente</span>
+              {!canEdit && <span>Modo solo lectura</span>}
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full min-w-max border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50">
+                    <th rowSpan={2} className="sticky left-0 z-30 bg-slate-50 border-b border-r border-slate-200 px-3 py-3 text-left font-bold uppercase text-slate-500" style={{ minWidth: '160px' }}>Equipo</th>
+                    <th rowSpan={2} className="sticky z-30 bg-slate-50 border-b border-r border-slate-200 px-3 py-3 text-left font-bold uppercase text-slate-500" style={{ minWidth: '120px', left: '160px' }}>Marca</th>
+                    <th rowSpan={2} className="sticky z-30 bg-slate-50 border-b border-r border-slate-200 px-3 py-3 text-left font-bold uppercase text-slate-500" style={{ minWidth: '140px', left: '280px' }}>Modelo</th>
+                    <th rowSpan={2} className="sticky z-30 bg-slate-50 border-b border-r border-slate-200 px-3 py-3 text-left font-bold uppercase text-slate-500" style={{ minWidth: '130px', left: '420px' }}>Serie</th>
+                    <th rowSpan={2} className="sticky z-30 bg-slate-50 border-b border-r border-slate-200 px-3 py-3 text-left font-bold uppercase text-slate-500" style={{ minWidth: '130px', left: '550px' }}>Inventario</th>
+                    {preventiveMonths.map(month => (
+                      <th key={month.monthIndex} colSpan={month.weeks.length} className="border-b border-r border-slate-200 px-3 py-2 text-center font-bold uppercase text-slate-600">
+                        {month.label}
+                      </th>
+                    ))}
+                  </tr>
+                  <tr className="bg-slate-50">
+                    {preventiveWeeks.map(week => (
+                      <th key={`${week.monthIndex}-${week.index}`} className="border-b border-r border-slate-200 px-2 py-2 text-center font-semibold text-slate-500" style={{ minWidth: '42px' }} title={`Semana ${week.index}: ${week.range} ${monthNames[week.monthIndex]}`}>
+                        <div>{week.label}</div>
+                        <div className="text-[10px] font-normal text-slate-400">{week.range}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupedEquipos.length === 0 && (
+                    <tr>
+                      <td colSpan={preventiveWeeks.length + 5} className="px-6 py-12 text-center text-slate-400 italic">
+                        No hay equipos registrados. Agrega equipos desde Mantenedores / Equipos.
+                      </td>
+                    </tr>
+                  )}
+                  {groupedEquipos.map((equipo, index) => {
+                    const previous = groupedEquipos[index - 1];
+                    const showGroup = !previous || preventiveGroupKey(previous) !== preventiveGroupKey(equipo);
+                    const estimatedSet = estimatedWeeksForEquipo(equipo);
+                    return (
+                      <React.Fragment key={preventiveEquipoId(equipo)}>
+                        {showGroup && (
+                          <tr className="bg-slate-100/80">
+                            <td colSpan={preventiveWeeks.length + 5} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                              {equipo.tipo_equipo || 'Equipo'} / {equipo.marca || 'Sin marca'} / {equipo.modelo || 'Sin modelo'}
+                            </td>
+                          </tr>
+                        )}
+                        <tr className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="sticky left-0 z-20 bg-white border-r border-slate-100 px-3 py-2 font-semibold text-slate-700" style={{ minWidth: '160px' }}>{equipo.tipo_equipo || '—'}</td>
+                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 text-slate-600" style={{ minWidth: '120px', left: '160px' }}>{equipo.marca || '—'}</td>
+                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 text-slate-600" style={{ minWidth: '140px', left: '280px' }}>{equipo.modelo || '—'}</td>
+                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 font-mono text-[11px] text-slate-500" style={{ minWidth: '130px', left: '420px' }}>{equipo.numero_serie || '—'}</td>
+                          <td className="sticky z-20 bg-white border-r border-slate-100 px-3 py-2 font-mono text-[11px] text-slate-500" style={{ minWidth: '130px', left: '550px' }}>{equipo.numero_inventario || '—'}</td>
+                          {preventiveWeeks.map(week => {
+                            const overrideKey = preventiveOverrideKey(equipo, week);
+                            const hasOverride = Object.prototype.hasOwnProperty.call(preventiveOverrides, overrideKey);
+                            const marked = isPreventiveMarked(equipo, week, estimatedSet);
+                            const estimated = estimatedSet.has(week.key);
+                            const title = marked
+                              ? `${hasOverride ? 'Marcada manualmente' : 'Mantención preventiva estimada'}`
+                              : `${canEdit ? 'Marcar mantención preventiva' : 'Sin mantención preventiva'}`;
+                            return (
+                              <td key={week.key} className="border-r border-slate-100 px-1 py-1 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => togglePreventiveCell(equipo, week, estimatedSet)}
+                                  disabled={!canEdit}
+                                  title={title}
+                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:cursor-default ${
+                                    marked
+                                      ? hasOverride
+                                        ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                        : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                      : estimated && hasOverride
+                                      ? 'border-slate-200 bg-white text-slate-300'
+                                      : 'border-transparent bg-transparent text-slate-200 hover:border-slate-200 hover:text-slate-400'
+                                  }`}
+                                >
+                                  {marked ? <Wrench size={13} /> : <Plus size={12} />}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              La estimación usa la última orden preventiva registrada para el equipo y suma la frecuencia definida en Mantenedores / Equipos.
+            </p>
           </div>
         )}
       </div>
