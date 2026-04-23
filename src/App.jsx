@@ -2831,6 +2831,39 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
     };
   };
 
+  const buildPreventiveMailPayload = async (orden) => {
+    const cliente = getCliente(orden);
+    const licitacion = getLicitacion(orden);
+    const reportOrden = await prepareReportOrden(orden);
+    const preventiva = parsePreventivaObservaciones(reportOrden.observaciones);
+    const fallbackLogoSrc = typeof window !== 'undefined' ? `${window.location.origin}/logo-vaic-pdf.jpeg` : '';
+    return {
+      recipientEmail: getContactEmail(orden),
+      report: {
+        empresa: currentEmpresa || {},
+        assets: {
+          logoSrc: currentEmpresa?.membreteImagen || fallbackLogoSrc,
+        },
+        cliente: cliente || {},
+        licitacion: licitacion || {},
+        title: getPreventiveProtocol(reportOrden.tipo_equipo, protocolosPreventivos)?.title || 'MANT. PREVENTIVO',
+        orden: {
+          folio: reportOrden.folio || '',
+          fecha: reportOrden.fecha || '',
+          tipo_equipo: reportOrden.tipo_equipo || '',
+          marca: reportOrden.marca || '',
+          modelo: reportOrden.modelo || '',
+          numero_serie: reportOrden.numero_serie || '',
+          numero_inventario: reportOrden.numero_inventario || '',
+          ubicacion_area: reportOrden.ubicacion_area || '',
+          estado: reportOrden.estado || '',
+          estado_equipo: reportOrden.estado_equipo || '',
+        },
+        preventiva,
+      },
+    };
+  };
+
   const buildReportHtml = (orden) => {
     const cliente = getCliente(orden);
     const lic = getLicitacion(orden);
@@ -3057,20 +3090,14 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
       return;
     }
 
-    if (isPreventivo) {
-      await openReportWindow(orden);
-      const subject = encodeURIComponent(`Informe ${orden.folio}`);
-      const body = encodeURIComponent(`Estimados,\n\nSe genero el informe ${orden.folio} para ${orden.tipo_equipo || 'equipo'} ${orden.marca || ''} ${orden.modelo || ''}.\n\nEl informe se abrio en una pestaña para imprimir/guardar como PDF y adjuntarlo al correo.\n\nSaludos.`);
-      window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
-      return;
-    }
-
     try {
       setMailingOrderId(String(orden.id || orden.folio || 'sending'));
-      const response = await fetch('/api/reports/send-corrective-report', {
+      const endpoint = isPreventivo ? '/api/reports/send-preventive-report' : '/api/reports/send-corrective-report';
+      const payload = isPreventivo ? await buildPreventiveMailPayload(orden) : buildCorrectiveMailPayload(orden);
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildCorrectiveMailPayload(orden)),
+        body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -3777,10 +3804,11 @@ const Cotizaciones = () => {
 };
 
 const HistorialCotizaciones = () => {
-  const { cotizacionesHistorial, setCotizacionesHistorial, setCotizacionDraft, setActiveModule, setOcRecibidas, currentEmpresa } = useContext(ERPContext);
+  const { cotizacionesHistorial, setCotizacionesHistorial, setCotizacionDraft, setActiveModule, setOcRecibidas, currentEmpresa, clientes, licitaciones } = useContext(ERPContext);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [ocModal, setOcModal] = useState(null);
+  const [mailingQuoteId, setMailingQuoteId] = useState('');
 
   const normalizeText = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const filtered = cotizacionesHistorial.filter(c => normalizeText([
@@ -3795,11 +3823,42 @@ const HistorialCotizaciones = () => {
     ? prev.filter(id => !filteredIds.includes(id))
     : Array.from(new Set([...prev, ...filteredIds])));
   const openPdf = (cotizacion) => openHtmlDocument(buildCotizacionHtml(cotizacion, currentEmpresa));
-  const mailCotizacion = (cotizacion) => {
-    openPdf(cotizacion);
-    const subject = encodeURIComponent(`Cotizacion ${cotizacion.numero || ''}`);
-    const body = encodeURIComponent(`Estimados,\n\nSe adjunta/gestiona la cotizacion ${cotizacion.numero || ''} por un total de $${Number(cotizacion.total || 0).toLocaleString('es-CL')}.\n\nEl documento se abrio para imprimir o guardar como PDF.\n\nSaludos.`);
-    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  const getCotizacionRecipientEmail = (cotizacion) => {
+    const licitacion = licitaciones.find(l => String(l.id || '') === String(cotizacion.licitacionId || ''));
+    const cliente = clientes.find(c => String(c.id || c.id_RUT || '') === String(cotizacion.clienteId || ''));
+    return licitacion?.email || licitacion?.email_contacto || cliente?.email_contacto || cliente?.email || '';
+  };
+  const mailCotizacion = async (cotizacion) => {
+    const recipientEmail = getCotizacionRecipientEmail(cotizacion);
+    if (!recipientEmail) {
+      alert('No se encontro email de contacto para esta cotizacion.');
+      return;
+    }
+    const fallbackLogoSrc = typeof window !== 'undefined' ? `${window.location.origin}/logo-vaic-pdf.jpeg` : '';
+    try {
+      setMailingQuoteId(String(cotizacion.id || cotizacion.numero || 'sending'));
+      const response = await fetch('/api/reports/send-quotation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipientEmail,
+          company: currentEmpresa || {},
+          quotation: {
+            ...cotizacion,
+            assets: {
+              logoSrc: currentEmpresa?.membreteImagen || fallbackLogoSrc,
+            },
+          },
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || 'No fue posible enviar la cotizacion adjunta.');
+      alert(`Correo enviado correctamente a ${recipientEmail} con la cotizacion PDF adjunta.`);
+    } catch (error) {
+      alert('No se pudo enviar la cotizacion con el PDF adjunto: ' + friendlyError(error));
+    } finally {
+      setMailingQuoteId('');
+    }
   };
   const downloadPdf = (cotizacion) => {
     const win = openHtmlDocument(buildCotizacionHtml(cotizacion, currentEmpresa));
@@ -3907,7 +3966,7 @@ const HistorialCotizaciones = () => {
                   <td className="p-3">{c.estado || 'Emitida'}</td>
                   <td className="p-3">
                     <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => mailCotizacion(c)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Enviar por correo"><Mail size={14} /></button>
+                      <button onClick={() => mailCotizacion(c)} disabled={mailingQuoteId === String(c.id || c.numero || '')} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40" title={mailingQuoteId === String(c.id || c.numero || '') ? 'Enviando cotizacion por correo' : 'Enviar por correo'}><Mail size={14} /></button>
                       <button onClick={() => editCotizacion(c)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Modificar cotizacion"><Pencil size={14} /></button>
                       <button onClick={() => deleteCotizacion(c)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar"><Trash2 size={14} /></button>
                       <button onClick={() => downloadPdf(c)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Descargar PDF"><Download size={14} /></button>
