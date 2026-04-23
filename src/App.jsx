@@ -11088,7 +11088,11 @@ const monthsBetweenInclusive = (fromDate, toDate) => {
   const to = new Date(toDate);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 0;
   if (to < from) return 0;
-  return ((to.getFullYear() - from.getFullYear()) * 12) + (to.getMonth() - from.getMonth()) + 1;
+  const fromMonthOffset = from.getDate() > 15 ? 1 : 0;
+  const startMonth = new Date(from.getFullYear(), from.getMonth() + fromMonthOffset, 1);
+  const endMonth = new Date(to.getFullYear(), to.getMonth(), 1);
+  if (endMonth < startMonth) return 0;
+  return ((endMonth.getFullYear() - startMonth.getFullYear()) * 12) + (endMonth.getMonth() - startMonth.getMonth()) + 1;
 };
 
 const calculateDepreciationValue = (costoHistorico, valorResidual, vidaUtilMeses) => {
