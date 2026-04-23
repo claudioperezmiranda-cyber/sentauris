@@ -2897,6 +2897,8 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
     const correctivaEstadoKey = normalizeKey(correctivaEstado);
     const correctivaTitle = correctiva.garantiaContrato || correctivaEstadoKey === 'garantia'
       ? 'MANT. CORRECTIVO. - GARANTIA'
+      : correctivaEstadoKey === 'sugerenciadebaja'
+        ? 'MANT. CORRECTIVA - SUGERENCIA DE BAJA'
       : isEstadoEjecutado(orden.estado)
         ? 'MANT. CORRECTIVO - EJECUTADO'
         : correctivaEstadoKey === 'ingresado'
@@ -13410,6 +13412,8 @@ const buildCorrectivePublicReportHtml = ({ orden, cliente, lic, empresa }) => {
   const estadoKey = normalizeKey(estado);
   const title = correctiva.garantiaContrato || estadoKey === 'garantia'
     ? 'MANT. CORRECTIVO. - GARANTIA'
+    : estadoKey === 'sugerenciadebaja'
+      ? 'MANT. CORRECTIVA - SUGERENCIA DE BAJA'
     : isEstadoEjecutado(estado)
       ? 'MANT. CORRECTIVO - EJECUTADO'
       : estadoKey === 'ingresado'
