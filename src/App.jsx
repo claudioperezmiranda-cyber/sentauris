@@ -4540,7 +4540,18 @@ const MantenedoresClientes = () => {
   const [saving, setSaving] = useState(false);
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [emailColumnMissing, setEmailColumnMissing] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
   const fileInputRef = useRef(null);
+  const CLIENTES_TABLE_COLUMNS = [
+    { id: 'rut', label: 'RUT' },
+    { id: 'razonSocial', label: 'Razón Social' },
+    { id: 'nombreFantasia', label: 'Nombre Fantasía' },
+    { id: 'tipoCliente', label: 'Tipo Cliente' },
+    { id: 'tipoProveedor', label: 'Tipo Proveedor' },
+    { id: 'correoComercial', label: 'Correo Comercial' },
+    { id: 'telefono', label: 'Teléfono' },
+  ];
+  const [visibleColumnIds, setVisibleColumnIds] = useState(() => CLIENTES_TABLE_COLUMNS.map(col => col.id));
 
   const COLUMNS = [
     { key: 'name',               label: 'Nombre',                required: true  },
@@ -4806,6 +4817,25 @@ const MantenedoresClientes = () => {
       return Array.from(new Set([...prev, ...filteredIds]));
     });
   };
+  const toggleColumn = (columnId) => {
+    setVisibleColumnIds(prev => {
+      if (prev.includes(columnId)) {
+        if (prev.length === 1) return prev;
+        return prev.filter(id => id !== columnId);
+      }
+      return [...prev, columnId];
+    });
+  };
+  const visibleColumns = CLIENTES_TABLE_COLUMNS.filter(col => visibleColumnIds.includes(col.id));
+  const renderClienteCell = (cliente, columnId) => ({
+    rut: cliente.rut || '-',
+    razonSocial: cliente.razonSocial || cliente.name || '-',
+    nombreFantasia: cliente.nombreFantasia || '-',
+    tipoCliente: cliente.tipoCliente || 'No',
+    tipoProveedor: cliente.tipoProveedor || 'No',
+    correoComercial: cliente.correoComercial || cliente.email || '-',
+    telefono: cliente.telefono || '-',
+  }[columnId] || '-');
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
@@ -5290,15 +5320,59 @@ const MantenedoresClientesProveedores = () => {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 px-6 py-4 border-b border-slate-100">
           <div className="relative w-full sm:w-auto"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="pl-8 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none w-full sm:w-64" /></div>
-          <h3 className="font-bold text-slate-800">Registros ({empresaClientes.length})</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="font-bold text-slate-800">Registros ({empresaClientes.length})</h3>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setColumnsOpen(v => !v)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+                title="Configurar columnas visibles"
+              >
+                <Settings size={16} />
+              </button>
+              {columnsOpen && (
+                <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">Columnas</p>
+                    <button type="button" onClick={() => setColumnsOpen(false)} className="p-1 rounded text-slate-400 hover:bg-slate-100"><X size={14} /></button>
+                  </div>
+                  <div className="space-y-1 max-h-72 overflow-y-auto">
+                    {CLIENTES_TABLE_COLUMNS.map(col => {
+                      const checked = visibleColumnIds.includes(col.id);
+                      return (
+                        <label key={col.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={checked && visibleColumnIds.length === 1}
+                            onChange={() => toggleColumn(col.id)}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>{col.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="bg-slate-50 text-left border-b border-slate-100">{['RUT','Razón Social','Nombre Fantasía','Tipo Cliente','Tipo Proveedor','Correo Comercial','Teléfono','Acciones'].map(h => <th key={h} className="px-6 py-3 text-[10px] font-bold uppercase text-slate-400">{h}</th>)}</tr></thead>
+            <thead><tr className="bg-slate-50 text-left border-b border-slate-100">
+              {visibleColumns.map(col => <th key={col.id} className="px-6 py-3 text-[10px] font-bold uppercase text-slate-400">{col.label}</th>)}
+              <th className="px-6 py-3 text-[10px] font-bold uppercase text-slate-400">Acciones</th>
+            </tr></thead>
             <tbody>
-              {filtered.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-center text-slate-400 italic">{activeEmpresaId ? 'No hay registros para esta empresa.' : 'Selecciona una empresa activa.'}</td></tr> : filtered.map(c => (
+              {filtered.length === 0 ? <tr><td colSpan={visibleColumns.length + 1} className="px-6 py-12 text-center text-slate-400 italic">{activeEmpresaId ? 'No hay registros para esta empresa.' : 'Selecciona una empresa activa.'}</td></tr> : filtered.map(c => (
                 <tr key={c.id} className="border-b hover:bg-slate-50">
-                  <td className="px-6 py-4 font-mono text-xs">{c.rut}</td><td className="px-6 py-4 font-semibold">{c.razonSocial || c.name}</td><td className="px-6 py-4">{c.nombreFantasia || '-'}</td><td className="px-6 py-4">{c.tipoCliente || 'No'}</td><td className="px-6 py-4">{c.tipoProveedor || 'No'}</td><td className="px-6 py-4">{c.correoComercial || c.email || '-'}</td><td className="px-6 py-4">{c.telefono || '-'}</td>
+                  {visibleColumns.map(col => (
+                    <td key={col.id} className={`px-6 py-4 ${col.id === 'rut' ? 'font-mono text-xs' : col.id === 'razonSocial' ? 'font-semibold' : ''}`}>
+                      {renderClienteCell(c, col.id)}
+                    </td>
+                  ))}
                   <td className="px-6 py-4 text-right"><button onClick={() => openEdit(c)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50"><Pencil size={15}/></button><button onClick={() => deleteRecord(c)} className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 ml-1"><Trash2 size={15}/></button></td>
                 </tr>
               ))}
