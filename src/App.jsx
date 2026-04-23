@@ -10174,29 +10174,7 @@ const ANALITICOS_TABLE_COLUMNS = [
 ];
 const DEFAULT_ANALITICOS_VISIBLE_COLUMNS = ANALITICOS_TABLE_COLUMNS.map(col => col.id);
 
-const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
-  .filter(voucher => dateInRange(voucher.fecha, filters.fechaDesde, filters.fechaHasta))
-  .filter(voucher => {
-    const estado = normalizeKey(voucher.estado);
-    const closedStates = ['contabilizado', 'cancelado', 'pagado', 'importado'];
-    if (filters.documentos === 'Solo pendientes') return !closedStates.includes(estado);
-    if (filters.documentos === 'Cancelados') return closedStates.includes(estado);
-    return true;
-  })
-  .filter(voucher => !filters.unidadNegocio || filters.unidadNegocio === 'Todas' || filterValueMatches(voucher.unidadNegocio, filters.unidadNegocio))
-  .flatMap(voucher => (voucher.detalles || []).map(line => ({ voucher, line, account: splitAccount(line.cuentaContable) })))
-  .filter(item => accountFilterMatches(item.line.cuentaContable, filters.cuentaContable))
-  .filter(item => !filters.auxiliar || filterValueMatches(item.line.auxiliar, filters.auxiliar))
-  .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || filterValueMatches(item.line.centroCosto, filters.centroCosto))
-  .filter(item => !filters.moneda || filters.moneda === 'Todas' || filterValueMatches(item.line.moneda, filters.moneda))
-  .filter(item => !filters.tipoCambio || String(item.line.tipoCambio || '').includes(String(filters.tipoCambio)))
-  .filter(item => !filters.valorMonedaExtranjera || String(item.line.valorMonedaExtranjera || '').includes(String(filters.valorMonedaExtranjera)))
-  .sort((a, b) =>
-    String(a.account.code || '').localeCompare(String(b.account.code || '')) ||
-    String(a.voucher.fecha || '').localeCompare(String(b.voucher.fecha || '')) ||
-    String(a.voucher.numero || '').localeCompare(String(b.voucher.numero || ''))
-  )
-  .map(({ voucher, line, account }) => {
+const analiticoItemToRow = ({ voucher, line, account }) => {
     const debe = toAmount(line.debe);
     const haber = toAmount(line.haber);
     return {
@@ -10220,7 +10198,87 @@ const buildAnaliticoRows = (comprobantes = [], filters = {}) => comprobantes
       Saldo: debe - haber,
       voucherId: voucher.id,
     };
-  });
+  };
+
+const buildAnaliticoRows = (comprobantes = [], filters = {}) => {
+  const closedStates = ['contabilizado', 'cancelado', 'pagado', 'importado'];
+  const items = comprobantes
+    .filter(voucher => dateInRange(voucher.fecha, filters.fechaDesde, filters.fechaHasta))
+    .filter(voucher => {
+      if (filters.documentos !== 'Cancelados') return true;
+      return closedStates.includes(normalizeKey(voucher.estado));
+    })
+    .filter(voucher => !filters.unidadNegocio || filters.unidadNegocio === 'Todas' || filterValueMatches(voucher.unidadNegocio, filters.unidadNegocio))
+    .flatMap(voucher => (voucher.detalles || []).map(line => ({ voucher, line, account: splitAccount(line.cuentaContable) })))
+    .filter(item => accountFilterMatches(item.line.cuentaContable, filters.cuentaContable))
+    .filter(item => !filters.auxiliar || filterValueMatches(item.line.auxiliar, filters.auxiliar))
+    .filter(item => !filters.centroCosto || filters.centroCosto === 'Todos' || filterValueMatches(item.line.centroCosto, filters.centroCosto))
+    .filter(item => !filters.moneda || filters.moneda === 'Todas' || filterValueMatches(item.line.moneda, filters.moneda))
+    .filter(item => !filters.tipoCambio || String(item.line.tipoCambio || '').includes(String(filters.tipoCambio)))
+    .filter(item => !filters.valorMonedaExtranjera || String(item.line.valorMonedaExtranjera || '').includes(String(filters.valorMonedaExtranjera)))
+    .sort((a, b) =>
+      String(a.account.code || '').localeCompare(String(b.account.code || '')) ||
+      String(a.voucher.fecha || '').localeCompare(String(b.voucher.fecha || '')) ||
+      String(a.voucher.numero || '').localeCompare(String(b.voucher.numero || ''))
+    );
+
+  if (filters.documentos !== 'Solo pendientes') {
+    return items.map(analiticoItemToRow);
+  }
+
+  const pendingGroups = new Map();
+  items
+    .filter(({ line }) => line.tipoDocumento && line.numeroDocumento && line.auxiliar)
+    .forEach(item => {
+      const { voucher, line, account } = item;
+      const key = [
+        normalizeKey(line.auxiliar),
+        normalizeKey(line.tipoDocumento),
+        normalizeKey(line.numeroDocumento),
+      ].join('|');
+      const existing = pendingGroups.get(key) || {
+        voucher,
+        line,
+        account,
+        debe: 0,
+        haber: 0,
+        lastDate: '',
+        comprobantes: new Set(),
+      };
+      existing.debe += toAmount(line.debe);
+      existing.haber += toAmount(line.haber);
+      if (String(voucher.fecha || '') >= String(existing.lastDate || '')) {
+        existing.voucher = voucher;
+        existing.line = line;
+        existing.account = account;
+        existing.lastDate = voucher.fecha || '';
+      }
+      existing.comprobantes.add(voucherCode(voucher));
+      pendingGroups.set(key, existing);
+    });
+
+  return Array.from(pendingGroups.values())
+    .map(group => {
+      const saldo = group.debe - group.haber;
+      const row = analiticoItemToRow({ voucher: group.voucher, line: group.line, account: group.account });
+      return {
+        ...row,
+        Fecha: formatJournalDate(group.lastDate || group.voucher.fecha),
+        Comprobante: Array.from(group.comprobantes).filter(Boolean).join(', '),
+        Estado: 'Pendiente',
+        Glosa: 'Saldo pendiente documento',
+        Debe: saldo > 0 ? saldo : 0,
+        Haber: saldo < 0 ? Math.abs(saldo) : 0,
+        Saldo: saldo,
+        voucherId: `${normalizeKey(group.line.auxiliar)}-${normalizeKey(group.line.tipoDocumento)}-${normalizeKey(group.line.numeroDocumento)}`,
+      };
+    })
+    .filter(row => Math.abs(toAmount(row.Saldo)) > 0.0001)
+    .sort((a, b) =>
+      String(a.Auxiliar || '').localeCompare(String(b.Auxiliar || '')) ||
+      String(a.Documento || '').localeCompare(String(b.Documento || ''))
+    );
+};
 
 const buildAnaliticoHtml = (rows = [], filters = {}, empresa = {}) => {
   const totals = rows.reduce((acc, row) => ({
