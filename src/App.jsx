@@ -1253,7 +1253,7 @@ const SearchableSelect = ({ label, options = [], value, onChange, disabled, plac
   );
 };
 
-const ComboInput = ({ label, value, onChange, options = [], disabled, placeholder }) => {
+const ComboInput = ({ label, value, onChange, onBlur, options = [], disabled, placeholder }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value || '');
   const [showAllOptions, setShowAllOptions] = useState(false);
@@ -1301,6 +1301,7 @@ const ComboInput = ({ label, value, onChange, options = [], disabled, placeholde
           setOpen(true);
           setShowAllOptions(true);
         }}
+        onBlur={onBlur}
         disabled={disabled} placeholder={placeholder || 'Seleccionar...'}
         className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all text-sm"
         style={{ backgroundImage: chevronSvg, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1em 1em', paddingRight: '2rem' }}
@@ -1595,8 +1596,10 @@ const NuevoRegistro = () => {
   const [showNewCliente, setShowNewCliente] = useState(false);
   const [newCliente, setNewCliente] = useState({ name: '', rut: '', email: '' });
   const [saving, setSaving] = useState(false);
+  const [fieldWarning, setFieldWarning] = useState('');
 
   const handleChange = (field, value) => {
+    setFieldWarning('');
     const newData = { ...formData, [field]: value };
     const sameText = (a, b) => normalizeKey(a) === normalizeKey(b);
     if (field === 'clienteId') {
@@ -1674,6 +1677,38 @@ const NuevoRegistro = () => {
       if (!hasMatchingSerie) newData.numeroSerie = '';
     }
     setFormData(newData);
+  };
+
+  const validateListedField = (field, label, options = []) => {
+    const currentValue = String(formData[field] || '').trim();
+    if (!currentValue) return;
+    const isValid = options.some(option => normalizeKey(option) === normalizeKey(currentValue));
+    if (isValid) return;
+
+    const nextData = { ...formData, [field]: '' };
+    if (field === 'tipoEquipo') {
+      nextData.marca = '';
+      nextData.modelo = '';
+      nextData.numeroSerie = '';
+      nextData.numeroInventario = '';
+    }
+    if (field === 'marca') {
+      nextData.modelo = '';
+      nextData.numeroSerie = '';
+      nextData.numeroInventario = '';
+    }
+    if (field === 'modelo') {
+      nextData.numeroSerie = '';
+      nextData.numeroInventario = '';
+    }
+    if (field === 'numeroSerie') {
+      nextData.numeroInventario = '';
+    }
+    if (field === 'numeroInventario') {
+      nextData.numeroSerie = '';
+    }
+    setFormData(nextData);
+    setFieldWarning(`Advertencia: "${label}" solo permite valores existentes en el listado. El dato ingresado se eliminó.`);
   };
 
   const handleSaveCliente = async () => {
@@ -1826,6 +1861,11 @@ const NuevoRegistro = () => {
 
       <Card>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {fieldWarning && (
+            <div className="md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {fieldWarning}
+            </div>
+          )}
           <div className="space-y-2">
             <Select label="Cliente" options={clientesEmpresa} value={formData.clienteId} onChange={(e) => handleChange('clienteId', e.target.value)} />
             <button onClick={() => setShowNewCliente(!showNewCliente)} className="text-xs text-blue-600 hover:underline font-medium">
@@ -1861,43 +1901,44 @@ const NuevoRegistro = () => {
             value={formData.tipoEquipo}
             disabled={!formData.licitacionId}
             onChange={(e) => handleChange('tipoEquipo', e.target.value)}
+            onBlur={() => validateListedField('tipoEquipo', 'Tipo de Equipo', tipoEquipoOptions)}
             placeholder={availableEquipos.length > 0 ? "Seleccionar tipo de equipo..." : "No hay equipos para esta licitacion"}
           />
           <ComboInput
             label="Marca"
             value={formData.marca}
             onChange={(e) => handleChange('marca', e.target.value)}
+            onBlur={() => validateListedField('marca', 'Marca', marcaOptions)}
             options={marcaOptions}
             disabled={!formData.tipoEquipo}
             placeholder="Seleccione o ingrese marca"
-            listId="nuevo-registro-marcas"
           />
           <ComboInput
             label="Modelo"
             value={formData.modelo}
             onChange={(e) => handleChange('modelo', e.target.value)}
+            onBlur={() => validateListedField('modelo', 'Modelo', modeloOptions)}
             options={modeloOptions}
             disabled={!formData.marca}
             placeholder="Seleccione o ingrese modelo"
-            listId="nuevo-registro-modelos"
           />
           <ComboInput
             label="Nro de Serie"
             value={formData.numeroSerie}
             onChange={(e) => handleChange('numeroSerie', e.target.value)}
+            onBlur={() => validateListedField('numeroSerie', 'Nro de Serie', serieOptions)}
             options={serieOptions}
             disabled={!formData.marca}
             placeholder="Seleccione o ingrese serie"
-            listId="nuevo-registro-series"
           />
           <ComboInput
             label="Nro de Inventario"
             value={formData.numeroInventario}
             onChange={(e) => handleChange('numeroInventario', e.target.value)}
+            onBlur={() => validateListedField('numeroInventario', 'Nro de Inventario', inventarioOptions)}
             options={inventarioOptions}
             disabled={!formData.marca}
             placeholder="Seleccione o ingrese inventario"
-            listId="nuevo-registro-inventarios"
           />
           <Input label="Area / Servicio" value={formData.ubicacionArea} onChange={(e) => handleChange('ubicacionArea', e.target.value)} placeholder="Ej: UCI, Pabellon, Urgencia" />
           <Input label="Solicitado por" value={formData.solicitadoPor} onChange={(e) => handleChange('solicitadoPor', e.target.value)} placeholder="Nombre del solicitante" />
