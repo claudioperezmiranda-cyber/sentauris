@@ -11651,9 +11651,9 @@ const CalidadMantenimientosCalibraciones = () => {
       </div>
 
       {modal && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
+        <div className="fixed inset-0 z-[120] flex items-stretch justify-center bg-slate-950/70 p-2 sm:p-4 backdrop-blur-sm">
+          <div className="flex h-full max-h-[96vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-6 sm:py-5">
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Calidad</p>
                 <h3 className="text-xl font-black text-slate-900">{modal.mode === 'maintenance' ? 'Registrar mantenimiento' : 'Modificar datos del activo'}</h3>
@@ -11663,15 +11663,17 @@ const CalidadMantenimientosCalibraciones = () => {
                 <X size={18} />
               </button>
             </div>
-            <div className="px-6 py-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="ID Activo" value={modal.data.idActivo} disabled />
-              <Input label="Nombre Activo" value={modal.data.nombreActivo} disabled />
-              <Input label="Fecha Adquisicion" type="date" value={modal.data.fechaAdquisicion} disabled />
-              <Input label="Fecha de Mantenimiento" type="date" value={modal.data.fechaMantenimiento} onChange={e => setField('fechaMantenimiento', e.target.value)} />
-              <Input label="Responsable" value={modal.data.responsable} onChange={e => setField('responsable', e.target.value)} />
-              <Select label="Estado del Activo" value={modal.data.estadoActivo} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
+            <div className="flex-1 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Input label="ID Activo" value={modal.data.idActivo} disabled />
+                <Input label="Nombre Activo" value={modal.data.nombreActivo} disabled />
+                <Input label="Fecha Adquisicion" type="date" value={modal.data.fechaAdquisicion} disabled />
+                <Input label="Fecha de Mantenimiento" type="date" value={modal.data.fechaMantenimiento} onChange={e => setField('fechaMantenimiento', e.target.value)} />
+                <Input label="Responsable" value={modal.data.responsable} onChange={e => setField('responsable', e.target.value)} />
+                <Select label="Estado del Activo" value={modal.data.estadoActivo} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
+              </div>
             </div>
-            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+            <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
               <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
               <Button variant="accent" icon={CheckCircle} onClick={saveRow}>{modal.mode === 'maintenance' ? 'Guardar mantenimiento' : 'Guardar cambios'}</Button>
             </div>
