@@ -10364,13 +10364,13 @@ const AnaliticosContables = () => {
           <div className="relative max-w-md w-full"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar en informe generado" className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" /></div>
           <div className="relative">
             <button type="button" onClick={() => setColumnsOpen(v => !v)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-blue-600" title="Configurar columnas visibles"><Settings size={16}/></button>
-            {columnsOpen && (
-              <div className="absolute right-0 z-50 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+            {columnsOpen && createPortal(
+              <div className="fixed bottom-6 right-6 top-24 z-[130] w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
                   <p className="text-xs font-black uppercase tracking-widest text-slate-500">Columnas</p>
                   <button type="button" onClick={() => setColumnsOpen(false)} className="p-1 rounded text-slate-400 hover:bg-slate-100"><X size={14}/></button>
                 </div>
-                <div className="space-y-1 max-h-[70vh] overflow-y-auto pr-1">
+                <div className="space-y-1 h-[calc(100%-2.5rem)] overflow-y-auto pr-1">
                   {ANALITICOS_TABLE_COLUMNS.map(col => {
                     const checked = visibleColumnIds.includes(col.id);
                     return (
@@ -10381,7 +10381,8 @@ const AnaliticosContables = () => {
                     );
                   })}
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>
