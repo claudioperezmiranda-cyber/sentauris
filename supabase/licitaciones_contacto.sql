@@ -1,0 +1,3 @@
+ALTER TABLE licitaciones
+  ADD COLUMN IF NOT EXISTS encargado TEXT,
+  ADD COLUMN IF NOT EXISTS email TEXT;

@@ -2797,7 +2797,7 @@ const HistorialMantenciones = ({ tipo, verifyOrderId = '', verifyFolio = '' }) =
   const getContactEmail = (orden) => {
     const lic = getLicitacion(orden);
     const cliente = getCliente(orden);
-    return lic?.email_contacto || lic?.email || cliente?.email_contacto || cliente?.email || '';
+    return lic?.email || lic?.email_contacto || cliente?.email_contacto || cliente?.email || '';
   };
 
   const buildCorrectiveMailPayload = (orden) => {
@@ -5642,6 +5642,8 @@ const MIGRATION_SQL = `ALTER TABLE licitaciones
   ADD COLUMN IF NOT EXISTS fecha_termino DATE,
   ADD COLUMN IF NOT EXISTS monto         BIGINT,
   ADD COLUMN IF NOT EXISTS estado        TEXT DEFAULT 'Activa',
+  ADD COLUMN IF NOT EXISTS encargado     TEXT,
+  ADD COLUMN IF NOT EXISTS email         TEXT,
   ADD COLUMN IF NOT EXISTS garantia_preventiva_meses INTEGER DEFAULT 0,
   ADD COLUMN IF NOT EXISTS garantia_correctiva_meses INTEGER DEFAULT 0;`;
 
@@ -5664,7 +5666,7 @@ const MantenedoresLicitaciones = () => {
 
   // Detecta si las columnas extendidas existen en el esquema
   useEffect(() => {
-    supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado, garantia_preventiva_meses, garantia_correctiva_meses').limit(1)
+    supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado, encargado, email, garantia_preventiva_meses, garantia_correctiva_meses').limit(1)
       .then(({ error }) => { if (error && isSchemaError(error.message)) setSchemaMissing(true); });
   }, []);
 
@@ -5681,7 +5683,7 @@ const MantenedoresLicitaciones = () => {
   };
 
   // ---- CRUD manual ----
-  const emptyForm = { id_licitacion: '', name: '', cliente_id: '', fecha_inicio: '', fecha_termino: '', monto: '', estado: 'Activa', garantia_preventiva_meses: '', garantia_correctiva_meses: '' };
+  const emptyForm = { id_licitacion: '', name: '', cliente_id: '', fecha_inicio: '', fecha_termino: '', monto: '', estado: 'Activa', encargado: '', email: '', garantia_preventiva_meses: '', garantia_correctiva_meses: '' };
   const openNew  = () => setModal({ mode: 'new', data: { ...emptyForm } });
   const openEdit = (l) => setModal({ mode: 'edit', data: {
     id: l.id,
@@ -5692,6 +5694,8 @@ const MantenedoresLicitaciones = () => {
     fecha_termino: l.fecha_termino || '',
     monto:         l.monto != null  ? String(l.monto) : '',
     estado:        l.estado        || 'Activa',
+    encargado:     l.encargado     || '',
+    email:         l.email         || '',
     garantia_preventiva_meses: l.garantia_preventiva_meses != null ? String(l.garantia_preventiva_meses) : '',
     garantia_correctiva_meses: l.garantia_correctiva_meses != null ? String(l.garantia_correctiva_meses) : '',
   }});
@@ -5706,11 +5710,13 @@ const MantenedoresLicitaciones = () => {
     fecha_termino: data.fecha_termino || null,
     monto:         data.monto ? Number(String(data.monto).replace(/\D/g, '')) || null : null,
     estado:        data.estado        || 'Activa',
+    encargado:     data.encargado     || null,
+    email:         data.email         || null,
     garantia_preventiva_meses: data.garantia_preventiva_meses ? Number(data.garantia_preventiva_meses) || 0 : 0,
     garantia_correctiva_meses: data.garantia_correctiva_meses ? Number(data.garantia_correctiva_meses) || 0 : 0,
   });
   const basePayload = (data) => ({ name: data.name, cliente_id: data.cliente_id });
-  const hasExtendedData = (r) => Boolean(r.id_licitacion || r.fecha_inicio || r.fecha_termino || r.monto || r.garantia_preventiva_meses || r.garantia_correctiva_meses || (r.estado && r.estado !== 'Activa'));
+  const hasExtendedData = (r) => Boolean(r.id_licitacion || r.fecha_inicio || r.fecha_termino || r.monto || r.encargado || r.email || r.garantia_preventiva_meses || r.garantia_correctiva_meses || (r.estado && r.estado !== 'Activa'));
 
   // Intenta con payload completo; si falla por schema, reintenta con columnas base
   const safeInsert = async (data) => {
@@ -5809,6 +5815,8 @@ const MantenedoresLicitaciones = () => {
     { key: 'fecha_inicio',  label: 'Fecha Inicio',      required: false, hint: 'dd/mm/aaaa' },
     { key: 'fecha_termino', label: 'Fecha Término',     required: false, hint: 'dd/mm/aaaa' },
     { key: 'monto',         label: 'Monto Contrato',    required: false, hint: 'Solo números, sin puntos ni $' },
+    { key: 'encargado',     label: 'Encargado',         required: false, hint: 'Persona responsable de la licitación' },
+    { key: 'email',         label: 'Email',             required: false, hint: 'Correo preferente para envio de informes' },
     { key: 'garantia_preventiva_meses', label: 'Garantia Preventiva Meses', required: false, hint: 'Meses cobertura preventiva, ej: 3' },
     { key: 'garantia_correctiva_meses', label: 'Garantia Correctiva Meses', required: false, hint: 'Meses cobertura correctiva, ej: 6' },
     { key: 'estado',        label: 'Estado',            required: false, hint: 'Activa / Vencida / En revisión / Cancelada / Suspendida' },
@@ -5816,10 +5824,10 @@ const MantenedoresLicitaciones = () => {
 
   const exportTemplate = () => {
     const hintRow   = COLUMNS.map(c => c.hint);
-    const exampleRow = ['LIC-001', 'Contrato Mantención 2025', '76.123.456-K', '01/01/2025', '31/12/2025', '5000000', '3', '6', 'Activa'];
+    const exampleRow = ['LIC-001', 'Contrato Mantención 2025', '76.123.456-K', '01/01/2025', '31/12/2025', '5000000', 'Juan Perez', 'contratos@cliente.cl', '3', '6', 'Activa'];
 
     const ws = XLSX.utils.aoa_to_sheet([COLUMNS.map(c => c.label), hintRow, exampleRow]);
-    ws['!cols'] = [{ wch: 14 }, { wch: 38 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 24 }, { wch: 14 }];
+    ws['!cols'] = [{ wch: 14 }, { wch: 38 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 28 }, { wch: 24 }, { wch: 24 }, { wch: 14 }];
 
     const clientesData = [['Nombre Cliente', 'RUT Cliente']];
     clientes.forEach(c => clientesData.push([c.name, c.rut]));
@@ -5868,7 +5876,7 @@ const MantenedoresLicitaciones = () => {
       });
 
       const mapped = rows.map((row, idx) => {
-        const entry = { id_licitacion: '', name: '', rut_cliente: '', fecha_inicio: '', fecha_termino: '', monto: '', garantia_preventiva_meses: '', garantia_correctiva_meses: '', estado: 'Activa', _row: idx + 2 };
+        const entry = { id_licitacion: '', name: '', rut_cliente: '', fecha_inicio: '', fecha_termino: '', monto: '', encargado: '', email: '', garantia_preventiva_meses: '', garantia_correctiva_meses: '', estado: 'Activa', _row: idx + 2 };
         const keys = Object.keys(row);
         COLUMNS.forEach(col => {
           const wanted = normalizeHeader(col.label);
@@ -5904,14 +5912,14 @@ const MantenedoresLicitaciones = () => {
     if (previewErrors.length > 0) return;
     setImporting(true);
     try {
-      const schemaProbe = await supabaseRequest(() => supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado, garantia_preventiva_meses, garantia_correctiva_meses').limit(1));
+      const schemaProbe = await supabaseRequest(() => supabase.from('licitaciones').select('id_licitacion, fecha_inicio, fecha_termino, monto, estado, encargado, email, garantia_preventiva_meses, garantia_correctiva_meses').limit(1));
       const missingExtendedSchema = schemaMissing || (schemaProbe.error && isSchemaError(schemaProbe.error.message));
 
       if (missingExtendedSchema && preview.some(hasExtendedData)) {
         setSchemaMissing(true);
         setImportResult({
           ok: false,
-          message: 'La tabla licitaciones no tiene columnas para ID, fechas, monto, estado o garantias. Copia y ejecuta el SQL amarillo de arriba en Supabase y vuelve a importar el Excel.',
+          message: 'La tabla licitaciones no tiene columnas para ID, fechas, monto, encargado, email, estado o garantias. Copia y ejecuta el SQL amarillo de arriba en Supabase y vuelve a importar el Excel.',
         });
         return;
       }
@@ -5923,6 +5931,8 @@ const MantenedoresLicitaciones = () => {
         fecha_inicio:  r.fecha_inicio  || null,
         fecha_termino: r.fecha_termino || null,
         monto:         r.monto ? Number(String(r.monto).replace(/\D/g, '')) || null : null,
+        encargado:     r.encargado || null,
+        email:         r.email || null,
         garantia_preventiva_meses: r.garantia_preventiva_meses ? Number(String(r.garantia_preventiva_meses).replace(/\D/g, '')) || 0 : 0,
         garantia_correctiva_meses: r.garantia_correctiva_meses ? Number(String(r.garantia_correctiva_meses).replace(/\D/g, '')) || 0 : 0,
         estado:        r.estado        || 'Activa',
@@ -6001,6 +6011,8 @@ const MantenedoresLicitaciones = () => {
       l.id_licitacion?.toLowerCase().includes(t) ||
       cliente?.name?.toLowerCase().includes(t) ||
       cliente?.rut?.toLowerCase().includes(t) ||
+      l.encargado?.toLowerCase().includes(t) ||
+      l.email?.toLowerCase().includes(t) ||
       l.estado?.toLowerCase().includes(t)
     );
   });
@@ -6028,7 +6040,7 @@ const MantenedoresLicitaciones = () => {
             <div className="flex-1 min-w-0">
               <p className="font-bold text-amber-800 text-sm">Faltan columnas en la tabla <code className="font-mono">licitaciones</code></p>
               <p className="text-amber-700 text-xs mt-0.5">
-                El guardado funciona con nombre y cliente solamente. Para habilitar ID, fechas, monto y estado ejecuta este SQL en
+                El guardado funciona con nombre y cliente solamente. Para habilitar ID, fechas, monto, encargado, email y estado ejecuta este SQL en
                 <strong> Supabase → SQL Editor</strong>:
               </p>
             </div>
@@ -6065,6 +6077,12 @@ const MantenedoresLicitaciones = () => {
                 onChange={e => setField('fecha_inicio', e.target.value)} />
               <Input label="Fecha Término" type="date" value={modal.data.fecha_termino}
                 onChange={e => setField('fecha_termino', e.target.value)} />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="Encargado" value={modal.data.encargado}
+                onChange={e => setField('encargado', e.target.value)} placeholder="Ej: Juan Pérez" />
+              <Input label="Email" type="email" value={modal.data.email}
+                onChange={e => setField('email', e.target.value)} placeholder="contratos@cliente.cl" />
             </div>
             <Input label="Monto Contrato (CLP)" type="number" value={modal.data.monto}
               onChange={e => setField('monto', e.target.value)} placeholder="5000000" />
@@ -6126,7 +6144,7 @@ const MantenedoresLicitaciones = () => {
           </div>
           <div className="text-[11px] text-slate-300 text-center mt-1 space-y-0.5">
             <p>Requeridos: <strong className="text-slate-400">Nombre Licitación · RUT Cliente</strong></p>
-            <p>Opcionales: ID Licitación · Fecha Inicio · Fecha Término · Monto Contrato · Estado</p>
+            <p>Opcionales: ID Licitación · Fecha Inicio · Fecha Término · Monto Contrato · Encargado · Email · Estado</p>
             <p className="text-blue-300 font-medium">La plantilla incluye hoja de referencia con los clientes del sistema</p>
           </div>
         </div>
@@ -6162,6 +6180,8 @@ const MantenedoresLicitaciones = () => {
                   <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Cliente (RUT)</th>
                   <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Fechas</th>
                   <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Monto</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Encargado</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Email</th>
                   <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Estado</th>
                 </tr>
               </thead>
@@ -6186,6 +6206,8 @@ const MantenedoresLicitaciones = () => {
                       <td className="px-4 py-3 text-slate-500 text-xs">
                         {row.monto ? `$${Number(row.monto.replace(/\D/g, '')).toLocaleString('es-CL')}` : '—'}
                       </td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">{row.encargado || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">{row.email || '—'}</td>
                       <td className="px-4 py-3">
                         <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${estadoBadge(row.estado)}`}>{row.estado || 'Activa'}</span>
                       </td>
@@ -6249,6 +6271,8 @@ const MantenedoresLicitaciones = () => {
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Fecha Inicio</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Fecha Término</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Monto Contrato</th>
+                <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Encargado</th>
+                <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Email</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Garantia Prev.</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Garantia Corr.</th>
                 <th className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">Estado</th>
@@ -6258,7 +6282,7 @@ const MantenedoresLicitaciones = () => {
             <tbody className="divide-y divide-slate-50">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan="12" className="px-6 py-12 text-center text-slate-400 italic">
+                  <td colSpan="14" className="px-6 py-12 text-center text-slate-400 italic">
                     {licitaciones.length === 0 ? 'No hay licitaciones. Usa "Nueva Licitación" o carga un Excel.' : 'Sin resultados para la búsqueda.'}
                   </td>
                 </tr>
@@ -6280,6 +6304,8 @@ const MantenedoresLicitaciones = () => {
                     <td className="px-4 py-4 text-slate-700">
                       {l.monto ? `$${Number(l.monto).toLocaleString('es-CL')}` : '—'}
                     </td>
+                    <td className="px-4 py-4 text-slate-700 font-medium">{l.encargado || '—'}</td>
+                    <td className="px-4 py-4 text-slate-500">{l.email || '—'}</td>
                     <td className="px-4 py-4 text-slate-500 text-xs">{l.garantia_preventiva_meses ? `${l.garantia_preventiva_meses} mes(es)` : '—'}</td>
                     <td className="px-4 py-4 text-slate-500 text-xs">{l.garantia_correctiva_meses ? `${l.garantia_correctiva_meses} mes(es)` : '—'}</td>
                     <td className="px-4 py-4 text-right">

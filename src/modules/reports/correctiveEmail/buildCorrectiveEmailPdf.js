@@ -10,6 +10,12 @@ const FONT_BODY = 10;
 const FONT_LABEL = 8;
 const FONT_SECTION = 11;
 const LINE_HEIGHT = 13;
+const fitFontSize = (text, font, maxWidth, preferredSize, minSize = 10) => {
+  let size = preferredSize;
+  const content = String(text || '');
+  while (size > minSize && font.widthOfTextAtSize(content, size) > maxWidth) size -= 0.5;
+  return size;
+};
 
 const normalizeText = (value = '') => String(value || '').replace(/\r/g, '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 
@@ -239,11 +245,13 @@ const drawHeader = async (page, report, fonts) => {
     size: FONT_LABEL,
     color: MUTED_COLOR,
   });
-  page.drawText(String(report.orden?.folio || ''), {
+  const folioText = String(report.orden?.folio || '');
+  const folioFontSize = fitFontSize(folioText, fonts.bold, metaWidth - 24, 20, 12);
+  page.drawText(folioText, {
     x: metaX + 12,
-    y: headerY + HEADER_HEIGHT - 38,
+    y: headerY + HEADER_HEIGHT - 18 - folioFontSize,
     font: fonts.bold,
-    size: 20,
+    size: folioFontSize,
     color: BORDER_COLOR,
   });
   page.drawText(`Fecha: ${formatDate(report.orden?.fecha)}`, {
