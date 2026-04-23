@@ -12452,6 +12452,7 @@ const Planificacion = () => {
         pixelRatio: 2,
         backgroundColor: '#ffffff',
         cacheBust: true,
+        filter: (node) => !(node instanceof HTMLElement && node.dataset?.exportHide === 'true'),
       });
       const link = document.createElement('a');
       const start = dateStr(weekDays[0]);
@@ -12485,12 +12486,7 @@ const Planificacion = () => {
               <button onClick={() => setWeekOffset(w => w - 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                 <ChevronLeft size={18} />
               </button>
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-slate-700 capitalize">{weekLabel()}</span>
-                <Button variant="secondary" icon={exportingTecnicosJpg ? Cpu : Download} onClick={downloadTecnicosJpg} disabled={exportingTecnicosJpg || selectedClientes.length === 0}>
-                  {exportingTecnicosJpg ? 'Generando JPG...' : 'Descargar JPG'}
-                </Button>
-              </div>
+              <span className="text-sm font-semibold text-slate-700 capitalize">{weekLabel()}</span>
               <button onClick={() => setWeekOffset(w => w + 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                 <ChevronRight size={18} />
               </button>
@@ -12522,9 +12518,14 @@ const Planificacion = () => {
 
             {/* Leyenda */}
             {selectedClientes.length > 0 && (
-              <div className="flex items-center gap-4 text-xs text-slate-400">
-                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-blue-100 border border-blue-200" /> Asignado esta semana</span>
-                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-slate-100 border border-slate-200" /> Heredado de semana anterior</span>
+              <div className="flex items-center justify-between gap-4 text-xs text-slate-400">
+                <div className="flex items-center gap-4">
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-blue-100 border border-blue-200" /> Asignado esta semana</span>
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-slate-100 border border-slate-200" /> Heredado de semana anterior</span>
+                </div>
+                <Button variant="secondary" icon={exportingTecnicosJpg ? Cpu : Download} onClick={downloadTecnicosJpg} disabled={exportingTecnicosJpg || selectedClientes.length === 0}>
+                  {exportingTecnicosJpg ? 'Generando JPG...' : 'Descargar JPG'}
+                </Button>
               </div>
             )}
 
@@ -12560,7 +12561,7 @@ const Planificacion = () => {
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium text-slate-700 text-sm">{nombre}</span>
                             {canEdit && (
-                              <button onClick={() => removeCliente(cId)} title="Quitar cliente" className="p-1 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
+                              <button data-export-hide="true" onClick={() => removeCliente(cId)} title="Quitar cliente" className="p-1 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
                                 <X size={13} />
                               </button>
                             )}
@@ -12580,7 +12581,7 @@ const Planificacion = () => {
                                     <div key={u.id || u.usuario} className="flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-500 text-xs rounded-lg px-2 py-1" title="Heredado de semana anterior">
                                       <span className="flex-1 truncate">{u.nombre}</span>
                                       {canEdit && (
-                                        <button onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                        <button data-export-hide="true" onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
                                           <X size={11} />
                                         </button>
                                       )}
@@ -12590,7 +12591,7 @@ const Planificacion = () => {
                                     <div key={u.id || u.usuario} className="flex items-center gap-1 bg-blue-50 border border-blue-100 text-blue-700 text-xs rounded-lg px-2 py-1">
                                       <span className="flex-1 truncate font-medium">{u.nombre}</span>
                                       {canEdit && (
-                                        <button onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-blue-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                        <button data-export-hide="true" onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-blue-300 hover:text-red-500 transition-colors flex-shrink-0">
                                           <X size={11} />
                                         </button>
                                       )}
@@ -12599,6 +12600,7 @@ const Planificacion = () => {
                                 ))}
                                 {canEdit && availableUsers.length > 0 && (
                                   <select
+                                    data-export-hide="true"
                                     value=""
                                     onChange={e => { if (e.target.value) addUserToCell(cId, d, e.target.value); }}
                                     className="w-full text-xs rounded border border-dashed border-slate-300 px-1 py-1 text-slate-400 bg-transparent cursor-pointer hover:border-blue-400 hover:text-blue-500 focus:outline-none focus:border-blue-400 transition-colors"
