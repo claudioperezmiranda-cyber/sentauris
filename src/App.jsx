@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { toJpeg } from 'html-to-image';
 import {
   LayoutDashboard, User, ClipboardList, TrendingUp, FileText, Users, LogOut,
   Search, Bell, ChevronLeft, ChevronRight, Wrench, CheckCircle2, AlertCircle,
@@ -12125,6 +12126,8 @@ const Planificacion = () => {
   const [preventiveFilters, setPreventiveFilters] = useState({ licitacionId: '', equipo: '', marca: '', modelo: '' });
   const [preventiveOrders, setPreventiveOrders] = useState([]);
   const [addingClienteId, setAddingClienteId] = useState('');
+  const [exportingTecnicosJpg, setExportingTecnicosJpg] = useState(false);
+  const tecnicosExportRef = useRef(null);
 
   const tabBase = 'px-4 py-2 text-sm font-bold border-b-2 transition-colors';
   const tabAct  = `${tabBase} border-blue-600 text-blue-700`;
@@ -12440,6 +12443,28 @@ const Planificacion = () => {
     setPreventiveYear(now.getFullYear());
     setPreventiveMonth(now.getMonth());
   };
+  const downloadTecnicosJpg = async () => {
+    if (!tecnicosExportRef.current) return;
+    try {
+      setExportingTecnicosJpg(true);
+      const dataUrl = await toJpeg(tecnicosExportRef.current, {
+        quality: 0.96,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+        cacheBust: true,
+      });
+      const link = document.createElement('a');
+      const start = dateStr(weekDays[0]);
+      const end = dateStr(weekDays[weekDays.length - 1]);
+      link.download = `planificacion_tecnicos_${start}_${end}.jpg`;
+      link.href = dataUrl;
+      link.click();
+    } catch (error) {
+      alert('No se pudo descargar la planificación en JPG: ' + friendlyError(error));
+    } finally {
+      setExportingTecnicosJpg(false);
+    }
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-2">
@@ -12460,7 +12485,12 @@ const Planificacion = () => {
               <button onClick={() => setWeekOffset(w => w - 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                 <ChevronLeft size={18} />
               </button>
-              <span className="text-sm font-semibold text-slate-700 capitalize">{weekLabel()}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-slate-700 capitalize">{weekLabel()}</span>
+                <Button variant="secondary" icon={exportingTecnicosJpg ? Cpu : Download} onClick={downloadTecnicosJpg} disabled={exportingTecnicosJpg || selectedClientes.length === 0}>
+                  {exportingTecnicosJpg ? 'Generando JPG...' : 'Descargar JPG'}
+                </Button>
+              </div>
               <button onClick={() => setWeekOffset(w => w + 1)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                 <ChevronRight size={18} />
               </button>
@@ -12499,7 +12529,7 @@ const Planificacion = () => {
             )}
 
             {/* Tabla Gantt */}
-            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <div ref={tecnicosExportRef} className="overflow-x-auto border border-slate-200 rounded-xl bg-white">
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-slate-50">
