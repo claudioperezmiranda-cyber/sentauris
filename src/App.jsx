@@ -656,6 +656,7 @@ const APP_DATA_KEYS = {
   abastecimiento_documentos: 'sentauris_abastecimiento_documentos',
   protocolos_preventivos: 'sentauris_protocolos_preventivos',
   monedas_indicadores: 'sentauris_monedas_indicadores',
+  planificacion_tecnicos: 'sentauris_planificacion_tecnicos',
 };
 
 const appDataParamId = (key) => `app_data:${key}`;
@@ -859,6 +860,7 @@ const ERPProvider = ({ children }) => {
     ...defaultPreventiveProtocolsConfig(),
     ...(readLocalObj('sentauris_protocolos_preventivos') || {}),
   }));
+  const [planificacionTecnicos, setPlanificacionTecnicos] = useState(() => readLocalObj('sentauris_planificacion_tecnicos') || {});
   const [loading, setLoading] = useState(true);
   const [dbStatus, setDbStatus] = useState('connecting'); // 'connecting' | 'ok' | 'error'
   const appDataLoadedRef = useRef(false);
@@ -921,6 +923,7 @@ const ERPProvider = ({ children }) => {
             tipo_documentos: setTipoDocumentos,
             monedas_indicadores: setMonedasIndicadores,
             protocolos_preventivos: setProtocolosPreventivos,
+            planificacion_tecnicos: setPlanificacionTecnicos,
           };
           const appDataResponse = await loadAppDataFromSupabase(Object.keys(appDataSetters));
           if (appDataResponse.error) {
@@ -933,11 +936,13 @@ const ERPProvider = ({ children }) => {
                   ? { ...defaultPreventiveProtocolsConfig(), ...(remoteByKey.get(key) || {}) }
                   : key === 'monedas_indicadores'
                   ? normalizeMonedasIndicadores(remoteByKey.get(key) || {})
+                  : key === 'planificacion_tecnicos'
+                  ? (remoteByKey.get(key) || {})
                   : (Array.isArray(remoteByKey.get(key)) ? remoteByKey.get(key) : []);
                 if (setter) setter(remoteValue);
                 localStorage.setItem(APP_DATA_KEYS[key], JSON.stringify(remoteValue));
               } else {
-                const localValue = key === 'protocolos_preventivos' || key === 'monedas_indicadores'
+                const localValue = key === 'protocolos_preventivos' || key === 'monedas_indicadores' || key === 'planificacion_tecnicos'
                   ? readLocalObj(APP_DATA_KEYS[key])
                   : readLocalList(APP_DATA_KEYS[key]);
                 if ((Array.isArray(localValue) && localValue.length > 0) || (localValue && typeof localValue === 'object' && Object.keys(localValue).length > 0)) {
@@ -1027,6 +1032,10 @@ const ERPProvider = ({ children }) => {
   useEffect(() => {
     persistAppData('protocolos_preventivos', APP_DATA_KEYS.protocolos_preventivos, protocolosPreventivos);
   }, [protocolosPreventivos]);
+
+  useEffect(() => {
+    persistAppData('planificacion_tecnicos', APP_DATA_KEYS.planificacion_tecnicos, planificacionTecnicos);
+  }, [planificacionTecnicos]);
 
   const setParametros = async (nextParametros) => {
     setParametrosState(nextParametros);
@@ -1137,6 +1146,7 @@ const ERPProvider = ({ children }) => {
       tipoDocumentos, setTipoDocumentos,
       monedasIndicadores, setMonedasIndicadores,
       protocolosPreventivos, setProtocolosPreventivos,
+      planificacionTecnicos, setPlanificacionTecnicos,
       parametros, setParametros,
       loading, dbStatus
     }}>
@@ -11700,12 +11710,9 @@ const RegistroCompras = () => {
 };
 
 const Planificacion = () => {
-  const { clientes, usuarios, loggedInUser, activeEmpresaId, empresas } = useContext(ERPContext);
+  const { clientes, usuarios, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('tecnicos');
   const [weekOffset, setWeekOffset] = useState(0);
-  const [asignaciones, setAsignaciones] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('planificacion-tecnicos') || '{}'); } catch { return {}; }
-  });
 
   const tabBase = 'px-4 py-2 text-sm font-bold border-b-2 transition-colors';
   const tabAct  = `${tabBase} border-blue-600 text-blue-700`;
@@ -11743,13 +11750,12 @@ const Planificacion = () => {
   const clientesList = clientes.filter(c => (c.razonSocial || c.name || c.nombre || '').trim());
   const usuariosList = usuarios.filter(u => (u.nombre || '').trim());
 
-  const getAsignacion = (cId, d) => asignaciones[`${cId}-${dateStr(d)}`] || '';
+  const getAsignacion = (cId, d) => (planificacionTecnicos || {})[`${cId}-${dateStr(d)}`] || '';
   const setAsignacion = (cId, d, userId) => {
     const key = `${cId}-${dateStr(d)}`;
-    const next = { ...asignaciones };
+    const next = { ...(planificacionTecnicos || {}) };
     if (userId) next[key] = userId; else delete next[key];
-    setAsignaciones(next);
-    localStorage.setItem('planificacion-tecnicos', JSON.stringify(next));
+    setPlanificacionTecnicos(next);
   };
 
   return (
