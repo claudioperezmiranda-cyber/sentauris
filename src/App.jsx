@@ -11755,11 +11755,24 @@ const Planificacion = () => {
   const selectedClientes = selectedIds.map(id => allClientes.find(c => c.id === id)).filter(Boolean);
   const clientesDisponibles = allClientes.filter(c => !selectedIds.includes(c.id));
 
-  // Cell value is always an array; handle legacy single-string format
-  const getCellUsers = (cId, d) => {
+  // Devuelve { users: string[], inherited: bool }
+  // Si no hay datos explícitos para la fecha, busca hacia atrás semana a semana (hasta 8 semanas)
+  const getCellData = (cId, d) => {
     const raw = data[`${cId}-${dateStr(d)}`];
-    if (!raw) return [];
-    return Array.isArray(raw) ? raw : [raw];
+    if (raw !== undefined) {
+      const users = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      return { users, inherited: false };
+    }
+    for (let w = 1; w <= 8; w++) {
+      const prev = new Date(d);
+      prev.setDate(d.getDate() - 7 * w);
+      const prevRaw = data[`${cId}-${dateStr(prev)}`];
+      if (prevRaw !== undefined) {
+        const users = Array.isArray(prevRaw) ? prevRaw : (prevRaw ? [prevRaw] : []);
+        return { users, inherited: true };
+      }
+    }
+    return { users: [], inherited: false };
   };
 
   const updateData = (next) => setPlanificacionTecnicos(next);
@@ -11776,19 +11789,20 @@ const Planificacion = () => {
     updateData(next);
   };
 
+  // Al modificar una celda heredada se crea entrada explícita para esa fecha
   const addUserToCell = (cId, d, userId) => {
     if (!userId) return;
-    const key = `${cId}-${dateStr(d)}`;
-    const current = getCellUsers(cId, d);
+    const { users: current } = getCellData(cId, d);
     if (current.includes(userId)) return;
-    updateData({ ...data, [key]: [...current, userId] });
+    updateData({ ...data, [`${cId}-${dateStr(d)}`]: [...current, userId] });
   };
 
   const removeUserFromCell = (cId, d, userId) => {
-    const key = `${cId}-${dateStr(d)}`;
+    const { users: current } = getCellData(cId, d);
+    const remaining = current.filter(id => id !== userId);
     const next = { ...data };
-    const remaining = getCellUsers(cId, d).filter(id => id !== userId);
-    if (remaining.length > 0) next[key] = remaining; else delete next[key];
+    if (remaining.length > 0) next[`${cId}-${dateStr(d)}`] = remaining;
+    else delete next[`${cId}-${dateStr(d)}`];
     updateData(next);
   };
 
@@ -11817,26 +11831,34 @@ const Planificacion = () => {
               </button>
             </div>
 
-            {/* Selector para agregar cliente */}
+            {/* Buscador de cliente para agregar */}
             {canEdit && (
-              <div className="flex items-center gap-2">
-                <select
-                  value={addingClienteId}
-                  onChange={e => setAddingClienteId(e.target.value)}
-                  className="flex-1 text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                >
-                  <option value="">Seleccionar cliente para agregar…</option>
-                  {clientesDisponibles.map(c => (
-                    <option key={c.id} value={c.id}>{c.razonSocial || c.name || c.nombre}</option>
-                  ))}
-                </select>
+              <div className="flex items-start gap-2">
+                <div className="flex-1">
+                  <SearchableSelect
+                    options={clientesDisponibles}
+                    value={addingClienteId}
+                    onChange={e => setAddingClienteId(e.target.value)}
+                    getLabel={c => c.razonSocial || c.name || c.nombre || ''}
+                    getSearchText={c => `${c.razonSocial || c.name || c.nombre || ''} ${c.rut || ''}`}
+                    placeholder="Buscar cliente para agregar…"
+                  />
+                </div>
                 <button
                   onClick={addCliente}
                   disabled={!addingClienteId}
-                  className="flex items-center gap-1 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-40 hover:bg-blue-700 transition-colors whitespace-nowrap"
+                  className="flex items-center gap-1 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-40 hover:bg-blue-700 transition-colors whitespace-nowrap mt-0"
                 >
                   <Plus size={15} /> Agregar
                 </button>
+              </div>
+            )}
+
+            {/* Leyenda */}
+            {selectedClientes.length > 0 && (
+              <div className="flex items-center gap-4 text-xs text-slate-400">
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-blue-100 border border-blue-200" /> Asignado esta semana</span>
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-slate-100 border border-slate-200" /> Heredado de semana anterior</span>
               </div>
             )}
 
@@ -11858,7 +11880,7 @@ const Planificacion = () => {
                   {selectedClientes.length === 0 && (
                     <tr>
                       <td colSpan={8} className="p-10 text-center text-slate-400 text-sm">
-                        {canEdit ? 'Selecciona un cliente y presiona "Agregar" para comenzar.' : 'No hay clientes en la planificación.'}
+                        {canEdit ? 'Busca un cliente y presiona "Agregar" para comenzar.' : 'No hay clientes en la planificación.'}
                       </td>
                     </tr>
                   )}
@@ -11880,24 +11902,35 @@ const Planificacion = () => {
                         </td>
                         {/* Celdas de días */}
                         {weekDays.map((d, di) => {
-                          const assignedIds = getCellUsers(cId, d);
+                          const { users: assignedIds, inherited } = getCellData(cId, d);
                           const assignedUsers = assignedIds.map(id => usuariosList.find(u => (u.id || u.usuario) === id)).filter(Boolean);
                           const availableUsers = usuariosList.filter(u => !assignedIds.includes(u.id || u.usuario));
                           return (
-                            <td key={di} className="border-r border-slate-100 px-2 py-1.5 align-top">
+                            <td key={di} className={`border-r border-slate-100 px-2 py-1.5 align-top ${inherited && assignedIds.length > 0 ? 'bg-slate-50/60' : ''}`}>
                               <div className="space-y-1">
-                                {/* Tags de usuarios asignados */}
                                 {assignedUsers.map(u => (
-                                  <div key={u.id || u.usuario} className="flex items-center gap-1 bg-blue-50 border border-blue-100 text-blue-700 text-xs rounded-lg px-2 py-1">
-                                    <span className="flex-1 truncate font-medium">{u.nombre}</span>
-                                    {canEdit && (
-                                      <button onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-blue-300 hover:text-red-500 transition-colors flex-shrink-0">
-                                        <X size={11} />
-                                      </button>
-                                    )}
-                                  </div>
+                                  inherited ? (
+                                    // Tag heredado: gris, sin X pero permite modificar
+                                    <div key={u.id || u.usuario} className="flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-500 text-xs rounded-lg px-2 py-1" title="Heredado de semana anterior">
+                                      <span className="flex-1 truncate">{u.nombre}</span>
+                                      {canEdit && (
+                                        <button onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                          <X size={11} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    // Tag explícito: azul
+                                    <div key={u.id || u.usuario} className="flex items-center gap-1 bg-blue-50 border border-blue-100 text-blue-700 text-xs rounded-lg px-2 py-1">
+                                      <span className="flex-1 truncate font-medium">{u.nombre}</span>
+                                      {canEdit && (
+                                        <button onClick={() => removeUserFromCell(cId, d, u.id || u.usuario)} className="text-blue-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                          <X size={11} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  )
                                 ))}
-                                {/* Select para agregar usuario */}
                                 {canEdit && availableUsers.length > 0 && (
                                   <select
                                     value=""
