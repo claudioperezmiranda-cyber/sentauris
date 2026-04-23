@@ -1680,6 +1680,7 @@ const NuevoRegistro = () => {
   };
 
   const validateListedField = (field, label, options = []) => {
+    if (field === 'numeroSerie' || field === 'numeroInventario') return;
     const currentValue = String(formData[field] || '').trim();
     if (!currentValue) return;
     const isValid = options.some(option => normalizeKey(option) === normalizeKey(currentValue));
@@ -1926,7 +1927,6 @@ const NuevoRegistro = () => {
             label="Nro de Serie"
             value={formData.numeroSerie}
             onChange={(e) => handleChange('numeroSerie', e.target.value)}
-            onBlur={() => validateListedField('numeroSerie', 'Nro de Serie', serieOptions)}
             options={serieOptions}
             disabled={!formData.marca}
             placeholder="Seleccione o ingrese serie"
@@ -1935,7 +1935,6 @@ const NuevoRegistro = () => {
             label="Nro de Inventario"
             value={formData.numeroInventario}
             onChange={(e) => handleChange('numeroInventario', e.target.value)}
-            onBlur={() => validateListedField('numeroInventario', 'Nro de Inventario', inventarioOptions)}
             options={inventarioOptions}
             disabled={!formData.marca}
             placeholder="Seleccione o ingrese inventario"
