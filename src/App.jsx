@@ -11133,7 +11133,7 @@ const ActivosFijosContabilidad = () => {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-2 space-y-5">
+    <div className="w-full max-w-none animate-in fade-in slide-in-from-bottom-2 space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Contabilidad / Activos Fijos</p>
@@ -11160,7 +11160,7 @@ const ActivosFijosContabilidad = () => {
 
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="relative max-w-md w-full">
+          <div className="relative w-full md:max-w-xl">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -11221,9 +11221,9 @@ const ActivosFijosContabilidad = () => {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-6xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+        <div className="fixed inset-0 z-[120] flex items-stretch justify-center bg-slate-950/70 p-2 sm:p-4 backdrop-blur-sm">
+          <div className="flex h-full max-h-[96vh] w-full max-w-[min(96vw,1680px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-6 sm:py-5">
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Nuevo activo fijo</p>
                 <h3 className="text-xl font-black text-slate-900">Crear registro de activo fijo</h3>
@@ -11233,15 +11233,15 @@ const ActivosFijosContabilidad = () => {
                 <X size={18} />
               </button>
             </div>
-            <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+            <div className="flex-1 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
               {error && (
                 <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
                   {error}
                 </div>
               )}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {ACTIVOS_FIJOS_FIELDS.map(field => (
-                  <div key={field.key} className={field.key === 'nombreActivo' ? 'md:col-span-2 xl:col-span-2' : ''}>
+                  <div key={field.key} className={field.key === 'nombreActivo' ? 'md:col-span-2 xl:col-span-2 2xl:col-span-2' : ''}>
                     {field.type === 'select' ? (
                       <Select
                         label={field.label}
@@ -11261,7 +11261,7 @@ const ActivosFijosContabilidad = () => {
                 ))}
               </div>
             </div>
-            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+            <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
               <Button variant="secondary" onClick={closeModal}>Cancelar</Button>
               <Button variant="accent" icon={CheckCircle} onClick={saveAsset}>Guardar activo fijo</Button>
             </div>
