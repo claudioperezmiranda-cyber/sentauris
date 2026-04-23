@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
+import { generateAndSaveDiagnostic, generateDiagnosticReport } from './modules/diagnostics';
 
 // --- CONSTANTES ---
 const APP_NAME = "Sentauris ERP";
@@ -2156,8 +2157,11 @@ const MantencionCorrectiva = () => {
   const repuestoVisibleFields = (r = {}) => ({
     id: r.id,
     name: r.name || '',
+    sku: r.sku || '',
     part_number: r.part_number || '',
+    item_type: r.item_type || '',
     qty: r.qty || 1,
+    optionalNote: r.optionalNote || '',
     toBodega: Boolean(r.toBodega),
     garantia: Boolean(r.garantia),
     lockedQty: Boolean(r.lockedQty),
@@ -2214,30 +2218,46 @@ const MantencionCorrectiva = () => {
     setRepuestosSeleccionados(prev => prev.map(r => r.tempId === tempId ? { ...r, ...patch } : r));
   };
 
+  const buildDiagnosticEngineInput = (workOrderId) => ({
+    workOrderId: String(workOrderId || formData.ordenId || `draft-${formData.folio || Date.now()}`),
+    equipment: {
+      name: formData.tipoEquipo || 'Equipo',
+      brand: formData.marca || '',
+      model: formData.modelo || '',
+      category: formData.tipoEquipo || '',
+      serviceArea: formData.ubicacionArea || ''
+    },
+    findingsText: diagnostico.text,
+    selectedItems: repuestosSeleccionados.map((item) => ({
+      id: item.id,
+      code: item.sku || item.part_number || item.name || 'SIN-CODIGO',
+      name: item.name || 'Item sin nombre',
+      itemType: item.item_type,
+      quantity: item.qty,
+      optionalNote: item.optionalNote || ''
+    }))
+  });
+
   const generateAI = () => {
     if (!diagnostico.text.trim()) {
       alert('Primero escribe el hallazgo tecnico del problema del equipo.');
       return;
     }
+    if (repuestosSeleccionados.length === 0) {
+      alert('Selecciona al menos un repuesto o servicio para generar el diagnostico.');
+      return;
+    }
     setIsGenerating(true);
     setTimeout(() => {
-      const items = repuestosSeleccionados.map(r => r.name).filter(Boolean).join(', ') || 'sin repuestos seleccionados';
-      const estiloConclusion = normalizeKey(parametros?.promptConclusionCorrectiva || DEFAULT_CORRECTIVA_CONCLUSION_PROMPT);
-      const requiereDetalle = estiloConclusion.includes('detall') || estiloConclusion.includes('diagnostico');
-      const garantiaText = garantiaHabilitada ? ' Considerando que el caso se encuentra asociado a garantía por contrato, se recomienda mantener trazabilidad de la intervención y de los componentes evaluados.' : '';
-      const equipo = `${formData.tipoEquipo || 'equipo'} ${formData.marca || ''} ${formData.modelo || ''}`.trim();
-      const serieInventario = [
-        formData.numeroSerie ? `serie ${formData.numeroSerie}` : '',
-        formData.numeroInventario ? `inventario ${formData.numeroInventario}` : ''
-      ].filter(Boolean).join(', ');
-      const contextoEquipo = `${equipo}${serieInventario ? `, ${serieInventario}` : ''}`;
-      const detalle = requiereDetalle
-        ? ` Se debe revisar el conjunto asociado al componente comprometido, confirmar si existe desgaste, pérdida de ajuste, daño eléctrico, fatiga mecánica o falla de conexión, y validar que la causa detectada no afecte otros subsistemas del equipo.`
-        : '';
-      setDiagnostico(prev => ({
-        ...prev,
-        conclusion: `El análisis técnico del ${contextoEquipo} permite orientar la falla hacia un daño o deterioro del componente asociado al sistema intervenido. La causa probable se relaciona con desgaste operacional, pérdida de ajuste, fatiga del material o alteración funcional del repuesto comprometido, lo que puede generar un comportamiento inestable del equipo y afectar su desempeño durante el uso.\n\nLa solución técnica recomendada es intervenir el conjunto afectado, reemplazar o reparar el repuesto comprometido según corresponda, revisar sus puntos de fijación, conexiones y elementos relacionados, y posteriormente realizar pruebas funcionales para confirmar que la falla fue corregida. Para esta intervención se consideran los siguientes repuestos o servicios: ${items}.${detalle}${garantiaText}\n\nFinalizada la reparación, se recomienda verificar el funcionamiento del equipo en condiciones normales de operación, dejar registro de las acciones ejecutadas y entregar el equipo solo cuando se confirme una respuesta estable y conforme.`
-      }));
+      try {
+        const report = generateDiagnosticReport(buildDiagnosticEngineInput());
+        setDiagnostico(prev => ({
+          ...prev,
+          conclusion: report.fullReportText
+        }));
+      } catch (error) {
+        alert(`No fue posible generar el diagnostico: ${error.message}`);
+      }
       setIsGenerating(false);
     }, 1500);
   };
@@ -2246,14 +2266,26 @@ const MantencionCorrectiva = () => {
       alert('Para marcar como Ejecutado debes completar Recibido por, Cargo y la firma de recepción.');
       return;
     }
+    if (!diagnostico.text.trim()) {
+      alert('Debes ingresar los hallazgos tecnicos antes de guardar la correctiva.');
+      return;
+    }
+    if (repuestosSeleccionados.length === 0) {
+      alert('Debes seleccionar al menos un repuesto o servicio antes de guardar la correctiva.');
+      return;
+    }
     setIsSaving(true);
     try {
+      const previewReport = generateDiagnosticReport(buildDiagnosticEngineInput());
+      const fullReportText = previewReport.fullReportText;
+      setDiagnostico(prev => ({ ...prev, conclusion: fullReportText }));
+
       const orden = await saveOrden({
         estado: estadoInterno,
         observaciones: buildCorrectivaObservaciones({
           condicionInicial,
           diagnostico: diagnostico.text,
-          conclusion: diagnostico.conclusion,
+          conclusion: fullReportText,
           condicionFinal: muestraCondicionFinal ? condicionFinal : '',
           fotos,
           firma: firmaCorrectiva,
@@ -2290,6 +2322,13 @@ const MantencionCorrectiva = () => {
           throw insRepErr;
         }
       }
+
+      await generateAndSaveDiagnostic({
+        input: buildDiagnosticEngineInput(orden.id),
+        equipmentId: formData.equipoId || formData.numeroInventario || null,
+        createdBy: currentUser?.usuario || currentUser?.name || null,
+        persist: true
+      });
 
       alert(`✅ Correctiva ${formData.folio} guardada en Supabase`);
       resetRegistrationForm();
@@ -2355,8 +2394,10 @@ const MantencionCorrectiva = () => {
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-left">
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Descripción</th>
+                <th className="px-4 py-3 font-bold uppercase text-[10px]">Código</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">P/N</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Cant.</th>
+                <th className="px-4 py-3 font-bold uppercase text-[10px]">Nota técnica</th>
                 <th className="px-4 py-3 font-bold uppercase text-[10px]">Solicitar compra</th>
                 {garantiaHabilitada && <th className="px-4 py-3 font-bold uppercase text-[10px]">Garantia</th>}
                 <th className="px-4 py-3"></th>
@@ -2366,8 +2407,18 @@ const MantencionCorrectiva = () => {
               {repuestosSeleccionados.map((r) => (
                 <tr key={r.tempId} className="hover:bg-slate-50">
                   <td className="px-4 py-3 font-medium text-slate-700">{r.name}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.sku || '—'}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.part_number}</td>
                   <td className="px-4 py-3"><input type="number" min="1" value={r.qty ?? ''} disabled={r.lockedQty} onChange={e => updateRepuestoSeleccionado(r.tempId, { qty: e.target.value })} onBlur={e => updateRepuestoSeleccionado(r.tempId, { qty: Number(e.target.value) > 0 ? e.target.value : 1 })} className="w-16 border rounded px-1 text-center text-sm disabled:bg-slate-100 disabled:text-slate-400" /></td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="text"
+                      value={r.optionalNote || ''}
+                      onChange={e => updateRepuestoSeleccionado(r.tempId, { optionalNote: e.target.value })}
+                      className="w-48 border rounded px-2 py-1 text-sm"
+                      placeholder="Complemento opcional"
+                    />
+                  </td>
                   <td className="px-4 py-3"><input type="checkbox" checked={Boolean(r.toBodega)} onChange={e => updateRepuestoSeleccionado(r.tempId, { toBodega: e.target.checked })} className="w-4 h-4 rounded" /></td>
                   {garantiaHabilitada && <td className="px-4 py-3"><input type="checkbox" checked={Boolean(r.garantia)} onChange={e => updateRepuestoSeleccionado(r.tempId, { garantia: e.target.checked })} className="w-4 h-4 rounded accent-emerald-600" /></td>}
                   <td className="px-4 py-3 text-right">
@@ -2376,7 +2427,7 @@ const MantencionCorrectiva = () => {
                 </tr>
               ))}
               {repuestosSeleccionados.length === 0 && (
-                <tr><td colSpan={garantiaHabilitada ? 6 : 5} className="px-4 py-10 text-center text-slate-400 italic">No hay repuestos seleccionados</td></tr>
+                <tr><td colSpan={garantiaHabilitada ? 8 : 7} className="px-4 py-10 text-center text-slate-400 italic">No hay repuestos seleccionados</td></tr>
               )}
             </tbody>
           </table>
@@ -11721,12 +11772,13 @@ const RegistroCompras = () => {
 };
 
 const Planificacion = () => {
-  const { clientes, usuarios, equipos, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
+  const { clientes, usuarios, equipos, licitaciones, loggedInUser, activeEmpresaId, empresas, planificacionTecnicos, setPlanificacionTecnicos } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('tecnicos');
   const [weekOffset, setWeekOffset] = useState(0);
   const [preventiveYear, setPreventiveYear] = useState(() => new Date().getFullYear());
   const [preventiveMonth, setPreventiveMonth] = useState(() => new Date().getMonth());
   const [collapsedPreventiveGroups, setCollapsedPreventiveGroups] = useState({});
+  const [preventiveFilters, setPreventiveFilters] = useState({ licitacionId: '', equipo: '', marca: '', modelo: '' });
   const [preventiveOrders, setPreventiveOrders] = useState([]);
   const [addingClienteId, setAddingClienteId] = useState('');
 
@@ -11772,6 +11824,15 @@ const Planificacion = () => {
   const selectedClientes = selectedIds.map(id => allClientes.find(c => String(clienteId(c)) === String(id))).filter(Boolean);
   const clientesDisponibles = allClientes.filter(c => !selectedIds.some(id => String(id) === String(clienteId(c))));
   const preventiveOverrides = data._preventivas || {};
+  const setPreventiveFilter = (key, value) => {
+    setPreventiveFilters(prev => ({
+      ...prev,
+      [key]: value,
+      ...(key === 'licitacionId' ? { equipo: '', marca: '', modelo: '' } : {}),
+      ...(key === 'equipo' ? { marca: '', modelo: '' } : {}),
+      ...(key === 'marca' ? { modelo: '' } : {}),
+    }));
+  };
 
   useEffect(() => {
     if (activeTab !== 'preventivas') return;
@@ -11905,11 +11966,36 @@ const Planificacion = () => {
     const week = month?.weeks.find(item => date >= item.start && date <= item.end);
     return week ? `${date.getMonth() + 1}-${week.index}` : '';
   };
+  const samePreventiveEquipment = (orden = {}, equipo = {}) => {
+    const sameLic = !orden.licitacion_id || !equipo.licitacion_id || String(orden.licitacion_id) === String(equipo.licitacion_id);
+    const ordenSerie = normalizeEquipmentMatchValue(orden.numero_serie ?? orden.numeroSerie);
+    const equipoSerie = normalizeEquipmentMatchValue(equipo.numero_serie ?? equipo.numeroSerie);
+    const ordenInventario = normalizeEquipmentMatchValue(orden.numero_inventario ?? orden.numeroInventario);
+    const equipoInventario = normalizeEquipmentMatchValue(equipo.numero_inventario ?? equipo.numeroInventario);
+    const serieMatch = ordenSerie && equipoSerie && ordenSerie === equipoSerie;
+    const inventarioMatch = ordenInventario && equipoInventario && ordenInventario === equipoInventario;
+    if (serieMatch || inventarioMatch) return true;
+    return sameLic &&
+      normalizeEquipmentMatchValue(orden.tipo_equipo ?? orden.tipoEquipo) === normalizeEquipmentMatchValue(equipo.tipo_equipo ?? equipo.tipoEquipo) &&
+      normalizeEquipmentMatchValue(orden.marca) === normalizeEquipmentMatchValue(equipo.marca) &&
+      normalizeEquipmentMatchValue(orden.modelo) === normalizeEquipmentMatchValue(equipo.modelo);
+  };
   const lastPreventiveForEquipo = (equipo) => preventiveOrders
-    .filter(orden => sameEquipmentIdentity(orden, equipo))
+    .filter(orden => samePreventiveEquipment(orden, equipo))
     .sort((a, b) => String(b.fecha || b.created_at || '').localeCompare(String(a.fecha || a.created_at || '')))[0] || null;
+  const preventiveFrequencyMonths = (equipo = {}) => {
+    const raw = equipo.frecuencia_mantenimiento_meses
+      ?? equipo.frecuencia_mantencion_meses
+      ?? equipo.frecuenciaPreventivaMeses
+      ?? equipo.frecuencia_mantenimiento
+      ?? equipo.frecuencia_mantencion
+      ?? equipo.frecuencia
+      ?? equipo.periodicidad_meses
+      ?? equipo.periodicidad;
+    return Number(String(raw || '').replace(',', '.').replace(/[^\d.]/g, '')) || 0;
+  };
   const estimatedWeeksForEquipo = (equipo) => {
-    const frequency = Number(equipo.frecuencia_mantenimiento_meses) || 0;
+    const frequency = preventiveFrequencyMonths(equipo);
     const lastOrden = lastPreventiveForEquipo(equipo);
     let nextDate = addMonthsToIsoDate(lastOrden?.fecha || lastOrden?.created_at || '', frequency);
     const marked = new Set();
@@ -11930,6 +12016,19 @@ const Planificacion = () => {
     if (Object.prototype.hasOwnProperty.call(preventiveOverrides, key)) return Boolean(preventiveOverrides[key]);
     return estimatedSet.has(week.key);
   };
+  const hasPreventiveOverride = (equipo, week) => Object.prototype.hasOwnProperty.call(preventiveOverrides, preventiveOverrideKey(equipo, week));
+  const groupWeekState = (groupItems, week) => {
+    const state = { marked: false, manual: false, estimated: false };
+    groupItems.forEach(item => {
+      const estimatedSet = estimatedWeeksForEquipo(item);
+      const marked = isPreventiveMarked(item, week, estimatedSet);
+      if (!marked) return;
+      state.marked = true;
+      state.manual = state.manual || hasPreventiveOverride(item, week);
+      state.estimated = state.estimated || estimatedSet.has(week.key);
+    });
+    return state;
+  };
   const togglePreventiveCell = (equipo, week, estimatedSet) => {
     if (!canEdit) return;
     const key = preventiveOverrideKey(equipo, week);
@@ -11937,8 +12036,43 @@ const Planificacion = () => {
     nextOverrides[key] = !isPreventiveMarked(equipo, week, estimatedSet);
     updateData({ ...data, _preventivas: nextOverrides });
   };
-  const groupedEquipos = [...equipos]
+  const uniquePreventiveValues = (values) => Array.from(new Set(values.filter(Boolean).map(value => String(value).trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'es'));
+  const activeClienteIds = new Set(
+    allClientes
+      .filter(cliente => String(cliente.empresaId || '') === String(activeEmpresaId || ''))
+      .map(cliente => String(clienteId(cliente)))
+  );
+  const equiposLicitacionIds = new Set(equipos.map(equipo => String(equipo.licitacion_id || '')).filter(Boolean));
+  const licitacionesWithEquipos = licitaciones.filter(licitacion => equiposLicitacionIds.has(String(licitacion.id || '')));
+  const empresaScopedLicitaciones = activeEmpresaId && activeClienteIds.size > 0
+    ? licitacionesWithEquipos.filter(licitacion => activeClienteIds.has(String(licitacion.cliente_id || '')))
+    : licitacionesWithEquipos;
+  const activeLicitaciones = (empresaScopedLicitaciones.length > 0 ? empresaScopedLicitaciones : licitacionesWithEquipos)
+    .sort((a, b) => String(a.id_licitacion || a.name || '').localeCompare(String(b.id_licitacion || b.name || ''), 'es'));
+  const activeLicitacionIds = new Set(activeLicitaciones.map(licitacion => String(licitacion.id)));
+  const preventiveBaseEquipos = equipos.filter(equipo => (
+    (equipo.tipo_equipo || '').trim() &&
+    (activeLicitacionIds.size === 0 || activeLicitacionIds.has(String(equipo.licitacion_id || '')))
+  ));
+  const filteredForEquipo = preventiveBaseEquipos.filter(equipo =>
+    !preventiveFilters.licitacionId || String(equipo.licitacion_id || '') === String(preventiveFilters.licitacionId)
+  );
+  const filteredForMarca = filteredForEquipo.filter(equipo =>
+    !preventiveFilters.equipo || normalizeKey(equipo.tipo_equipo) === normalizeKey(preventiveFilters.equipo)
+  );
+  const filteredForModelo = filteredForMarca.filter(equipo =>
+    !preventiveFilters.marca || normalizeKey(equipo.marca) === normalizeKey(preventiveFilters.marca)
+  );
+  const preventiveEquipoOptions = uniquePreventiveValues(filteredForEquipo.map(equipo => equipo.tipo_equipo));
+  const preventiveMarcaOptions = uniquePreventiveValues(filteredForMarca.map(equipo => equipo.marca));
+  const preventiveModeloOptions = uniquePreventiveValues(filteredForModelo.map(equipo => equipo.modelo));
+  const groupedEquipos = [...preventiveBaseEquipos]
     .filter(equipo => (equipo.tipo_equipo || '').trim())
+    .filter(equipo => !preventiveFilters.licitacionId || String(equipo.licitacion_id || '') === String(preventiveFilters.licitacionId))
+    .filter(equipo => !preventiveFilters.equipo || normalizeKey(equipo.tipo_equipo) === normalizeKey(preventiveFilters.equipo))
+    .filter(equipo => !preventiveFilters.marca || normalizeKey(equipo.marca) === normalizeKey(preventiveFilters.marca))
+    .filter(equipo => !preventiveFilters.modelo || normalizeKey(equipo.modelo) === normalizeKey(preventiveFilters.modelo))
     .sort((a, b) => [
       a.tipo_equipo,
       a.marca,
@@ -11954,7 +12088,8 @@ const Planificacion = () => {
     ].map(value => value || '').join('|'), 'es'));
   const preventiveGroupKey = (equipo) => [equipo.tipo_equipo, equipo.marca, equipo.modelo].map(value => normalizeEquipmentMatchValue(value)).join('|');
   const togglePreventiveGroup = (groupKey) => {
-    setCollapsedPreventiveGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }));
+    const isCollapsed = collapsedPreventiveGroups[groupKey] !== false;
+    setCollapsedPreventiveGroups(prev => ({ ...prev, [groupKey]: !isCollapsed }));
   };
   const resetPreventivePeriod = () => {
     const now = new Date();
@@ -12139,7 +12274,10 @@ const Planificacion = () => {
                 <input
                   type="number"
                   value={preventiveYear}
-                  onChange={e => setPreventiveYear(Number(e.target.value) || new Date().getFullYear())}
+                  onChange={e => {
+                    const nextYear = Number(e.target.value);
+                    if (Number.isFinite(nextYear) && nextYear >= 1900 && nextYear <= 2200) setPreventiveYear(nextYear);
+                  }}
                   className="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   aria-label="Filtrar año de preventivas"
                 />
@@ -12150,6 +12288,57 @@ const Planificacion = () => {
                   Mes actual
                 </button>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Licitación</span>
+                <select
+                  value={preventiveFilters.licitacionId}
+                  onChange={e => setPreventiveFilter('licitacionId', e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="">Todas</option>
+                  {activeLicitaciones.map(licitacion => (
+                    <option key={licitacion.id} value={licitacion.id}>
+                      {licitacion.id_licitacion ? `${licitacion.id_licitacion} - ${licitacion.name}` : licitacion.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Equipo</span>
+                <select
+                  value={preventiveFilters.equipo}
+                  onChange={e => setPreventiveFilter('equipo', e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="">Todos</option>
+                  {preventiveEquipoOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Marca</span>
+                <select
+                  value={preventiveFilters.marca}
+                  onChange={e => setPreventiveFilter('marca', e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="">Todas</option>
+                  {preventiveMarcaOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Modelo</span>
+                <select
+                  value={preventiveFilters.modelo}
+                  onChange={e => setPreventiveFilter('modelo', e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="">Todos</option>
+                  {preventiveModeloOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
             </div>
 
             <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
@@ -12186,7 +12375,7 @@ const Planificacion = () => {
                   {groupedEquipos.length === 0 && (
                     <tr>
                       <td colSpan={preventiveWeeks.length + 5} className="px-6 py-12 text-center text-slate-400 italic">
-                        No hay equipos registrados. Agrega equipos desde Mantenedores / Equipos.
+                        No hay equipos para los filtros seleccionados.
                       </td>
                     </tr>
                   )}
@@ -12194,14 +12383,15 @@ const Planificacion = () => {
                     const previous = groupedEquipos[index - 1];
                     const groupKey = preventiveGroupKey(equipo);
                     const showGroup = !previous || preventiveGroupKey(previous) !== groupKey;
-                    const collapsed = Boolean(collapsedPreventiveGroups[groupKey]);
+                    const collapsed = collapsedPreventiveGroups[groupKey] !== false;
                     if (!showGroup && collapsed) return null;
+                    const groupItems = showGroup ? groupedEquipos.filter(item => preventiveGroupKey(item) === groupKey) : [];
                     const estimatedSet = estimatedWeeksForEquipo(equipo);
                     return (
                       <React.Fragment key={preventiveEquipoId(equipo)}>
                         {showGroup && (
                           <tr className="bg-slate-100/80">
-                            <td colSpan={preventiveWeeks.length + 5} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                            <td colSpan={5} className="sticky left-0 z-20 bg-slate-100 border-r border-slate-200 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-600">
                               <button
                                 type="button"
                                 onClick={() => togglePreventiveGroup(groupKey)}
@@ -12212,6 +12402,27 @@ const Planificacion = () => {
                                 <span>{equipo.tipo_equipo || 'Equipo'} / {equipo.marca || 'Sin marca'} / {equipo.modelo || 'Sin modelo'}</span>
                               </button>
                             </td>
+                            {preventiveWeeks.map(week => {
+                              const state = groupWeekState(groupItems, week);
+                              return (
+                                <td key={week.key} className="border-r border-slate-200 px-1 py-1 text-center">
+                                  {state.marked ? (
+                                    <span
+                                      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
+                                        state.manual
+                                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                      }`}
+                                      title={state.manual ? 'Grupo con mantención marcada manualmente' : 'Grupo con mantención estimada por frecuencia'}
+                                    >
+                                      <Wrench size={13} />
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex h-7 w-7 items-center justify-center text-slate-200">-</span>
+                                  )}
+                                </td>
+                              );
+                            })}
                           </tr>
                         )}
                         {!collapsed && (
@@ -12226,9 +12437,15 @@ const Planificacion = () => {
                               const hasOverride = Object.prototype.hasOwnProperty.call(preventiveOverrides, overrideKey);
                               const marked = isPreventiveMarked(equipo, week, estimatedSet);
                               const estimated = estimatedSet.has(week.key);
+                              const frequency = preventiveFrequencyMonths(equipo);
+                              const lastPreventive = lastPreventiveForEquipo(equipo);
                               const title = marked
                                 ? `${hasOverride ? 'Marcada manualmente' : 'Mantención preventiva estimada'}`
-                                : `${canEdit ? 'Marcar mantención preventiva' : 'Sin mantención preventiva'}`;
+                                : frequency && lastPreventive
+                                ? `${canEdit ? 'Marcar mantención preventiva' : 'Sin mantención preventiva'} - última preventiva ${formatPdfDate(lastPreventive.fecha || lastPreventive.created_at)}, frecuencia ${frequency} mes(es)`
+                                : !frequency
+                                ? 'Sin frecuencia de mantenimiento en este equipo'
+                                : 'Sin mantenimiento preventivo previo coincidente';
                               return (
                                 <td key={week.key} className="border-r border-slate-100 px-1 py-1 text-center">
                                   <button
