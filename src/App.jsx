@@ -1648,14 +1648,6 @@ const NuevoRegistro = () => {
       if (match) {
         newData.modelo = match.modelo || newData.modelo;
       }
-      const hasMatchingInventario = !newData.numeroInventario || availableEquipos.some(e =>
-        sameText(e.tipo_equipo, newData.tipoEquipo) &&
-        sameText(e.marca, newData.marca) &&
-        (!newData.modelo || sameText(e.modelo, newData.modelo)) &&
-        sameText(e.numero_serie, value) &&
-        sameText(e.numero_inventario, newData.numeroInventario)
-      );
-      if (!hasMatchingInventario) newData.numeroInventario = '';
     }
     if (field === 'numeroInventario') {
       const match = availableEquipos.find(e =>
@@ -1667,14 +1659,6 @@ const NuevoRegistro = () => {
       if (match) {
         newData.modelo = match.modelo || newData.modelo;
       }
-      const hasMatchingSerie = !newData.numeroSerie || availableEquipos.some(e =>
-        sameText(e.tipo_equipo, newData.tipoEquipo) &&
-        sameText(e.marca, newData.marca) &&
-        (!newData.modelo || sameText(e.modelo, newData.modelo)) &&
-        sameText(e.numero_inventario, value) &&
-        sameText(e.numero_serie, newData.numeroSerie)
-      );
-      if (!hasMatchingSerie) newData.numeroSerie = '';
     }
     setFormData(newData);
   };
