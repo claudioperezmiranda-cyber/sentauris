@@ -11109,7 +11109,7 @@ const normalizeActivoFijoComputed = (asset = {}, fechaCierre = '') => {
   const depAcumTributaria = roundMoney(Math.min(depreciableBase, depTributaria * mesesDepreciados));
   const depAcumIfrsMesAnterior = roundMoney(Math.max(0, depAcumIfrs - depIfrsMensual));
   const depAcumTributariaMesAnterior = roundMoney(Math.max(0, depAcumTributaria - depTributaria));
-  const valorLibroIfrs = roundMoney(Math.max(valorResidual, costoHistorico - depAcumIfrs));
+  const valorLibroIfrs = roundMoney(costoHistorico - depAcumIfrs);
   const valorTributario = roundMoney(Math.max(valorResidual, costoHistorico - depAcumTributaria));
   const factorCm = toAmount(asset.factorCm);
   const valorTributarioCorregido = roundMoney(factorCm > 0 ? valorTributario * factorCm : valorTributario);
@@ -11167,7 +11167,6 @@ const ActivosFijosContabilidad = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [draft, setDraft] = useState(emptyActivoFijo);
   const [error, setError] = useState('');
-  const [isCentralizeOpen, setIsCentralizeOpen] = useState(false);
   const [fechaCierre, setFechaCierre] = useState(accountingDate());
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => {
@@ -11292,7 +11291,6 @@ const ActivosFijosContabilidad = () => {
           <p className="mt-2 text-sm text-slate-500">Registro de activos con los mismos campos operativos definidos en la planilla de control.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" icon={FileText} onClick={() => setIsCentralizeOpen(true)}>Centralizar depreciacion</Button>
           <Button variant="accent" icon={Plus} onClick={() => setIsModalOpen(true)}>Crear activo fijo</Button>
         </div>
       </div>
@@ -11350,6 +11348,14 @@ const ActivosFijosContabilidad = () => {
                 document.body
               )}
             </div>
+          </div>
+        </div>
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-xs w-full">
+            <Input label="Fecha de cierre" type="date" value={fechaCierre} onChange={e => setFechaCierre(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="accent" icon={CheckCircle} onClick={registrarCentralizacion}>Registrar</Button>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -11441,33 +11447,6 @@ const ActivosFijosContabilidad = () => {
             <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
               <Button variant="secondary" onClick={closeModal}>Cancelar</Button>
               <Button variant="accent" icon={CheckCircle} onClick={saveAsset}>Guardar activo fijo</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isCentralizeOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Centralizacion</p>
-                <h3 className="text-xl font-black text-slate-900">Centralizar depreciacion</h3>
-                <p className="mt-1 text-sm text-slate-500">Se recalcularan depreciaciones IFRS y tributarias usando la fecha de cierre seleccionada.</p>
-              </div>
-              <button type="button" onClick={() => setIsCentralizeOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="px-6 py-5 space-y-4">
-              <Input label="Fecha de cierre" type="date" value={fechaCierre} onChange={e => setFechaCierre(e.target.value)} />
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-600">
-                La depreciacion mensual se calculara como `(Costo Historico - Valor Residual) / Vida Util`, y los acumulados se actualizaran segun los meses transcurridos hasta la fecha de cierre.
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
-              <Button variant="secondary" onClick={() => setIsCentralizeOpen(false)}>Cancelar</Button>
-              <Button variant="accent" icon={CheckCircle} onClick={registrarCentralizacion}>Registrar</Button>
             </div>
           </div>
         </div>
