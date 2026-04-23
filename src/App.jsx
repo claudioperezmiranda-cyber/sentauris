@@ -11168,6 +11168,8 @@ const ActivosFijosContabilidad = () => {
   const [draft, setDraft] = useState(emptyActivoFijo);
   const [error, setError] = useState('');
   const [fechaCierre, setFechaCierre] = useState(accountingDate());
+  const [previewAssets, setPreviewAssets] = useState(null);
+  const [previewFechaCierre, setPreviewFechaCierre] = useState('');
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => {
     const saved = readLocalList(ACTIVOS_FIJOS_COLUMN_STORAGE_KEY);
@@ -11194,7 +11196,9 @@ const ActivosFijosContabilidad = () => {
   const categoriaOptions = dedupeByNormalizedText(planCuentas.filter(belongsToCurrentEmpresa).map(planCuentaLabel));
   const centroCostoOptions = dedupeByNormalizedText(getEmpresaCentrosCosto(currentEmpresa).map(empresaCentroCostoValue));
 
-  const filteredAssets = activosFijos
+  const displayedAssets = previewAssets || activosFijos;
+
+  const filteredAssets = displayedAssets
     .filter(asset => Object.values(asset || {}).join(' ').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
@@ -11263,23 +11267,36 @@ const ActivosFijosContabilidad = () => {
       createdAt: new Date().toISOString(),
     };
     setActivosFijos(prev => [payload, ...prev]);
+    setPreviewAssets(null);
+    setPreviewFechaCierre('');
     closeModal();
   };
 
-  const registrarCentralizacion = () => {
+  const actualizarCentralizacion = () => {
     if (!fechaCierre) {
       setError('Debe seleccionar una fecha de cierre para centralizar la depreciación.');
       return;
     }
-    setActivosFijos(prev => prev.map(asset => normalizeActivoFijoComputed(asset, fechaCierre)));
+    setPreviewAssets(activosFijos.map(asset => normalizeActivoFijoComputed(asset, fechaCierre)));
+    setPreviewFechaCierre(fechaCierre);
     setError('');
-    setIsCentralizeOpen(false);
+  };
+
+  const registrarCentralizacion = () => {
+    if (!previewAssets) {
+      setError('Primero debe actualizar los calculos con la fecha de cierre seleccionada.');
+      return;
+    }
+    setActivosFijos(previewAssets);
+    setPreviewAssets(null);
+    setPreviewFechaCierre('');
+    setError('');
   };
 
   const summary = {
-    total: activosFijos.length,
-    vigentes: activosFijos.filter(asset => normalizeKey(asset.estado) === 'vigente').length,
-    valorLibro: activosFijos.reduce((sum, asset) => sum + toAmount(asset.valorLibroIfrs), 0),
+    total: displayedAssets.length,
+    vigentes: displayedAssets.filter(asset => normalizeKey(asset.estado) === 'vigente').length,
+    valorLibro: displayedAssets.reduce((sum, asset) => sum + toAmount(asset.valorLibroIfrs), 0),
   };
 
   return (
@@ -11351,11 +11368,19 @@ const ActivosFijosContabilidad = () => {
           </div>
         </div>
         <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-xs w-full">
-            <Input label="Fecha de cierre" type="date" value={fechaCierre} onChange={e => setFechaCierre(e.target.value)} />
+          <div className="flex flex-col gap-1">
+            <div className="max-w-xs w-full">
+              <Input label="Fecha de cierre" type="date" value={fechaCierre} onChange={e => setFechaCierre(e.target.value)} />
+            </div>
+            <p className="text-xs text-slate-500">
+              {previewAssets && previewFechaCierre
+                ? `Calculos actualizados con fecha de cierre ${formatPdfDate(previewFechaCierre)}. Presiona Registrar para guardar.`
+                : 'Indique la fecha de cierre y luego seleccione Actualizar para recalcular.'}
+            </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="accent" icon={CheckCircle} onClick={registrarCentralizacion}>Registrar</Button>
+            <Button variant="secondary" icon={ArrowUpDown} onClick={actualizarCentralizacion}>Actualizar</Button>
+            <Button variant="accent" icon={CheckCircle} onClick={registrarCentralizacion} disabled={!previewAssets}>Registrar</Button>
           </div>
         </div>
         <div className="overflow-x-auto">
