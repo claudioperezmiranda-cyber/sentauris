@@ -2,6 +2,20 @@ import { supabase } from '../../../supabaseClient.js';
 
 const MODEL_NAME = 'local-template-engine-v1';
 
+const isMissingDiagnosticsTableError = (error) => {
+  const message = String(error?.message || error || '').toLowerCase();
+  return (
+    message.includes('schema cache') ||
+    message.includes('could not find the table') ||
+    message.includes('relation') ||
+    message.includes('does not exist')
+  ) && (
+    message.includes('technical_findings') ||
+    message.includes('selected_catalog_items') ||
+    message.includes('generated_diagnostics')
+  );
+};
+
 const buildGeneratedDiagnosticsPayload = ({ workOrderId, report, inputSnapshot, generatedByModel }) => ({
   work_order_id: String(workOrderId),
   diagnosis_text: report.diagnosisText,
@@ -35,55 +49,69 @@ export const saveGeneratedDiagnostic = async ({
     updated_at: new Date().toISOString(),
   };
 
-  const { data: findingRow, error: findingsError } = await supabase
-    .from('technical_findings')
-    .insert([findingsPayload])
-    .select()
-    .single();
+  try {
+    const { data: findingRow, error: findingsError } = await supabase
+      .from('technical_findings')
+      .insert([findingsPayload])
+      .select()
+      .single();
 
-  if (findingsError) throw findingsError;
+    if (findingsError) throw findingsError;
 
-  const { error: deleteSelectedError } = await supabase
-    .from('selected_catalog_items')
-    .delete()
-    .eq('work_order_id', workOrderId);
-
-  if (deleteSelectedError) throw deleteSelectedError;
-
-  if (normalizedItems.length > 0) {
-    const selectedRows = normalizedItems.map((item) => ({
-      work_order_id: String(workOrderId),
-      catalog_item_id: item.id != null ? String(item.id) : null,
-      quantity: item.quantity,
-      optional_note: item.optionalNote || null,
-      created_at: new Date().toISOString(),
-    }));
-
-    const { error: selectedItemsError } = await supabase
+    const { error: deleteSelectedError } = await supabase
       .from('selected_catalog_items')
-      .insert(selectedRows);
+      .delete()
+      .eq('work_order_id', workOrderId);
 
-    if (selectedItemsError) throw selectedItemsError;
+    if (deleteSelectedError) throw deleteSelectedError;
+
+    if (normalizedItems.length > 0) {
+      const selectedRows = normalizedItems.map((item) => ({
+        work_order_id: String(workOrderId),
+        catalog_item_id: item.id != null ? String(item.id) : null,
+        quantity: item.quantity,
+        optional_note: item.optionalNote || null,
+        created_at: new Date().toISOString(),
+      }));
+
+      const { error: selectedItemsError } = await supabase
+        .from('selected_catalog_items')
+        .insert(selectedRows);
+
+      if (selectedItemsError) throw selectedItemsError;
+    }
+
+    const generatedPayload = buildGeneratedDiagnosticsPayload({
+      workOrderId,
+      report,
+      inputSnapshot,
+    });
+
+    const { data: generatedDiagnostic, error: generatedError } = await supabase
+      .from('generated_diagnostics')
+      .upsert([generatedPayload], { onConflict: 'work_order_id' })
+      .select()
+      .single();
+
+    if (generatedError) throw generatedError;
+
+    return {
+      findingRow,
+      generatedDiagnostic,
+      skipped: false,
+    };
+  } catch (error) {
+    if (isMissingDiagnosticsTableError(error)) {
+      console.warn('Persistencia extendida de diagnósticos omitida: faltan tablas nuevas en Supabase.', error);
+      return {
+        findingRow: null,
+        generatedDiagnostic: null,
+        skipped: true,
+        reason: 'missing_diagnostics_tables',
+      };
+    }
+    throw error;
   }
-
-  const generatedPayload = buildGeneratedDiagnosticsPayload({
-    workOrderId,
-    report,
-    inputSnapshot,
-  });
-
-  const { data: generatedDiagnostic, error: generatedError } = await supabase
-    .from('generated_diagnostics')
-    .upsert([generatedPayload], { onConflict: 'work_order_id' })
-    .select()
-    .single();
-
-  if (generatedError) throw generatedError;
-
-  return {
-    findingRow,
-    generatedDiagnostic,
-  };
 };
 
 export default saveGeneratedDiagnostic;
