@@ -704,6 +704,7 @@ const APP_DATA_KEYS = {
   rendiciones: 'sentauris_rendiciones',
   productos_rendiciones: 'sentauris_productos_rendiciones',
   comprobantes: 'sentauris_comprobantes',
+  activos_fijos: 'sentauris_activos_fijos',
   registro_compras: 'sentauris_registro_compras',
   empresas: 'sentauris_empresas',
   plan_cuentas: 'sentauris_plan_cuentas',
@@ -904,6 +905,7 @@ const ERPProvider = ({ children }) => {
   const [rendiciones, setRendiciones] = useState(() => readLocalList('sentauris_rendiciones'));
   const [productosRendiciones, setProductosRendiciones] = useState(() => readLocalList('sentauris_productos_rendiciones'));
   const [comprobantes, setComprobantes] = useState(() => readLocalList('sentauris_comprobantes'));
+  const [activosFijos, setActivosFijos] = useState(() => readLocalList('sentauris_activos_fijos'));
   const [registroCompras, setRegistroCompras] = useState(() => readLocalList('sentauris_registro_compras'));
   const [usuarios, setUsuarios] = useState(() => readLocalList('sentauris_usuarios'));
   const [empresas, setEmpresas] = useState(() => readLocalList('sentauris_empresas'));
@@ -973,6 +975,7 @@ const ERPProvider = ({ children }) => {
             rendiciones: setRendiciones,
             productos_rendiciones: setProductosRendiciones,
             comprobantes: setComprobantes,
+            activos_fijos: setActivosFijos,
             registro_compras: setRegistroCompras,
             empresas: setEmpresas,
             plan_cuentas: setPlanCuentas,
@@ -1062,6 +1065,10 @@ const ERPProvider = ({ children }) => {
   useEffect(() => {
     persistAppData('comprobantes', APP_DATA_KEYS.comprobantes, comprobantes);
   }, [comprobantes]);
+
+  useEffect(() => {
+    persistAppData('activos_fijos', APP_DATA_KEYS.activos_fijos, activosFijos);
+  }, [activosFijos]);
 
   useEffect(() => {
     persistAppData('registro_compras', APP_DATA_KEYS.registro_compras, registroCompras);
@@ -1195,6 +1202,7 @@ const ERPProvider = ({ children }) => {
       rendiciones, setRendiciones,
       productosRendiciones, setProductosRendiciones,
       comprobantes, setComprobantes,
+      activosFijos, setActivosFijos,
       registroCompras, setRegistroCompras,
       usuarios, setUsuarios,
       empresas, setEmpresas, activeEmpresaId, setActiveEmpresaId,
@@ -7333,6 +7341,7 @@ const MODULES_TREE = [
   {
     id: 'contabilidad', label: 'Contabilidad', sub: [
       { id: 'contabilidad-comprobantes', label: 'Comprobantes' },
+      { id: 'contabilidad-activos-fijos', label: 'Activos Fijos' },
       { id: 'contabilidad-informes-tributarios', label: 'Informes Tributarios' },
       { id: 'contabilidad-analiticos', label: 'Analiticos' },
       { id: 'contabilidad-estados-financieros', label: 'Estados Financieros' },
@@ -11022,6 +11031,247 @@ const buildBalanceHtml = (rows, filters) => {
     </tbody></table></body></html>`;
 };
 
+const ACTIVOS_FIJOS_FIELDS = [
+  { key: 'idActivo', label: 'ID Activo', type: 'text', required: true },
+  { key: 'nombreActivo', label: 'Nombre Activo', type: 'text', required: true },
+  { key: 'categoria', label: 'Categoria', type: 'text' },
+  { key: 'fechaAdquisicion', label: 'Fecha Adquisicion', type: 'date' },
+  { key: 'fechaInicioUso', label: 'Fecha Inicio Uso', type: 'date' },
+  { key: 'costoHistorico', label: 'Costo Historico', type: 'number', step: '0.01' },
+  { key: 'valorResidual', label: 'Valor Residual', type: 'number', step: '0.01' },
+  { key: 'vidaUtilIfrsMeses', label: 'Vida Util IFRS (meses)', type: 'number', step: '1' },
+  { key: 'vidaUtilTributariaMeses', label: 'Vida Util Tributaria (Meses)', type: 'number', step: '1' },
+  { key: 'metodoIfrs', label: 'Metodo IFRS', type: 'select', options: ['Lineal', 'Instantaneo', 'Acelerado'] },
+  { key: 'metodoTributario', label: 'Metodo Tributario', type: 'select', options: ['Lineal', 'Instantaneo', 'Acelerado'] },
+  { key: 'centroCosto', label: 'Centro de Costo', type: 'text' },
+  { key: 'estado', label: 'Estado', type: 'select', options: ['Vigente', 'Depreciado', 'Baja', 'En revision'] },
+  { key: 'valorLibroIfrs', label: 'Valor Libro IFRS', type: 'number', step: '0.01' },
+  { key: 'depIfrsMensual', label: 'Dep. IFRS Mensual', type: 'number', step: '0.01' },
+  { key: 'depAcumIfrs', label: 'Dep. Acum IFRS', type: 'number', step: '0.01' },
+  { key: 'depAcumIfrsMesAnterior', label: 'Dep. Acum IFRS Mes Anterior', type: 'number', step: '0.01' },
+  { key: 'depTributaria', label: 'Dep. Tributaria', type: 'number', step: '0.01' },
+  { key: 'depAcumTributaria', label: 'Dep Acum Tributaria', type: 'number', step: '0.01' },
+  { key: 'depAcumTributariaMesAnterior', label: 'Dep Acum Tributaria Mes Anterior', type: 'number', step: '0.01' },
+  { key: 'valorTributario', label: 'Valor Tributario', type: 'number', step: '0.01' },
+  { key: 'diferenciaTemp', label: 'Diferencia Temp', type: 'number', step: '0.01' },
+  { key: 'factorCm', label: 'Factor CM', type: 'number', step: '0.0001' },
+  { key: 'valorTributarioCorregido', label: 'Valor Tributario Corregido', type: 'number', step: '0.01' },
+];
+
+const emptyActivoFijo = () => ({
+  id: '',
+  idActivo: '',
+  nombreActivo: '',
+  categoria: '',
+  fechaAdquisicion: '',
+  fechaInicioUso: '',
+  costoHistorico: '',
+  valorResidual: '',
+  vidaUtilIfrsMeses: '',
+  vidaUtilTributariaMeses: '',
+  metodoIfrs: 'Lineal',
+  metodoTributario: 'Lineal',
+  centroCosto: '',
+  estado: 'Vigente',
+  valorLibroIfrs: '',
+  depIfrsMensual: '',
+  depAcumIfrs: '',
+  depAcumIfrsMesAnterior: '',
+  depTributaria: '',
+  depAcumTributaria: '',
+  depAcumTributariaMesAnterior: '',
+  valorTributario: '',
+  diferenciaTemp: '',
+  factorCm: '',
+  valorTributarioCorregido: '',
+});
+
+const ActivosFijosContabilidad = () => {
+  const { activosFijos, setActivosFijos } = useContext(ERPContext);
+  const [search, setSearch] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [draft, setDraft] = useState(emptyActivoFijo);
+  const [error, setError] = useState('');
+
+  const filteredAssets = activosFijos
+    .filter(asset => Object.values(asset || {}).join(' ').toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+  const updateDraft = (field, value) => {
+    setDraft(prev => ({ ...prev, [field]: value }));
+  };
+
+  const closeModal = () => {
+    setDraft(emptyActivoFijo());
+    setError('');
+    setIsModalOpen(false);
+  };
+
+  const saveAsset = () => {
+    if (!draft.idActivo.trim() || !draft.nombreActivo.trim()) {
+      setError('Debe ingresar al menos el ID Activo y el Nombre Activo.');
+      return;
+    }
+    const duplicated = activosFijos.some(asset => normalizeKey(asset.idActivo) === normalizeKey(draft.idActivo));
+    if (duplicated) {
+      setError('Ya existe un activo fijo con ese ID Activo.');
+      return;
+    }
+    const payload = {
+      ...draft,
+      id: `af-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    setActivosFijos(prev => [payload, ...prev]);
+    closeModal();
+  };
+
+  const summary = {
+    total: activosFijos.length,
+    vigentes: activosFijos.filter(asset => normalizeKey(asset.estado) === 'vigente').length,
+    valorLibro: activosFijos.reduce((sum, asset) => sum + toAmount(asset.valorLibroIfrs), 0),
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-2 space-y-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Contabilidad / Activos Fijos</p>
+          <h2 className="text-2xl font-black text-slate-900">Activos Fijos</h2>
+          <p className="mt-2 text-sm text-slate-500">Registro de activos con los mismos campos operativos definidos en la planilla de control.</p>
+        </div>
+        <Button variant="accent" icon={Plus} onClick={() => setIsModalOpen(true)}>Crear activo fijo</Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="p-5">
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Activos registrados</p>
+          <p className="mt-2 text-3xl font-black text-slate-900">{summary.total}</p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Activos vigentes</p>
+          <p className="mt-2 text-3xl font-black text-emerald-600">{summary.vigentes}</p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Valor libro IFRS</p>
+          <p className="mt-2 text-3xl font-black text-slate-900">{money(summary.valorLibro)}</p>
+        </Card>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="relative max-w-md w-full">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por ID, nombre, categoria, centro de costo o estado"
+              className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Campos: {ACTIVOS_FIJOS_FIELDS.length}</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="p-3 text-left">ID Activo</th>
+                <th className="p-3 text-left">Nombre Activo</th>
+                <th className="p-3 text-left">Categoria</th>
+                <th className="p-3 text-left">Fecha Adquisicion</th>
+                <th className="p-3 text-left">Centro de Costo</th>
+                <th className="p-3 text-left">Estado</th>
+                <th className="p-3 text-right">Costo Historico</th>
+                <th className="p-3 text-right">Valor Libro IFRS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredAssets.map(asset => (
+                <tr key={asset.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="p-3 font-semibold text-slate-800">{asset.idActivo || '-'}</td>
+                  <td className="p-3 min-w-64">{asset.nombreActivo || '-'}</td>
+                  <td className="p-3">{asset.categoria || '-'}</td>
+                  <td className="p-3 font-mono">{asset.fechaAdquisicion || '-'}</td>
+                  <td className="p-3">{asset.centroCosto || '-'}</td>
+                  <td className="p-3">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                      normalizeKey(asset.estado) === 'vigente'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : normalizeKey(asset.estado) === 'baja'
+                          ? 'bg-red-50 text-red-700'
+                          : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {asset.estado || '-'}
+                    </span>
+                  </td>
+                  <td className="p-3 text-right font-mono">{money(asset.costoHistorico)}</td>
+                  <td className="p-3 text-right font-mono">{money(asset.valorLibroIfrs)}</td>
+                </tr>
+              ))}
+              {filteredAssets.length === 0 && (
+                <tr>
+                  <td colSpan="8" className="p-10 text-center text-sm text-slate-400">
+                    No hay activos fijos registrados todavia. Usa el boton Crear para ingresar el primer activo.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-6xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Nuevo activo fijo</p>
+                <h3 className="text-xl font-black text-slate-900">Crear registro de activo fijo</h3>
+                <p className="mt-1 text-sm text-slate-500">Se solicitaran los mismos datos presentes en la planilla de activos fijos.</p>
+              </div>
+              <button type="button" onClick={closeModal} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+              {error && (
+                <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                  {error}
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {ACTIVOS_FIJOS_FIELDS.map(field => (
+                  <div key={field.key} className={field.key === 'nombreActivo' ? 'md:col-span-2 xl:col-span-2' : ''}>
+                    {field.type === 'select' ? (
+                      <Select
+                        label={field.label}
+                        value={draft[field.key] || ''}
+                        onChange={e => updateDraft(field.key, e.target.value)}
+                        options={field.options || []}
+                      />
+                    ) : (
+                      <Input
+                        label={field.label}
+                        type={field.type || 'text'}
+                        value={draft[field.key] || ''}
+                        onChange={e => updateDraft(field.key, e.target.value)}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+              <Button variant="secondary" onClick={closeModal}>Cancelar</Button>
+              <Button variant="accent" icon={CheckCircle} onClick={saveAsset}>Guardar activo fijo</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const EstadosFinancieros = () => {
   const { comprobantes } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('Balance');
@@ -13132,6 +13382,7 @@ const Sidebar = () => {
     if (item.id.startsWith('contabilidad')) {
       return {
         'Comprobantes': 'contabilidad-comprobantes',
+        'Activos Fijos': 'contabilidad-activos-fijos',
         'Informes Tributarios': 'contabilidad-informes-tributarios',
         'Analiticos': 'contabilidad-analiticos',
         'Estados Financieros': 'contabilidad-estados-financieros',
@@ -13149,7 +13400,7 @@ const Sidebar = () => {
     { id: 'operaciones-registro', label: 'Operaciones', icon: ClipboardList, sub: ['Nuevo Registro', 'Planificacion', 'Historial Preventivo', 'Historial Correctivo', 'Cotizaciones', 'Historial Cotizaciones', 'OC Recibidas', 'Rendiciones', 'Historial Rendiciones'] },
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
-    { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
+    { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Activos Fijos', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
     { id: 'calidad', label: 'Calidad', icon: CheckCircle2 },
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
@@ -13261,6 +13512,7 @@ const Header = () => {
     'abastecimiento-informe-compras': 'Abastecimiento / Informe de Compras',
     'abastecimiento-registro-compras': 'Abastecimiento / Registro de Compras',
     'contabilidad-comprobantes': 'Contabilidad / Comprobantes',
+    'contabilidad-activos-fijos': 'Contabilidad / Activos Fijos',
     'contabilidad-informes-tributarios': 'Contabilidad / Informes Tributarios',
     'contabilidad-analiticos': 'Contabilidad / Analiticos',
     'contabilidad-estados-financieros': 'Contabilidad / Estados Financieros',
@@ -13597,6 +13849,7 @@ const ContentManager = () => {
     'abastecimiento-informe-compras': 'abastecimiento',
     'abastecimiento-registro-compras': 'abastecimiento',
     'contabilidad-comprobantes': 'contabilidad',
+    'contabilidad-activos-fijos': 'contabilidad',
     'contabilidad-informes-tributarios': 'contabilidad',
     'contabilidad-analiticos': 'contabilidad',
     'contabilidad-estados-financieros': 'contabilidad',
@@ -13634,6 +13887,7 @@ const ContentManager = () => {
       case 'abastecimiento-informe-compras': return <AbastecimientoPlaceholder titulo="Informe de Compras" />;
       case 'abastecimiento-registro-compras': return <RegistroCompras />;
       case 'contabilidad-comprobantes': return <ComprobantesContables />;
+      case 'contabilidad-activos-fijos': return <ActivosFijosContabilidad />;
       case 'contabilidad-informes-tributarios': return <InformesTributarios />;
       case 'contabilidad-analiticos': return <AnaliticosContables />;
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
