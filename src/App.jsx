@@ -11162,7 +11162,7 @@ const emptyActivoFijo = () => ({
 });
 
 const ActivosFijosContabilidad = () => {
-  const { activosFijos, setActivosFijos } = useContext(ERPContext);
+  const { activosFijos, setActivosFijos, planCuentas, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [draft, setDraft] = useState(emptyActivoFijo);
@@ -11178,6 +11178,22 @@ const ActivosFijosContabilidad = () => {
   useEffect(() => {
     localStorage.setItem(ACTIVOS_FIJOS_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumnIds));
   }, [visibleColumnIds]);
+
+  const currentEmpresaName = currentEmpresa?.razonSocial || currentEmpresa?.nombreFantasia || '';
+  const belongsToCurrentEmpresa = (item = {}) => {
+    if (!activeEmpresaId) return true;
+    if (item.empresaId || item.empresa_id) return String(item.empresaId || item.empresa_id) === String(activeEmpresaId);
+    if (Array.isArray(item.empresas)) return item.empresas.some(id => String(id) === String(activeEmpresaId));
+    if (Array.isArray(item.empresaConfig) && item.empresaConfig.length > 0) {
+      return item.empresaConfig.some(cfg =>
+        String(cfg.empresaId || cfg.empresa_id || '') === String(activeEmpresaId) ||
+        normalizeKey(cfg.empresa) === normalizeKey(currentEmpresaName)
+      );
+    }
+    return true;
+  };
+  const categoriaOptions = dedupeByNormalizedText(planCuentas.filter(belongsToCurrentEmpresa).map(planCuentaLabel));
+  const centroCostoOptions = dedupeByNormalizedText(getEmpresaCentrosCosto(currentEmpresa).map(empresaCentroCostoValue));
 
   const filteredAssets = activosFijos
     .filter(asset => Object.values(asset || {}).join(' ').toLowerCase().includes(search.toLowerCase()))
@@ -11387,7 +11403,23 @@ const ActivosFijosContabilidad = () => {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {ACTIVOS_FIJOS_CREATE_FIELDS.map(field => (
                   <div key={field.key} className={field.key === 'nombreActivo' ? 'md:col-span-2 xl:col-span-2 2xl:col-span-2' : ''}>
-                    {field.type === 'select' ? (
+                    {field.key === 'categoria' ? (
+                      <ComboInput
+                        label={field.label}
+                        value={draft[field.key] || ''}
+                        onChange={e => updateDraft(field.key, e.target.value)}
+                        options={categoriaOptions}
+                        placeholder={categoriaOptions.length ? 'Seleccionar cuenta del plan' : 'Sin cuentas para empresa activa'}
+                      />
+                    ) : field.key === 'centroCosto' ? (
+                      <ComboInput
+                        label={field.label}
+                        value={draft[field.key] || ''}
+                        onChange={e => updateDraft(field.key, e.target.value)}
+                        options={centroCostoOptions}
+                        placeholder={centroCostoOptions.length ? 'Seleccionar centro de costo' : 'Sin centros para empresa activa'}
+                      />
+                    ) : field.type === 'select' ? (
                       <Select
                         label={field.label}
                         value={draft[field.key] || ''}
