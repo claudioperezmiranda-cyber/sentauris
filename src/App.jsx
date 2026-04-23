@@ -5108,6 +5108,17 @@ const MantenedoresClientesProveedores = () => {
   const [preview, setPreview] = useState([]);
   const [previewErrors, setPreviewErrors] = useState([]);
   const [importResult, setImportResult] = useState(null);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const CLIENTES_TABLE_COLUMNS = [
+    { id: 'rut', label: 'RUT' },
+    { id: 'razonSocial', label: 'Razón Social' },
+    { id: 'nombreFantasia', label: 'Nombre Fantasía' },
+    { id: 'tipoCliente', label: 'Tipo Cliente' },
+    { id: 'tipoProveedor', label: 'Tipo Proveedor' },
+    { id: 'correoComercial', label: 'Correo Comercial' },
+    { id: 'telefono', label: 'Teléfono' },
+  ];
+  const [visibleColumnIds, setVisibleColumnIds] = useState(() => CLIENTES_TABLE_COLUMNS.map(col => col.id));
   const fileInputRef = useRef(null);
   const compactLabelClass = "block text-[10px] font-semibold text-slate-500 uppercase mb-1";
   const compactFieldClass = "w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
@@ -5244,6 +5255,25 @@ const MantenedoresClientesProveedores = () => {
   };
 
   const clearPreview = () => { setPreview([]); setPreviewErrors([]); setImportResult(null); if (fileInputRef.current) fileInputRef.current.value = ''; };
+  const toggleColumn = (columnId) => {
+    setVisibleColumnIds(prev => {
+      if (prev.includes(columnId)) {
+        if (prev.length === 1) return prev;
+        return prev.filter(id => id !== columnId);
+      }
+      return [...prev, columnId];
+    });
+  };
+  const visibleColumns = CLIENTES_TABLE_COLUMNS.filter(col => visibleColumnIds.includes(col.id));
+  const renderClienteCell = (cliente, columnId) => ({
+    rut: cliente.rut || '-',
+    razonSocial: cliente.razonSocial || cliente.name || '-',
+    nombreFantasia: cliente.nombreFantasia || '-',
+    tipoCliente: cliente.tipoCliente || 'No',
+    tipoProveedor: cliente.tipoProveedor || 'No',
+    correoComercial: cliente.correoComercial || cliente.email || '-',
+    telefono: cliente.telefono || '-',
+  }[columnId] || '-');
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
@@ -12849,6 +12879,8 @@ const Sidebar = () => {
     <div
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onPointerEnter={handleMouseEnter}
+      onPointerLeave={handleMouseLeave}
       className={`${effectiveSidebarOpen ? 'w-64' : 'w-20'} bg-slate-950 h-screen transition-all duration-300 flex flex-col fixed left-0 top-0 z-50 text-slate-400 border-r border-slate-800`}
     >
       <div className="p-6 flex items-center gap-3">
