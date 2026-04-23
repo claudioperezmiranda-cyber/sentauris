@@ -36,7 +36,9 @@ export const generateDiagnosticReport = (input) => {
   }
 
   const equipmentLabel = buildEquipmentLabel(input.equipment);
-  const introduction = `Tras la evaluación técnica del ${equipmentLabel}, se identificaron fallas que afectan su funcionamiento, seguridad y condición operativa.`;
+  const introduction = input.promptInstructions
+    ? `Tras la evaluación técnica del ${equipmentLabel}, y conforme al criterio de redacción definido para el informe, se identificaron fallas que afectan su funcionamiento, seguridad y condición operativa.`
+    : `Tras la evaluación técnica del ${equipmentLabel}, se identificaron fallas que afectan su funcionamiento, seguridad y condición operativa.`;
 
   const bulletLines = normalizedItems.map((item, index) => {
     const group = classifyItemGroup(item);
@@ -62,6 +64,7 @@ export const generateDiagnosticReport = (input) => {
     equipment: input.equipment,
     normalizedItems,
     findingsText: input.findingsText,
+    promptInstructions: input.promptInstructions,
   });
 
   const diagnosisTitle = 'DIAGNÓSTICO TÉCNICO';

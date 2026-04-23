@@ -2228,6 +2228,7 @@ const MantencionCorrectiva = () => {
       serviceArea: formData.ubicacionArea || ''
     },
     findingsText: diagnostico.text,
+    promptInstructions: parametros?.promptConclusionCorrectiva || DEFAULT_CORRECTIVA_CONCLUSION_PROMPT,
     selectedItems: repuestosSeleccionados.map((item) => ({
       id: item.id,
       code: item.sku || item.part_number || item.name || 'SIN-CODIGO',

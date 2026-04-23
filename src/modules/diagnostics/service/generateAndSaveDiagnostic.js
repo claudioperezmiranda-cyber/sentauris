@@ -24,6 +24,7 @@ export const generateAndSaveDiagnostic = async ({
       workOrderId: input.workOrderId,
       equipment: input.equipment,
       findingsText: input.findingsText,
+      promptInstructions: input.promptInstructions || '',
       selectedItems: report.normalizedItems,
     },
   });

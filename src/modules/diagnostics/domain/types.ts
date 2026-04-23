@@ -30,6 +30,7 @@ export interface DiagnosticReportInput {
   workOrderId: string;
   equipment: DiagnosticEquipmentContext;
   findingsText: string;
+  promptInstructions?: string;
   selectedItems: DiagnosticSelectedItemInput[];
 }
 

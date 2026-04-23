@@ -196,6 +196,26 @@ const buildContextClause = ({ findingsText, optionalNote }) => {
   return ' ';
 };
 
+const getPromptProfile = (promptInstructions = '') => {
+  const prompt = normalizeKey(promptInstructions);
+  return {
+    wantsDetailed: /(detall|ampli|profund|complet|diagnostico)/.test(prompt),
+    wantsCause: /(causa|causal|origen|motivo)/.test(prompt),
+    wantsNaturalTone: /(natural|fluido)/.test(prompt),
+    avoidLiteralFindings: /(sin citar textualmente|no citar textualmente|sin citar|no citar)/.test(prompt),
+    emphasizeSolution: /(solucion|accion correctiva|repar|reemplaz)/.test(prompt),
+  };
+};
+
+const buildPromptAlignedFindings = (findingsText = '', promptProfile = {}) => {
+  const findings = cleanText(findingsText);
+  if (!findings) return '';
+  if (promptProfile.avoidLiteralFindings) {
+    return 'los hallazgos técnicos levantados durante la inspección';
+  }
+  return findings;
+};
+
 export const buildFailureDescription = ({ item, findingsText, group, variationIndex = 0 }) => {
   const groupConfig = GROUP_CONFIG[group] || GROUP_CONFIG.generic;
   const opener = pickVariant(groupConfig.failures, variationIndex);
@@ -216,13 +236,14 @@ export const buildImpactText = ({ group, variationIndex = 0 }) => {
   return pickVariant(groupConfig.impact, variationIndex);
 };
 
-export const buildConclusion = ({ equipment = {}, normalizedItems = [], findingsText = '' }) => {
+export const buildConclusion = ({ equipment = {}, normalizedItems = [], findingsText = '', promptInstructions = '' }) => {
   const equipmentName = cleanText([
     equipment.name || 'equipo',
     equipment.brand || '',
     equipment.model || '',
   ].filter(Boolean).join(' '));
   const area = cleanText(equipment.serviceArea || '');
+  const promptProfile = getPromptProfile(promptInstructions);
   const criticalGroups = new Set(['electrical', 'gases', 'motors', 'hydraulic']);
   const totalQuantity = normalizedItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
   const hasCriticalItem = normalizedItems.some((item) => criticalGroups.has(classifyItemGroup(item)));
@@ -241,17 +262,31 @@ export const buildConclusion = ({ equipment = {}, normalizedItems = [], findings
       ? 'mediante la ejecución de las reparaciones técnicas indicadas'
       : 'mediante el reemplazo de los componentes comprometidos';
 
-  const context = cleanText(findingsText)
-    ? ` Los hallazgos técnicos consignados evidencian ${cleanText(findingsText)}.`
+  const findingsSummary = buildPromptAlignedFindings(findingsText, promptProfile);
+  const context = findingsSummary
+    ? ` Los hallazgos técnicos consignados evidencian ${findingsSummary}.`
     : '';
 
-  return `El ${equipmentName}${area ? ` del área ${area}` : ''} ${status}.${context} Para restablecer condiciones adecuadas de operatividad, seguridad y confiabilidad, deben ejecutarse las acciones correctivas indicadas, ${scope}, verificando posteriormente su respuesta funcional antes de su retorno al servicio.`;
+  const causalClause = promptProfile.wantsCause
+    ? ' Desde el punto de vista causal, la condición observada es compatible con desgaste operacional, fatiga de material, desajuste funcional o deterioro progresivo del conjunto intervenido.'
+    : '';
+
+  const solutionClause = promptProfile.emphasizeSolution
+    ? ' La intervención debe contemplar ejecución técnica controlada, validación posterior y registro de conformidad funcional del equipo.'
+    : '';
+
+  const detailClause = promptProfile.wantsDetailed
+    ? ' La criticidad operativa detectada exige verificar el subsistema asociado, confirmar eliminación de la falla y comprobar estabilidad de funcionamiento en condiciones normales de servicio.'
+    : '';
+
+  return `El ${equipmentName}${area ? ` del área ${area}` : ''} ${status}.${context}${causalClause} Para restablecer condiciones adecuadas de operatividad, seguridad y confiabilidad, deben ejecutarse las acciones correctivas indicadas, ${scope}, verificando posteriormente su respuesta funcional antes de su retorno al servicio.${detailClause}${solutionClause}`;
 };
 
 export const diagnosticsHelpers = {
   cleanText,
   normalizeKey,
   toTitleCase,
+  getPromptProfile,
   normalizeSelectedItems,
   classifyItemGroup,
   buildFailureDescription,

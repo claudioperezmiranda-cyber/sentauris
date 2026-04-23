@@ -11,6 +11,7 @@ export const buildFrontendDiagnosticPreview = ({ workOrderId, formData, selected
       serviceArea: formData.ubicacionArea || '',
     },
     findingsText,
+    promptInstructions: formData.promptConclusionCorrectiva || '',
     selectedItems: selectedItems.map((item) => ({
       id: item.id,
       code: item.sku || item.part_number || item.code || 'SIN-CODIGO',
