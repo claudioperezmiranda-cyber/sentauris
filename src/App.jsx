@@ -839,6 +839,7 @@ const ERPProvider = ({ children }) => {
     : MOCK_USER;
   const [activeModule, setActiveModule] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window === 'undefined' ? true : window.innerWidth >= 1024));
+  const [sidebarHoverOpen, setSidebarHoverOpen] = useState(false);
   const [clientes, setClientes] = useState([]);
   const [licitaciones, setLicitaciones] = useState([]);
   const [repuestos, setRepuestos] = useState([]);
@@ -1127,10 +1128,12 @@ const ERPProvider = ({ children }) => {
     return data;
   };
 
+  const effectiveSidebarOpen = sidebarOpen || sidebarHoverOpen;
+
   return (
     <ERPContext.Provider value={{
       currentUser, loggedInUser, setLoggedInUser, logout,
-      activeModule, setActiveModule, sidebarOpen, setSidebarOpen,
+      activeModule, setActiveModule, sidebarOpen, setSidebarOpen, sidebarHoverOpen, setSidebarHoverOpen, effectiveSidebarOpen,
       formData, setFormData, generateFolio, saveOrden, resetRegistrationForm,
       clientes, setClientes, licitaciones, setLicitaciones, equipos, setEquipos,
       repuestos, setRepuestos, cotizacionDraft, setCotizacionDraft,
@@ -12628,7 +12631,7 @@ const AccessDenied = () => (
 
 // --- LAYOUT ---
 const Sidebar = () => {
-  const { activeModule, setActiveModule, setCotizacionDraft, sidebarOpen, setSidebarOpen, currentUser, loggedInUser, logout, activeEmpresaId, empresas } = useContext(ERPContext);
+  const { activeModule, setActiveModule, setCotizacionDraft, sidebarOpen, setSidebarOpen, sidebarHoverOpen, setSidebarHoverOpen, effectiveSidebarOpen, currentUser, loggedInUser, logout, activeEmpresaId, empresas } = useContext(ERPContext);
   const [expandedMenus, setExpandedMenus] = useState(() => new Set());
   const toggleExpand = (id) => setExpandedMenus(prev => {
     const next = new Set(prev);
@@ -12734,12 +12737,12 @@ const Sidebar = () => {
         <button onClick={handleParentClick}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group ${isActiveParent ? 'bg-blue-600 text-white' : 'hover:bg-slate-900 hover:text-white'}`}>
           <item.icon size={20} />
-          {sidebarOpen && <span className="text-sm font-semibold flex-1 text-left">{item.label}</span>}
-          {sidebarOpen && item.sub && (
+          {effectiveSidebarOpen && <span className="text-sm font-semibold flex-1 text-left">{item.label}</span>}
+          {effectiveSidebarOpen && item.sub && (
             <ChevronLeft size={14} className={`transition-transform duration-200 ${isExpanded ? '-rotate-90' : 'rotate-180'}`} />
           )}
         </button>
-        {sidebarOpen && item.sub && isExpanded && (
+        {effectiveSidebarOpen && item.sub && isExpanded && (
           <div className="ml-9 space-y-1 border-l border-slate-800 pl-3">
             {visibleSubs(item).map(s => {
               const sid = subIdFor(item, s);
@@ -12756,11 +12759,27 @@ const Sidebar = () => {
     );
   });
 
+  const handleMouseEnter = () => {
+    if (!sidebarOpen && typeof window !== 'undefined' && window.innerWidth >= 1024) {
+      setSidebarHoverOpen(true);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (sidebarHoverOpen) {
+      setSidebarHoverOpen(false);
+    }
+  };
+
   return (
-    <div className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-slate-950 h-screen transition-all duration-300 flex flex-col fixed left-0 top-0 z-50 text-slate-400 border-r border-slate-800`}>
+    <div
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className={`${effectiveSidebarOpen ? 'w-64' : 'w-20'} bg-slate-950 h-screen transition-all duration-300 flex flex-col fixed left-0 top-0 z-50 text-slate-400 border-r border-slate-800`}
+    >
       <div className="p-6 flex items-center gap-3">
         <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shrink-0"><TrendingUp size={24} /></div>
-        {sidebarOpen && <span className="font-black text-xl text-white tracking-tighter">{APP_NAME}</span>}
+        {effectiveSidebarOpen && <span className="font-black text-xl text-white tracking-tighter">{APP_NAME}</span>}
       </div>
       <nav className="flex-1 px-3 mt-4 overflow-y-auto min-h-0">
         <div className="space-y-1">{renderItems(menuTop)}</div>
@@ -12769,7 +12788,7 @@ const Sidebar = () => {
       <div className="p-4 bg-slate-900/50 border-t border-slate-800">
         <div className="flex items-center gap-3 w-full p-2 rounded-lg">
           <img src={currentUser.avatar} className="w-10 h-10 rounded-lg object-cover border border-slate-700 shrink-0" alt="Profile" />
-          {sidebarOpen && (
+          {effectiveSidebarOpen && (
             <div className="text-left overflow-hidden">
               <p className="text-sm font-bold text-white truncate">{currentUser.name}</p>
               <p className="text-[10px] text-slate-500 uppercase font-black truncate">{currentUser.position}</p>
@@ -12777,7 +12796,7 @@ const Sidebar = () => {
           )}
         </div>
         <button onClick={logout} className="mt-3 flex items-center gap-3 w-full px-3 py-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
-          <LogOut size={18} />{sidebarOpen && <span className="text-sm font-bold">Cerrar Sesión</span>}
+          <LogOut size={18} />{effectiveSidebarOpen && <span className="text-sm font-bold">Cerrar Sesión</span>}
         </button>
       </div>
     </div>
@@ -12785,7 +12804,7 @@ const Sidebar = () => {
 };
 
 const Header = () => {
-  const { setSidebarOpen, sidebarOpen, activeModule, empresas, activeEmpresaId, setActiveEmpresaId, getAccessibleEmpresaIds } = useContext(ERPContext);
+  const { setSidebarOpen, sidebarOpen, effectiveSidebarOpen, activeModule, empresas, activeEmpresaId, setActiveEmpresaId, getAccessibleEmpresaIds } = useContext(ERPContext);
   const titleMap = {
     'dashboard': 'Dashboard Principal',
     'operaciones-registro': 'Nueva Operación',
@@ -12827,7 +12846,7 @@ const Header = () => {
     <header className="min-h-16 bg-white border-b border-slate-100 flex items-center justify-between gap-4 px-4 md:px-8 py-3 sticky top-0 z-40">
       <div className="flex items-center gap-3 md:gap-6 min-w-0">
         <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 transition-colors">
-          <ChevronLeft className={`transition-transform duration-300 ${!sidebarOpen ? 'rotate-180' : ''}`} />
+          <ChevronLeft className={`transition-transform duration-300 ${!effectiveSidebarOpen ? 'rotate-180' : ''}`} />
         </button>
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-slate-400 text-sm">ERP</span>
@@ -13100,7 +13119,7 @@ const PublicCorrectiveReport = ({ verifyOrderId = '', verifyFolio = '' }) => {
 };
 
 const ContentManager = () => {
-  const { activeModule, setActiveModule, sidebarOpen, setSidebarOpen, loggedInUser, activeEmpresaId, empresas } = useContext(ERPContext);
+  const { activeModule, setActiveModule, sidebarOpen, setSidebarOpen, effectiveSidebarOpen, loggedInUser, activeEmpresaId, empresas } = useContext(ERPContext);
   const [verificationRequest] = useState(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
@@ -13207,7 +13226,7 @@ const ContentManager = () => {
           className="fixed inset-y-0 left-64 right-0 z-40 bg-slate-950/30 backdrop-blur-[1px] lg:hidden"
         />
       )}
-      <div className={`min-w-0 overflow-hidden transition-all duration-300 ${sidebarOpen ? 'ml-64 max-lg:ml-20' : 'ml-20'}`}>
+      <div className={`min-w-0 overflow-hidden transition-all duration-300 ${effectiveSidebarOpen ? 'ml-64 max-lg:ml-20' : 'ml-20'}`}>
         <Header />
         <main className="min-w-0 p-4 md:p-8">{renderModule()}</main>
       </div>
