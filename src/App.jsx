@@ -715,6 +715,7 @@ const APP_DATA_KEYS = {
   monedas_indicadores: 'sentauris_monedas_indicadores',
   planificacion_tecnicos: 'sentauris_planificacion_tecnicos',
   planning_board: 'sentauris_planning_board',
+  planning_notifications: 'sentauris_planning_notifications',
 };
 
 const appDataParamId = (key) => `app_data:${key}`;
@@ -923,6 +924,7 @@ const ERPProvider = ({ children }) => {
   }));
   const [planificacionTecnicos, setPlanificacionTecnicos] = useState(() => readLocalObj('sentauris_planificacion_tecnicos') || {});
   const [planningBoard, setPlanningBoard] = useState(() => readLocalObj('sentauris_planning_board') || {});
+  const [planningNotifications, setPlanningNotifications] = useState(() => readLocalList('sentauris_planning_notifications'));
   const [loading, setLoading] = useState(true);
   const [dbStatus, setDbStatus] = useState('connecting'); // 'connecting' | 'ok' | 'error'
   const appDataLoadedRef = useRef(false);
@@ -989,6 +991,7 @@ const ERPProvider = ({ children }) => {
             protocolos_preventivos: setProtocolosPreventivos,
             planificacion_tecnicos: setPlanificacionTecnicos,
             planning_board: setPlanningBoard,
+            planning_notifications: setPlanningNotifications,
           };
           const appDataResponse = await loadAppDataFromSupabase(Object.keys(appDataSetters));
           if (appDataResponse.error) {
@@ -1005,6 +1008,8 @@ const ERPProvider = ({ children }) => {
                   ? (remoteByKey.get(key) || {})
                   : key === 'planning_board'
                   ? (remoteByKey.get(key) || {})
+                  : key === 'planning_notifications'
+                  ? (Array.isArray(remoteByKey.get(key)) ? remoteByKey.get(key) : [])
                   : (Array.isArray(remoteByKey.get(key)) ? remoteByKey.get(key) : []);
                 if (setter) setter(remoteValue);
                 localStorage.setItem(APP_DATA_KEYS[key], JSON.stringify(remoteValue));
@@ -1116,6 +1121,10 @@ const ERPProvider = ({ children }) => {
     persistAppData('planning_board', APP_DATA_KEYS.planning_board, planningBoard);
   }, [planningBoard]);
 
+  useEffect(() => {
+    persistAppData('planning_notifications', APP_DATA_KEYS.planning_notifications, planningNotifications);
+  }, [planningNotifications]);
+
   const setParametros = async (nextParametros) => {
     setParametrosState(nextParametros);
     localStorage.setItem('sentauris_parametros', JSON.stringify(nextParametros));
@@ -1192,29 +1201,39 @@ const ERPProvider = ({ children }) => {
     if (formData.ordenId) {
       const { data, error } = await supabase.from('ordenes_trabajo').update(payload).eq('id', formData.ordenId).select().single();
       if (error) throw error;
-      setPlanningBoard(prev => syncMaintenanceTaskToPlanningBoard({
-        board: prev,
-        orden: data,
-        licitaciones,
-        equipos,
-        usuarios,
-        currentUser,
-        empresaId: activeEmpresaId || currentEmpresa?.id || null,
-      }));
+      setPlanningBoard(prev => {
+        const synced = syncMaintenanceTaskToPlanningBoard({
+          board: prev,
+          notifications: planningNotifications,
+          orden: data,
+          licitaciones,
+          equipos,
+          usuarios,
+          currentUser,
+          empresaId: activeEmpresaId || currentEmpresa?.id || null,
+        });
+        setPlanningNotifications(synced.notifications);
+        return synced.board;
+      });
       return data;
     }
 
     const { data: inserted, error: insertError } = await supabase.from('ordenes_trabajo').insert([payload]).select().single();
     if (!insertError) {
-      setPlanningBoard(prev => syncMaintenanceTaskToPlanningBoard({
-        board: prev,
-        orden: inserted,
-        licitaciones,
-        equipos,
-        usuarios,
-        currentUser,
-        empresaId: activeEmpresaId || currentEmpresa?.id || null,
-      }));
+      setPlanningBoard(prev => {
+        const synced = syncMaintenanceTaskToPlanningBoard({
+          board: prev,
+          notifications: planningNotifications,
+          orden: inserted,
+          licitaciones,
+          equipos,
+          usuarios,
+          currentUser,
+          empresaId: activeEmpresaId || currentEmpresa?.id || null,
+        });
+        setPlanningNotifications(synced.notifications);
+        return synced.board;
+      });
       return inserted;
     }
 
@@ -1222,15 +1241,20 @@ const ERPProvider = ({ children }) => {
 
     const { data, error } = await supabase.from('ordenes_trabajo').update(payload).eq('folio', formData.folio).select().single();
     if (error) throw error;
-    setPlanningBoard(prev => syncMaintenanceTaskToPlanningBoard({
+    setPlanningBoard(prev => {
+      const synced = syncMaintenanceTaskToPlanningBoard({
       board: prev,
+      notifications: planningNotifications,
       orden: data,
       licitaciones,
       equipos,
       usuarios,
       currentUser,
       empresaId: activeEmpresaId || currentEmpresa?.id || null,
-    }));
+    });
+      setPlanningNotifications(synced.notifications);
+      return synced.board;
+    });
     return data;
   };
 
@@ -1260,6 +1284,7 @@ const ERPProvider = ({ children }) => {
       protocolosPreventivos, setProtocolosPreventivos,
       planificacionTecnicos, setPlanificacionTecnicos,
       planningBoard, setPlanningBoard,
+      planningNotifications, setPlanningNotifications,
       parametros, setParametros,
       loading, dbStatus
     }}>
@@ -1726,6 +1751,7 @@ const planningWorkspaceRole = (workspace, user) => {
   return (workspace.shares || []).find(share => share.userId === user.id)?.role || 'viewer';
 };
 const planningShareName = (users, id) => users.find(user => user.id === id)?.name || 'Usuario';
+const planningUsername = (user = {}) => String(user?.usuario || user?.email || '').toLowerCase().trim();
 const planningResolveAssignedUserIds = (usuarios = [], currentUser = null) => {
   const requiredUsers = ['cperez', 'cramos', 'mparra', 'mcaceres'];
   const ids = new Set();
@@ -1736,6 +1762,33 @@ const planningResolveAssignedUserIds = (usuarios = [], currentUser = null) => {
   });
   return [...ids];
 };
+const planningResolveMaintenanceAccess = (usuarios = [], currentUser = null) => {
+  const cperezUser = usuarios.find(user => planningUsername(user) === 'cperez') || null;
+  const requiredUsers = ['cperez', 'cramos', 'mparra', 'mcaceres'];
+  const assignedUsers = [];
+  if (currentUser?.id) assignedUsers.push(currentUser);
+  usuarios.forEach(user => {
+    if (requiredUsers.includes(planningUsername(user)) && !assignedUsers.some(item => item.id === user.id)) assignedUsers.push(user);
+  });
+  return {
+    ownerId: cperezUser?.id || currentUser?.id || '',
+    assigneeIds: assignedUsers.map(user => user.id).filter(Boolean),
+    shares: assignedUsers
+      .filter(user => user.id && user.id !== (cperezUser?.id || currentUser?.id))
+      .map(user => ({ userId: user.id, role: planningUsername(user) === 'cperez' ? 'editor' : 'viewer' })),
+  };
+};
+const planningBuildNotifications = ({ task, workspace, recipientIds = [], authorName = '' }) => recipientIds.map(userId => ({
+  id: crypto.randomUUID(),
+  userId,
+  title: workspace?.name || 'Planning',
+  body: `Nueva tarjeta asignada: ${task?.title || 'Sin título'}`,
+  createdAt: planningNowIso(),
+  read: false,
+  taskId: task?.id || '',
+  workspaceId: workspace?.id || '',
+  authorName: authorName || '',
+}));
 const planningReadFilesAsDataUrl = (files) => Promise.all(
   [...(files || [])].map(file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1853,6 +1906,7 @@ const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 
 };
 const syncMaintenanceTaskToPlanningBoard = ({
   board,
+  notifications = [],
   orden,
   licitaciones = [],
   equipos = [],
@@ -1860,7 +1914,7 @@ const syncMaintenanceTaskToPlanningBoard = ({
   currentUser = null,
   empresaId = null,
 }) => {
-  if (!orden?.id || !orden?.licitacion_id) return board;
+  if (!orden?.id || !orden?.licitacion_id) return { board, notifications };
   const licitacion = licitaciones.find(item => item.id === orden.licitacion_id);
   const planName = licitacion?.id_licitacion || licitacion?.name || String(orden.licitacion_id);
   const workspaceDescription = licitacion?.name && licitacion?.id_licitacion ? licitacion.name : 'Plan generado automáticamente desde mantenciones';
@@ -1875,9 +1929,11 @@ const syncMaintenanceTaskToPlanningBoard = ({
     ? Number(equipo?.plazo_correctiva_dias || equipo?.plazoCorrectivaDias || 0)
     : Number(equipo?.plazo_preventivo_dias || equipo?.plazoPreventivoDias || 0);
   const dueDate = planningAddDays(orden.fecha, dueDays);
-  const assigneeIds = planningResolveAssignedUserIds(usuarios, currentUser);
+  const maintenanceAccess = planningResolveMaintenanceAccess(usuarios, currentUser);
+  const assigneeIds = maintenanceAccess.assigneeIds;
   const companyKey = planningCompanyKey(empresaId);
   const nextBoard = normalizePlanningBoard(board);
+  let nextNotifications = Array.isArray(notifications) ? [...notifications] : [];
   let workspace = nextBoard.workspaces.find(item =>
     planningCompanyKey(item.empresaId) === companyKey &&
     item.type === 'plan' &&
@@ -1886,19 +1942,18 @@ const syncMaintenanceTaskToPlanningBoard = ({
   if (!workspace) {
     workspace = createPlanningWorkspace({
       empresaId,
-      currentUser,
+      currentUser: { ...currentUser, id: maintenanceAccess.ownerId || currentUser?.id },
       name: planName,
       description: workspaceDescription,
       type: 'plan',
     });
-    workspace.shares = assigneeIds
-      .filter(id => id !== workspace.ownerId)
-      .map(userId => ({ userId, role: 'editor' }));
+    workspace.ownerId = maintenanceAccess.ownerId || workspace.ownerId;
+    workspace.shares = maintenanceAccess.shares;
     nextBoard.workspaces.push(workspace);
   } else {
     const shareIds = new Set((workspace.shares || []).map(share => share.userId));
-    assigneeIds.filter(id => id && id !== workspace.ownerId && !shareIds.has(id)).forEach(userId => {
-      workspace.shares = [...(workspace.shares || []), { userId, role: 'editor' }];
+    maintenanceAccess.shares.filter(share => share.userId && !shareIds.has(share.userId)).forEach(share => {
+      workspace.shares = [...(workspace.shares || []), share];
     });
   }
   const targetColumn = workspace.columns.find(column => normalizeKey(column.title) === 'pendiente') || workspace.columns[0];
@@ -1930,9 +1985,17 @@ const syncMaintenanceTaskToPlanningBoard = ({
     ],
   });
   if (existingTaskIndex >= 0) workspace.tasks[existingTaskIndex] = taskPayload;
-  else workspace.tasks.unshift(taskPayload);
+  else {
+    workspace.tasks.unshift(taskPayload);
+    nextNotifications = [...planningBuildNotifications({
+      task: taskPayload,
+      workspace,
+      recipientIds: assigneeIds.filter(id => id !== currentUser?.id),
+      authorName: currentUser?.name || '',
+    }), ...nextNotifications];
+  }
   nextBoard.activeWorkspaceIdByEmpresa = { ...nextBoard.activeWorkspaceIdByEmpresa, [companyKey]: workspace.id };
-  return nextBoard;
+  return { board: nextBoard, notifications: nextNotifications };
 };
 const sanitizePlanningTask = (task) => {
   const {
@@ -2039,17 +2102,27 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
                 <input value={task.title} readOnly={!canEditFull} onChange={e => updateField('title', e.target.value)} placeholder="Titulo de la tarea"
                   className={`w-full bg-transparent text-2xl font-semibold outline-none border-b border-slate-200 pb-3 placeholder:text-slate-400 ${!canEditFull ? 'cursor-default' : ''}`} />
                 {allowAssignees && (
-                  <div className="flex flex-wrap gap-2">
-                    {users.map((user, index) => {
-                      const active = task.assigneeIds.includes(user.id);
-                      return (
-                        <button key={user.id} type="button" disabled={!canEditFull} onClick={() => toggleAssignee(user.id)}
-                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-60`}>
-                          <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(index)}`}>{planningInitials(user.name || user.nombre || user.usuario)}</span>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {users.filter(user => task.assigneeIds.includes(user.id)).map((user, index) => (
+                        <div key={user.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
+                          <span className={`h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(index)}`}>{planningInitials(user.name || user.nombre || user.usuario)}</span>
                           <span>{user.name || user.nombre || user.usuario}</span>
-                        </button>
-                      );
-                    })}
+                          {canEditFull && <button onClick={() => toggleAssignee(user.id)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>}
+                        </div>
+                      ))}
+                      {task.assigneeIds.length === 0 && <span className="text-sm text-slate-400">Sin usuarios asignados.</span>}
+                    </div>
+                    {canEditFull && (
+                      <div className="flex flex-wrap gap-2">
+                        {users.filter(user => !task.assigneeIds.includes(user.id)).map((user, index) => (
+                          <button key={user.id} type="button" onClick={() => toggleAssignee(user.id)} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">
+                            <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(index + 2)}`}>{planningInitials(user.name || user.nombre || user.usuario)}</span>
+                            <span>Agregar {user.name || user.nombre || user.usuario}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2273,7 +2346,7 @@ const PlanningShareModal = ({ workspace, users, onClose, onSave }) => {
 };
 
 const DashboardPlanning = () => {
-  const { currentUser, usuarios, activeEmpresaId, planningBoard, setPlanningBoard } = useContext(ERPContext);
+  const { currentUser, usuarios, activeEmpresaId, planningBoard, setPlanningBoard, planningNotifications, setPlanningNotifications } = useContext(ERPContext);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [columnDraft, setColumnDraft] = useState('');
@@ -2417,6 +2490,7 @@ const DashboardPlanning = () => {
         updatedAt: planningNowIso(),
       };
     }
+    const isNewTask = !targetWorkspace.tasks.some(task => task.id === cleanTask.id);
     updateBoard(current => ({
       ...current,
       workspaces: current.workspaces.map(workspace => {
@@ -2428,6 +2502,17 @@ const DashboardPlanning = () => {
         };
       }),
     }));
+    if (isNewTask) {
+      setPlanningNotifications(prev => [
+        ...planningBuildNotifications({
+          task: cleanTask,
+          workspace: targetWorkspace,
+          recipientIds: (cleanTask.assigneeIds || []).filter(id => id !== currentUser?.id),
+          authorName: currentUser?.name || '',
+        }),
+        ...(prev || []),
+      ]);
+    }
     setTaskModal(null);
   };
 
@@ -2541,9 +2626,8 @@ const DashboardPlanning = () => {
                       {allowUsers && (
                         <div className="flex flex-wrap items-center gap-2">
                           {assignees.map((user, assigneeIndex) => (
-                            <span key={user.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                              <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(assigneeIndex)}`}>{planningInitials(user.name)}</span>
-                              <span className="text-[11px] text-slate-600">{user.name}</span>
+                            <span key={user.id} title={user.name} className={`h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border border-white shadow-sm ${planningTone(assigneeIndex)}`}>
+                              {planningInitials(user.name)}
                             </span>
                           ))}
                         </div>
@@ -15009,7 +15093,8 @@ const Sidebar = () => {
 };
 
 const Header = () => {
-  const { setSidebarOpen, sidebarOpen, effectiveSidebarOpen, activeModule, empresas, activeEmpresaId, setActiveEmpresaId, getAccessibleEmpresaIds } = useContext(ERPContext);
+  const { setSidebarOpen, sidebarOpen, effectiveSidebarOpen, activeModule, empresas, activeEmpresaId, setActiveEmpresaId, getAccessibleEmpresaIds, currentUser, planningNotifications, setPlanningNotifications } = useContext(ERPContext);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const titleMap = {
     'dashboard': 'Dashboard Principal',
     'dashboard-planning': 'Dashboard / Planning',
@@ -15050,6 +15135,10 @@ const Header = () => {
   };
   const allowedEmpresaIds = getAccessibleEmpresaIds();
   const accessibleEmpresas = empresas.filter(e => allowedEmpresaIds.includes(e.id));
+  const userNotifications = (planningNotifications || []).filter(item => item.userId === currentUser.id);
+  const unreadNotifications = userNotifications.filter(item => !item.read);
+  const markNotificationRead = (notificationId) => setPlanningNotifications(prev => prev.map(item => item.id === notificationId ? { ...item, read: true } : item));
+  const markAllNotificationsRead = () => setPlanningNotifications(prev => prev.map(item => item.userId === currentUser.id ? { ...item, read: true } : item));
   return (
     <header className="min-h-16 bg-white border-b border-slate-100 flex items-center justify-between gap-4 px-4 md:px-8 py-3 sticky top-0 z-40">
       <div className="flex items-center gap-3 md:gap-6 min-w-0">
@@ -15074,9 +15163,37 @@ const Header = () => {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input type="text" placeholder="Buscador global..." className="pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-full text-xs focus:outline-none w-64" />
         </div>
-        <button className="p-2 text-slate-400 hover:text-blue-600 relative transition-colors">
-          <Bell size={20} /><span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-        </button>
+        <div className="relative">
+          <button onClick={() => setNotificationsOpen(prev => !prev)} className="p-2 text-slate-400 hover:text-blue-600 relative transition-colors">
+            <Bell size={20} />{unreadNotifications.length > 0 && <span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-red-500 text-white rounded-full border-2 border-white text-[10px] font-bold flex items-center justify-center">{unreadNotifications.length > 9 ? '9+' : unreadNotifications.length}</span>}
+          </button>
+          {notificationsOpen && (
+            <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden z-50">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                <div>
+                  <p className="font-semibold text-slate-900 text-sm">Notificaciones</p>
+                  <p className="text-xs text-slate-500">{unreadNotifications.length} sin leer</p>
+                </div>
+                {unreadNotifications.length > 0 && <button onClick={markAllNotificationsRead} className="text-xs font-semibold text-blue-600 hover:text-blue-700">Marcar todas</button>}
+              </div>
+              <div className="max-h-96 overflow-y-auto">
+                {userNotifications.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-400">Sin notificaciones.</div>}
+                {userNotifications.map(notification => (
+                  <button key={notification.id} onClick={() => markNotificationRead(notification.id)} className={`w-full text-left px-4 py-3 border-b border-slate-100 hover:bg-slate-50 ${notification.read ? 'bg-white' : 'bg-blue-50/50'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-1 h-2.5 w-2.5 rounded-full ${notification.read ? 'bg-slate-300' : 'bg-blue-500'}`}></div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800">{notification.title}</p>
+                        <p className="text-xs text-slate-500 mt-1">{notification.body}</p>
+                        <p className="text-[11px] text-slate-400 mt-2">{new Date(notification.createdAt).toLocaleString('es-CL')}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <button className="p-2 text-slate-400 hover:text-slate-900 transition-colors"><User size={20} /></button>
       </div>
     </header>
