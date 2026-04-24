@@ -1611,6 +1611,48 @@ const Dashboard = () => {
   );
 };
 
+const DashboardPlanning = () => {
+  const { clientes, licitaciones } = useContext(ERPContext);
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Dashboard</p>
+        <h2 className="text-2xl font-black text-slate-900">Planning</h2>
+        <p className="mt-2 text-sm text-slate-500">Submodulo listo para centralizar seguimiento, prioridades y plan de trabajo.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <p className="text-[10px] font-black uppercase text-slate-400">Clientes base</p>
+          <p className="mt-2 text-2xl font-black text-slate-900">{clientes.length}</p>
+          <p className="mt-1 text-xs text-slate-500">Disponibles para asociar planificaciones.</p>
+        </Card>
+        <Card>
+          <p className="text-[10px] font-black uppercase text-slate-400">Licitaciones</p>
+          <p className="mt-2 text-2xl font-black text-slate-900">{licitaciones.length}</p>
+          <p className="mt-1 text-xs text-slate-500">Base operativa para futuros hitos y agenda.</p>
+        </Card>
+        <Card>
+          <p className="text-[10px] font-black uppercase text-slate-400">Estado</p>
+          <p className="mt-2 text-2xl font-black text-blue-600">Activo</p>
+          <p className="mt-1 text-xs text-slate-500">Vista creada y lista para extender con widgets.</p>
+        </Card>
+      </div>
+
+      <Card>
+        <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center">
+          <div className="w-12 h-12 mx-auto rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <LayoutDashboard size={24} />
+          </div>
+          <p className="mt-3 text-sm font-semibold text-slate-700">Planning Dashboard</p>
+          <p className="mt-1 text-xs text-slate-400">Este espacio ya quedó integrado al Dashboard y puede recibir calendario, carga de trabajo, alertas y KPIs de planificación.</p>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
 // --- NUEVO REGISTRO ---
 const NuevoRegistro = () => {
   const { formData, setFormData, setActiveModule, generateFolio, clientes, licitaciones, equipos, setEquipos, repuestos, activeEmpresaId } = useContext(ERPContext);
@@ -7323,7 +7365,9 @@ const MantenedoresMonedasIndicadores = () => {
 
 // --- MANTENEDORES: USUARIOS ---
 const MODULES_TREE = [
-  { id: 'dashboard', label: 'Dashboard', sub: [] },
+  { id: 'dashboard', label: 'Dashboard', sub: [
+    { id: 'dashboard-planning', label: 'Planning' },
+  ] },
   {
     id: 'operaciones', label: 'Operaciones', sub: [
       { id: 'operaciones-registro',               label: 'Nuevo Registro' },
@@ -13799,7 +13843,7 @@ const Sidebar = () => {
     item.sub ? visibleSubs(item).length > 0 : canAccess(item.id);
 
   const menuTop = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, sub: ['Planning'] },
     { id: 'operaciones-registro', label: 'Operaciones', icon: ClipboardList, sub: ['Nuevo Registro', 'Planificacion', 'Historial Preventivo', 'Historial Correctivo', 'Cotizaciones', 'Historial Cotizaciones', 'OC Recibidas', 'Rendiciones', 'Historial Rendiciones'] },
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
@@ -13900,6 +13944,7 @@ const Header = () => {
   const { setSidebarOpen, sidebarOpen, effectiveSidebarOpen, activeModule, empresas, activeEmpresaId, setActiveEmpresaId, getAccessibleEmpresaIds } = useContext(ERPContext);
   const titleMap = {
     'dashboard': 'Dashboard Principal',
+    'dashboard-planning': 'Dashboard / Planning',
     'operaciones-registro': 'Nueva Operación',
     'operaciones-preventiva': 'Mantención Preventiva',
     'operaciones-correctiva': 'Mantención Correctiva',
@@ -14246,6 +14291,7 @@ const ContentManager = () => {
 
   // Sub-pages accessible if parent module is accessible
   const MODULE_PARENT = {
+    'dashboard-planning': 'dashboard',
     'operaciones-preventiva': 'operaciones-registro',
     'operaciones-correctiva': 'operaciones-registro',
     'abastecimiento-documentos': 'abastecimiento',
@@ -14276,6 +14322,7 @@ const ContentManager = () => {
     if (!canAccess(activeModule)) return <AccessDenied />;
     switch (activeModule) {
       case 'dashboard': return <Dashboard />;
+      case 'dashboard-planning': return <DashboardPlanning />;
       case 'operaciones-planificacion': return <Planificacion />;
       case 'operaciones-registro': return <NuevoRegistro />;
       case 'operaciones-preventiva': return <MantencionPreventiva />;
