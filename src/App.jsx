@@ -11651,34 +11651,21 @@ const CalidadMantenimientosCalibraciones = () => {
       </div>
 
       {modal && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-2 sm:p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-6 sm:py-5">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Calidad</p>
-                <h3 className="text-xl font-black text-slate-900">{modal.mode === 'maintenance' ? 'Registrar mantenimiento' : 'Modificar datos del activo'}</h3>
-                <p className="mt-1 text-sm text-slate-500">Los datos heredados de Activos Fijos son de solo lectura en este submodulo.</p>
-              </div>
-              <button type="button" onClick={() => setModal(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="px-5 py-6 sm:px-6">
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <Input label="ID Activo" value={modal.data.idActivo} disabled />
-                <Input label="Nombre Activo" value={modal.data.nombreActivo} disabled />
-                <Input label="Fecha Adquisicion" type="date" value={modal.data.fechaAdquisicion} disabled />
-                <Input label="Fecha de Mantenimiento" type="date" value={modal.data.fechaMantenimiento} onChange={e => setField('fechaMantenimiento', e.target.value)} />
-                <Input label="Responsable" value={modal.data.responsable} onChange={e => setField('responsable', e.target.value)} />
-                <Select label="Estado del Activo" value={modal.data.estadoActivo} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
-              <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
-              <Button variant="accent" icon={CheckCircle} onClick={saveRow}>{modal.mode === 'maintenance' ? 'Guardar mantenimiento' : 'Guardar cambios'}</Button>
-            </div>
+        <Modal title={modal.mode === 'maintenance' ? 'Registrar mantenimiento' : 'Modificar datos del activo'} onClose={() => setModal(null)} wide>
+          <p className="text-sm text-slate-500 mb-5">Los datos heredados de Activos Fijos son de solo lectura en este submodulo.</p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input label="ID Activo" value={modal.data.idActivo || ''} disabled />
+            <Input label="Nombre Activo" value={modal.data.nombreActivo || ''} disabled />
+            <Input label="Fecha Adquisicion" type="date" value={modal.data.fechaAdquisicion || ''} disabled />
+            <Input label="Fecha de Mantenimiento" type="date" value={modal.data.fechaMantenimiento || ''} onChange={e => setField('fechaMantenimiento', e.target.value)} />
+            <Input label="Responsable" value={modal.data.responsable || ''} onChange={e => setField('responsable', e.target.value)} />
+            <Select label="Estado del Activo" value={modal.data.estadoActivo || ''} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
           </div>
-        </div>
+          <div className="flex justify-end gap-3 mt-6">
+            <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
+            <Button variant="accent" icon={CheckCircle} onClick={saveRow}>{modal.mode === 'maintenance' ? 'Guardar mantenimiento' : 'Guardar cambios'}</Button>
+          </div>
+        </Modal>
       )}
     </div>
   );
