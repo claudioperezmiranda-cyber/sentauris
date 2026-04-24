@@ -12885,7 +12885,7 @@ const CalidadMantenimientosCalibraciones = () => {
       adjuntos: (row.adjuntos || []).map(file => file.name).join(' '),
     }).join(' ')).includes(normalizeKey(search)));
 
-  const availableAssets = activosFijos.filter(asset => !calidadMantenimientos.some(item => item.assetId === asset.id));
+  const availableAssets = activosFijos;
   const isMantencionesTab = activeTab === 'mantenciones';
   const maintenanceColumns = [
     { key: 'idActivo', label: 'ID Activo' },
@@ -12935,13 +12935,14 @@ const CalidadMantenimientosCalibraciones = () => {
 
   const openNewMaintenance = () => {
     if (!availableAssets.length) {
-      alert('Todos los activos fijos ya tienen un registro en Mantenciones.');
+      alert('No hay activos fijos disponibles para registrar en Mantenciones.');
       return;
     }
     setModal({
       mode: 'new-maintenance',
       data: {
         ...emptyCalidadMantenimiento(),
+        id: '',
         assetId: availableAssets[0].id,
         fechaAsignacion: accountingDate(),
         fechaMantenimiento: accountingDate(),
@@ -12975,19 +12976,28 @@ const CalidadMantenimientosCalibraciones = () => {
       alert('Debes seleccionar un activo fijo.');
       return;
     }
+    const isNewMaintenance = modal?.mode === 'new-maintenance';
     const payload = {
       ...emptyCalidadMantenimiento(),
       ...data,
-      id: data.id || data.assetId,
+      id: isNewMaintenance ? `qm-${Date.now()}` : (data.id || `qm-${Date.now()}`),
       assetId: data.assetId,
       adjuntos: Array.isArray(data.adjuntos) ? data.adjuntos : [],
       updatedAt: new Date().toISOString(),
     };
     setCalidadMantenimientos(prev => {
-      const exists = prev.some(item => item.assetId === payload.assetId);
-      return exists
-        ? prev.map(item => item.assetId === payload.assetId ? { ...item, ...payload } : item)
-        : [...prev, payload];
+      if (isNewMaintenance) {
+        const previousByAsset = prev
+          .filter(item => item.assetId === payload.assetId && item.id !== payload.id)
+          .sort((a, b) => String(b.updatedAt || b.fechaMantenimiento || b.fechaAsignacion || '').localeCompare(String(a.updatedAt || a.fechaMantenimiento || a.fechaAsignacion || '')))[0];
+        const updatedPrev = previousByAsset
+          ? prev.map(item => item.id === previousByAsset.id ? { ...item, estadoActivo: 'Registro Actualizado', updatedAt: new Date().toISOString() } : item)
+          : prev;
+        return [payload, ...updatedPrev];
+      }
+      return prev.some(item => item.id === payload.id)
+        ? prev.map(item => item.id === payload.id ? { ...item, ...payload } : item)
+        : [payload, ...prev];
     });
     setModal(null);
   };
