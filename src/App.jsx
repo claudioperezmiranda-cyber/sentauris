@@ -1192,16 +1192,45 @@ const ERPProvider = ({ children }) => {
     if (formData.ordenId) {
       const { data, error } = await supabase.from('ordenes_trabajo').update(payload).eq('id', formData.ordenId).select().single();
       if (error) throw error;
+      setPlanningBoard(prev => syncMaintenanceTaskToPlanningBoard({
+        board: prev,
+        orden: data,
+        licitaciones,
+        equipos,
+        usuarios,
+        currentUser,
+        empresaId: activeEmpresaId || currentEmpresa?.id || null,
+      }));
       return data;
     }
 
     const { data: inserted, error: insertError } = await supabase.from('ordenes_trabajo').insert([payload]).select().single();
-    if (!insertError) return inserted;
+    if (!insertError) {
+      setPlanningBoard(prev => syncMaintenanceTaskToPlanningBoard({
+        board: prev,
+        orden: inserted,
+        licitaciones,
+        equipos,
+        usuarios,
+        currentUser,
+        empresaId: activeEmpresaId || currentEmpresa?.id || null,
+      }));
+      return inserted;
+    }
 
     if (!isDuplicateFolioError(insertError) || !formData.folio) throw insertError;
 
     const { data, error } = await supabase.from('ordenes_trabajo').update(payload).eq('folio', formData.folio).select().single();
     if (error) throw error;
+    setPlanningBoard(prev => syncMaintenanceTaskToPlanningBoard({
+      board: prev,
+      orden: data,
+      licitaciones,
+      equipos,
+      usuarios,
+      currentUser,
+      empresaId: activeEmpresaId || currentEmpresa?.id || null,
+    }));
     return data;
   };
 
@@ -1665,6 +1694,13 @@ const planningPreviewText = (value = '', max = 120) => {
   if (!clean) return '';
   return clean.length > max ? `${clean.slice(0, max)}...` : clean;
 };
+const planningAddDays = (dateValue, days = 0) => {
+  if (!dateValue) return '';
+  const date = new Date(`${dateValue}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return dateValue;
+  date.setDate(date.getDate() + (Number(days) || 0));
+  return date.toISOString().slice(0, 10);
+};
 const planningNormalizeTags = (task) => {
   if (Array.isArray(task?.tags)) {
     return task.tags.map((tag, index) => ({
@@ -1690,6 +1726,16 @@ const planningWorkspaceRole = (workspace, user) => {
   return (workspace.shares || []).find(share => share.userId === user.id)?.role || 'viewer';
 };
 const planningShareName = (users, id) => users.find(user => user.id === id)?.name || 'Usuario';
+const planningResolveAssignedUserIds = (usuarios = [], currentUser = null) => {
+  const requiredUsers = ['cperez', 'cramos', 'mparra', 'mcaceres'];
+  const ids = new Set();
+  if (currentUser?.id) ids.add(currentUser.id);
+  usuarios.forEach(user => {
+    const username = String(user?.usuario || user?.email || '').toLowerCase().trim();
+    if (requiredUsers.includes(username) && user?.id) ids.add(user.id);
+  });
+  return [...ids];
+};
 const planningReadFilesAsDataUrl = (files) => Promise.all(
   [...(files || [])].map(file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1804,6 +1850,89 @@ const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 
     ];
   }
   return workspace;
+};
+const syncMaintenanceTaskToPlanningBoard = ({
+  board,
+  orden,
+  licitaciones = [],
+  equipos = [],
+  usuarios = [],
+  currentUser = null,
+  empresaId = null,
+}) => {
+  if (!orden?.id || !orden?.licitacion_id) return board;
+  const licitacion = licitaciones.find(item => item.id === orden.licitacion_id);
+  const planName = licitacion?.id_licitacion || licitacion?.name || String(orden.licitacion_id);
+  const workspaceDescription = licitacion?.name && licitacion?.id_licitacion ? licitacion.name : 'Plan generado automáticamente desde mantenciones';
+  const maintenanceType = normalizeKey(orden.tipo_mantencion) === 'correctiva' ? 'Correctiva' : 'Preventiva';
+  const equipo = equipos.find(item =>
+    item.licitacion_id === orden.licitacion_id &&
+    normalizeKey(item.tipo_equipo) === normalizeKey(orden.tipo_equipo) &&
+    normalizeKey(item.marca) === normalizeKey(orden.marca) &&
+    normalizeKey(item.modelo) === normalizeKey(orden.modelo)
+  ) || null;
+  const dueDays = maintenanceType === 'Correctiva'
+    ? Number(equipo?.plazo_correctiva_dias || equipo?.plazoCorrectivaDias || 0)
+    : Number(equipo?.plazo_preventivo_dias || equipo?.plazoPreventivoDias || 0);
+  const dueDate = planningAddDays(orden.fecha, dueDays);
+  const assigneeIds = planningResolveAssignedUserIds(usuarios, currentUser);
+  const companyKey = planningCompanyKey(empresaId);
+  const nextBoard = normalizePlanningBoard(board);
+  let workspace = nextBoard.workspaces.find(item =>
+    planningCompanyKey(item.empresaId) === companyKey &&
+    item.type === 'plan' &&
+    normalizeKey(item.name) === normalizeKey(planName)
+  );
+  if (!workspace) {
+    workspace = createPlanningWorkspace({
+      empresaId,
+      currentUser,
+      name: planName,
+      description: workspaceDescription,
+      type: 'plan',
+    });
+    workspace.shares = assigneeIds
+      .filter(id => id !== workspace.ownerId)
+      .map(userId => ({ userId, role: 'editor' }));
+    nextBoard.workspaces.push(workspace);
+  } else {
+    const shareIds = new Set((workspace.shares || []).map(share => share.userId));
+    assigneeIds.filter(id => id && id !== workspace.ownerId && !shareIds.has(id)).forEach(userId => {
+      workspace.shares = [...(workspace.shares || []), { userId, role: 'editor' }];
+    });
+  }
+  const targetColumn = workspace.columns.find(column => normalizeKey(column.title) === 'pendiente') || workspace.columns[0];
+  const existingTaskIndex = workspace.tasks.findIndex(task => String(task.sourceOrdenId || '') === String(orden.id));
+  const taskPayload = sanitizePlanningTask({
+    ...(existingTaskIndex >= 0 ? workspace.tasks[existingTaskIndex] : createPlanningTask({ workspaceId: workspace.id, columnId: targetColumn?.id, currentUser })),
+    workspaceId: workspace.id,
+    columnId: existingTaskIndex >= 0 ? workspace.tasks[existingTaskIndex].columnId : (targetColumn?.id || ''),
+    title: planName,
+    notes: [
+      `ID Licitación: ${planName}`,
+      `Equipo: ${orden.tipo_equipo || '-'}`,
+      `Marca: ${orden.marca || '-'}`,
+      `Modelo: ${orden.modelo || '-'}`,
+      `Fecha mantención: ${orden.fecha || '-'}`,
+    ].join('\n'),
+    dueDate,
+    startDate: orden.fecha || '',
+    progress: existingTaskIndex >= 0 ? workspace.tasks[existingTaskIndex].progress : 'No iniciado',
+    priority: maintenanceType === 'Correctiva' ? 'Alta' : 'Media',
+    assigneeIds,
+    sourceOrdenId: orden.id,
+    tags: [
+      {
+        id: crypto.randomUUID(),
+        label: maintenanceType,
+        color: maintenanceType === 'Correctiva' ? PLANNING_TAG_COLORS[3] : PLANNING_TAG_COLORS[1],
+      }
+    ],
+  });
+  if (existingTaskIndex >= 0) workspace.tasks[existingTaskIndex] = taskPayload;
+  else workspace.tasks.unshift(taskPayload);
+  nextBoard.activeWorkspaceIdByEmpresa = { ...nextBoard.activeWorkspaceIdByEmpresa, [companyKey]: workspace.id };
+  return nextBoard;
 };
 const sanitizePlanningTask = (task) => {
   const {
@@ -7395,11 +7524,15 @@ const MIGRATION_EQUIPOS_SQL = `CREATE TABLE IF NOT EXISTS equipos (
   modelo TEXT,
   numero_serie TEXT,
   numero_inventario TEXT,
-  frecuencia_mantenimiento_meses INTEGER DEFAULT 0
+  frecuencia_mantenimiento_meses INTEGER DEFAULT 0,
+  plazo_correctiva_dias INTEGER DEFAULT 0,
+  plazo_preventivo_dias INTEGER DEFAULT 0
 );
 
 ALTER TABLE equipos
-  ADD COLUMN IF NOT EXISTS frecuencia_mantenimiento_meses INTEGER DEFAULT 0;`;
+  ADD COLUMN IF NOT EXISTS frecuencia_mantenimiento_meses INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS plazo_correctiva_dias INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS plazo_preventivo_dias INTEGER DEFAULT 0;`;
 
 const MantenedoresEquipos = () => {
   const { licitaciones, equipos, setEquipos } = useContext(ERPContext);
@@ -7423,10 +7556,12 @@ const MantenedoresEquipos = () => {
     { key: 'numero_serie',      label: 'Número Serie',      required: false },
     { key: 'numero_inventario', label: 'Número Inventario', required: false },
     { key: 'frecuencia_mantenimiento_meses', label: 'Frecuencia Mantención Meses', required: false, hint: 'Ej: 6' },
+    { key: 'plazo_correctiva_dias', label: 'Plazo Correctiva', required: false, hint: 'Días para correctiva' },
+    { key: 'plazo_preventivo_dias', label: 'Plazo Preventivo', required: false, hint: 'Días para preventiva' },
   ];
 
   useEffect(() => {
-    supabaseRequest(() => supabase.from('equipos').select('id, frecuencia_mantenimiento_meses').limit(1))
+    supabaseRequest(() => supabase.from('equipos').select('id, frecuencia_mantenimiento_meses, plazo_correctiva_dias, plazo_preventivo_dias').limit(1))
       .then(({ error }) => { if (error && !isNetworkFetchError(error)) setSchemaMissing(true); });
   }, []);
 
@@ -7446,14 +7581,14 @@ const MantenedoresEquipos = () => {
   const exportTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
       COLUMNS.map(c => c.label),
-      ['LIC-2025-01', 'CAMAS MULTIMARCA', 'Hill-Rom', 'Avant-Garde 2', 'SN987654321', 'INV-5544', '6'],
+      ['LIC-2025-01', 'CAMAS MULTIMARCA', 'Hill-Rom', 'Avant-Garde 2', 'SN987654321', 'INV-5544', '6', '15', '30'],
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Equipos');
     XLSX.writeFile(wb, 'plantilla_carga_equipos.xlsx');
   };
 
-  const openNew = () => setModal({ mode: 'new', data: { licitacion_id: '', tipo_equipo: '', marca: '', modelo: '', numero_serie: '', numero_inventario: '', frecuencia_mantenimiento_meses: '' } });
+  const openNew = () => setModal({ mode: 'new', data: { licitacion_id: '', tipo_equipo: '', marca: '', modelo: '', numero_serie: '', numero_inventario: '', frecuencia_mantenimiento_meses: '', plazo_correctiva_dias: '', plazo_preventivo_dias: '' } });
   const openEdit = (e) => setModal({ mode: 'edit', data: { ...e } });
   const closeModal = () => setModal(null);
   const setField = (key, val) => setModal(m => ({ ...m, data: { ...m.data, [key]: val } }));
@@ -7475,6 +7610,8 @@ const MantenedoresEquipos = () => {
         numero_serie: data.numero_serie || null,
         numero_inventario: data.numero_inventario || null,
         frecuencia_mantenimiento_meses: data.frecuencia_mantenimiento_meses ? Number(data.frecuencia_mantenimiento_meses) || 0 : 0,
+        plazo_correctiva_dias: data.plazo_correctiva_dias ? Number(data.plazo_correctiva_dias) || 0 : 0,
+        plazo_preventivo_dias: data.plazo_preventivo_dias ? Number(data.plazo_preventivo_dias) || 0 : 0,
       };
       if (mode === 'new') {
         const { data: row, error } = await supabaseRequest(() => supabase.from('equipos').insert([payload]).select().single());
@@ -7582,6 +7719,8 @@ const MantenedoresEquipos = () => {
         numero_serie: r.numero_serie || null,
         numero_inventario: r.numero_inventario || null,
         frecuencia_mantenimiento_meses: r.frecuencia_mantenimiento_meses ? Number(String(r.frecuencia_mantenimiento_meses).replace(/\D/g, '')) || 0 : 0,
+        plazo_correctiva_dias: r.plazo_correctiva_dias ? Number(String(r.plazo_correctiva_dias).replace(/\D/g, '')) || 0 : 0,
+        plazo_preventivo_dias: r.plazo_preventivo_dias ? Number(String(r.plazo_preventivo_dias).replace(/\D/g, '')) || 0 : 0,
       });
 
       const findExistingEquipo = (r) => {
@@ -7672,6 +7811,8 @@ const MantenedoresEquipos = () => {
             <Input label="Nº Serie" value={modal.data.numero_serie} onChange={e => setField('numero_serie', e.target.value)} />
             <Input label="Nº Inventario" value={modal.data.numero_inventario} onChange={e => setField('numero_inventario', e.target.value)} />
             <Input label="Frecuencia mantención (meses)" type="number" value={modal.data.frecuencia_mantenimiento_meses || ''} onChange={e => setField('frecuencia_mantenimiento_meses', e.target.value)} placeholder="Ej: 6" />
+            <Input label="Plazo Correctiva (días)" type="number" value={modal.data.plazo_correctiva_dias || ''} onChange={e => setField('plazo_correctiva_dias', e.target.value)} placeholder="Ej: 15" />
+            <Input label="Plazo Preventivo (días)" type="number" value={modal.data.plazo_preventivo_dias || ''} onChange={e => setField('plazo_preventivo_dias', e.target.value)} placeholder="Ej: 30" />
           </div>
           <div className="flex justify-end gap-3 pt-6 mt-6 border-t"><Button variant="secondary" onClick={closeModal}>Cancelar</Button><Button variant="accent" onClick={handleSave} disabled={saving}>Guardar</Button></div>
         </Modal>
@@ -7749,13 +7890,15 @@ const MantenedoresEquipos = () => {
                 <th className="p-3 uppercase text-[10px] font-bold">Nro Serie</th>
                 <th className="p-3 uppercase text-[10px] font-bold">Nro Inventario</th>
                 <th className="p-3 uppercase text-[10px] font-bold">Frecuencia</th>
+                <th className="p-3 uppercase text-[10px] font-bold">Plazo Correctiva</th>
+                <th className="p-3 uppercase text-[10px] font-bold">Plazo Preventivo</th>
                 <th className="p-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="px-6 py-12 text-center text-slate-400 italic">
+                  <td colSpan="11" className="px-6 py-12 text-center text-slate-400 italic">
                     {equipos.length === 0 ? 'No hay equipos. Usa "Nuevo Equipo" o carga un Excel.' : 'Sin resultados para la busqueda.'}
                   </td>
                 </tr>
@@ -7775,6 +7918,8 @@ const MantenedoresEquipos = () => {
                     <td className="p-3 font-mono text-xs">{e.numero_serie || '—'}</td>
                     <td className="p-3 font-mono text-xs">{e.numero_inventario || '—'}</td>
                     <td className="p-3 text-xs text-slate-600">{e.frecuencia_mantenimiento_meses ? `${e.frecuencia_mantenimiento_meses} mes(es)` : '—'}</td>
+                    <td className="p-3 text-xs text-slate-600">{e.plazo_correctiva_dias ? `${e.plazo_correctiva_dias} día(s)` : '—'}</td>
+                    <td className="p-3 text-xs text-slate-600">{e.plazo_preventivo_dias ? `${e.plazo_preventivo_dias} día(s)` : '—'}</td>
                     <td className="p-3 text-right">
                       <button onClick={() => openEdit(e)} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg" title="Editar Equipo"><Pencil size={14}/></button>
                       <button onClick={() => handleDelete(e)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg ml-1" title="Borrar Equipo"><Trash2 size={14}/></button>
