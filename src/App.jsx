@@ -1678,6 +1678,18 @@ const planningNormalizeTags = (task) => {
   }
   return [];
 };
+const planningCanAccessWorkspace = (workspace, user) => {
+  if (!workspace || !user) return false;
+  if (user.isSuperadmin) return true;
+  if (workspace.ownerId && workspace.ownerId === user.id) return true;
+  return (workspace.shares || []).some(share => share.userId === user.id);
+};
+const planningWorkspaceRole = (workspace, user) => {
+  if (!workspace || !user) return 'viewer';
+  if (user.isSuperadmin || workspace.ownerId === user.id) return 'editor';
+  return (workspace.shares || []).find(share => share.userId === user.id)?.role || 'viewer';
+};
+const planningShareName = (users, id) => users.find(user => user.id === id)?.name || 'Usuario';
 const planningReadFilesAsDataUrl = (files) => Promise.all(
   [...(files || [])].map(file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1703,6 +1715,12 @@ const normalizePlanningBoard = (raw) => {
       name: workspace?.name || 'Nuevo plan',
       description: workspace?.description || '',
       color: workspace?.color || 'bg-fuchsia-600',
+      type: workspace?.type || 'plan',
+      ownerId: workspace?.ownerId || '',
+      shares: Array.isArray(workspace?.shares) ? workspace.shares.map(share => ({
+        userId: share?.userId || '',
+        role: share?.role === 'viewer' ? 'viewer' : 'editor',
+      })).filter(share => share.userId) : [],
       columns: Array.isArray(workspace?.columns) ? workspace.columns.map((column, index) => ({
         id: column?.id || crypto.randomUUID(),
         title: column?.title || `Columna ${index + 1}`,
@@ -1724,7 +1742,7 @@ const normalizePlanningBoard = (raw) => {
     })) : [],
   };
 };
-const createPlanningTask = ({ workspaceId, columnId, currentUser, overrides = {} }) => ({
+const createPlanningTask = ({ workspaceId, columnId, currentUser, assignUsers = true, overrides = {} }) => ({
   id: crypto.randomUUID(),
   workspaceId,
   columnId,
@@ -1736,7 +1754,7 @@ const createPlanningTask = ({ workspaceId, columnId, currentUser, overrides = {}
   dueDate: planningDateInputValue(7),
   notes: '',
   showNotesOnCard: true,
-  assigneeIds: currentUser?.id ? [currentUser.id] : [],
+  assigneeIds: assignUsers && currentUser?.id ? [currentUser.id] : [],
   tags: [],
   checklist: [],
   attachments: [],
@@ -1746,7 +1764,7 @@ const createPlanningTask = ({ workspaceId, columnId, currentUser, overrides = {}
   createdBy: currentUser?.id || 'planner',
   ...overrides,
 });
-const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 'Gestion de Proveedores', description = 'Operaciones - Gestion Interna' }) => {
+const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 'Gestion de Proveedores', description = 'Operaciones - Gestion Interna', type = 'plan' }) => {
   const id = crypto.randomUUID();
   const columns = PLANNING_COLUMN_TEMPLATES.map((column, index) => ({
     id: crypto.randomUUID(),
@@ -1759,6 +1777,9 @@ const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 
     name,
     description,
     color: 'bg-fuchsia-600',
+    type,
+    ownerId: currentUser?.id || '',
+    shares: [],
     columns,
     tasks: [],
   };
@@ -1768,6 +1789,7 @@ const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 
         workspaceId: id,
         columnId: columns[0].id,
         currentUser,
+        assignUsers: type !== 'my-day',
         overrides: {
           title: 'Fabricación de Baranda - JosonCare Es-99HD',
           dueDate: planningDateInputValue(4),
@@ -1800,29 +1822,44 @@ const sanitizePlanningTask = (task) => {
   };
 };
 
-const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setModal, onClose, onSave, onDelete, onDuplicate }) => {
+const PlanningTagPicker = ({ value, onChange, disabled = false }) => (
+  <div className="flex flex-wrap gap-2">
+    {PLANNING_TAG_COLORS.map(color => (
+      <button key={color} type="button" disabled={disabled} onClick={() => onChange(color)}
+        className={`h-7 w-7 rounded-full border-2 ${color.split(' ').find(token => token.startsWith('bg-')) || 'bg-blue-100'} ${value === color ? 'border-slate-900' : 'border-white'} disabled:opacity-50`} />
+    ))}
+  </div>
+);
+
+const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setModal, onClose, onSave, onDelete, onDuplicate, canEditFull = true, canEditLimited = true, allowAssignees = true }) => {
   if (!modal) return null;
   const task = modal.data;
   const attachmentInputRef = useRef(null);
-  const cardVisible = task.showNotesOnCard !== false;
-  const toggleAssignee = (id) => setModal(prev => ({
-    ...prev,
-    data: {
-      ...prev.data,
-      assigneeIds: prev.data.assigneeIds.includes(id)
-        ? prev.data.assigneeIds.filter(item => item !== id)
-        : [...prev.data.assigneeIds, id],
-    },
-  }));
+  const canEditStatus = canEditFull || canEditLimited;
+  const canDelete = canEditFull;
   const updateField = (key, value) => setModal(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
-  const updateTag = (tagId, key, value) => updateField('tags', (task.tags || []).map(tag => tag.id === tagId ? { ...tag, [key]: value } : tag));
+  const toggleAssignee = (id) => {
+    if (!canEditFull) return;
+    setModal(prev => ({
+      ...prev,
+      data: {
+        ...prev.data,
+        assigneeIds: prev.data.assigneeIds.includes(id)
+          ? prev.data.assigneeIds.filter(item => item !== id)
+          : [...prev.data.assigneeIds, id],
+      },
+    }));
+  };
+  const updateTag = (tagId, key, value) => canEditFull && updateField('tags', (task.tags || []).map(tag => tag.id === tagId ? { ...tag, [key]: value } : tag));
   const addChecklistItem = () => {
+    if (!canEditFull) return;
     const text = String(task.draftChecklist || '').trim();
     if (!text) return;
     updateField('checklist', [...(task.checklist || []), { id: crypto.randomUUID(), text, done: false }]);
     updateField('draftChecklist', '');
   };
   const handleAttachmentFiles = async (event) => {
+    if (!canEditFull) return;
     const files = event.target.files;
     if (!files?.length) return;
     try {
@@ -1833,12 +1870,14 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
     }
   };
   const addComment = () => {
+    if (!canEditFull) return;
     const text = String(task.draftComment || '').trim();
     if (!text) return;
     updateField('comments', [...(task.comments || []), { id: crypto.randomUUID(), text, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Equipo', createdAt: planningNowIso() }]);
     updateField('draftComment', '');
   };
   const addTag = () => {
+    if (!canEditFull) return;
     const label = String(task.draftTagLabel || '').trim();
     if (!label) return;
     updateField('tags', [...(task.tags || []), { id: crypto.randomUUID(), label, color: task.draftTagColor || PLANNING_TAG_COLORS[0] }]);
@@ -1859,61 +1898,63 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
               <p className="text-sm text-slate-500 truncate">{workspace.description || 'Panel de planificación interno'}</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={onDuplicate} className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-sm">Copiar tarea</button>
+              {canEditFull && <button onClick={onDuplicate} className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-sm">Copiar tarea</button>}
               <button onClick={copyTaskRef} className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-sm">Copiar vinculo</button>
-              <button onClick={onDelete} className="px-3 py-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 text-sm">Eliminar</button>
+              {canDelete && <button onClick={onDelete} className="px-3 py-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 text-sm">Eliminar</button>}
               <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100"><X size={18} /></button>
             </div>
           </div>
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="p-5 md:p-6 space-y-6">
               <div className="space-y-2">
-                <input value={task.title} onChange={e => updateField('title', e.target.value)} placeholder="Titulo de la tarea"
-                  className="w-full bg-transparent text-2xl font-semibold outline-none border-b border-slate-200 pb-3 placeholder:text-slate-400" />
-                <div className="flex flex-wrap gap-2">
-                  {users.map((user, index) => {
-                    const active = task.assigneeIds.includes(user.id);
-                    return (
-                      <button key={user.id} onClick={() => toggleAssignee(user.id)}
-                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
-                        <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(index)}`}>{planningInitials(user.name || user.nombre || user.usuario)}</span>
-                        <span>{user.name || user.nombre || user.usuario}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <input value={task.title} readOnly={!canEditFull} onChange={e => updateField('title', e.target.value)} placeholder="Titulo de la tarea"
+                  className={`w-full bg-transparent text-2xl font-semibold outline-none border-b border-slate-200 pb-3 placeholder:text-slate-400 ${!canEditFull ? 'cursor-default' : ''}`} />
+                {allowAssignees && (
+                  <div className="flex flex-wrap gap-2">
+                    {users.map((user, index) => {
+                      const active = task.assigneeIds.includes(user.id);
+                      return (
+                        <button key={user.id} type="button" disabled={!canEditFull} onClick={() => toggleAssignee(user.id)}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-60`}>
+                          <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(index)}`}>{planningInitials(user.name || user.nombre || user.usuario)}</span>
+                          <span>{user.name || user.nombre || user.usuario}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 <label className="space-y-1.5">
                   <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Deposito</span>
-                  <select value={task.columnId} onChange={e => updateField('columnId', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
+                  <select value={task.columnId} disabled={!canEditStatus} onChange={e => updateField('columnId', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-50">
                     {columns.map(column => <option key={column.id} value={column.id} className="text-slate-900">{column.title}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Progreso</span>
-                  <select value={task.progress} onChange={e => updateField('progress', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
+                  <select value={task.progress} disabled={!canEditStatus} onChange={e => updateField('progress', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-50">
                     {PLANNING_PROGRESS_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Prioridad</span>
-                  <select value={task.priority} onChange={e => updateField('priority', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
+                  <select value={task.priority} disabled={!canEditFull} onChange={e => updateField('priority', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-50">
                     {PLANNING_PRIORITY_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Fecha de inicio</span>
-                  <input type="date" value={task.startDate || ''} onChange={e => updateField('startDate', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm" />
+                  <input type="date" value={task.startDate || ''} readOnly={!canEditFull} onChange={e => updateField('startDate', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm read-only:bg-slate-50" />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Fecha de vencimiento</span>
-                  <input type="date" value={task.dueDate || ''} onChange={e => updateField('dueDate', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm" />
+                  <input type="date" value={task.dueDate || ''} readOnly={!canEditFull} onChange={e => updateField('dueDate', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm read-only:bg-slate-50" />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Repetir</span>
-                  <select value={task.repeat} onChange={e => updateField('repeat', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
+                  <select value={task.repeat} disabled={!canEditFull} onChange={e => updateField('repeat', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-50">
                     {PLANNING_REPEAT_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
                   </select>
                 </label>
@@ -1923,58 +1964,54 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-slate-800">Etiquetas</p>
                   <label className="flex items-center gap-2 text-sm text-slate-600">
-                    <input type="checkbox" checked={cardVisible} onChange={e => updateField('showNotesOnCard', e.target.checked)} className="rounded border-slate-300" />
+                    <input type="checkbox" checked={task.showNotesOnCard !== false} disabled={!canEditFull} onChange={e => updateField('showNotesOnCard', e.target.checked)} className="rounded border-slate-300" />
                     Mostrar notas en la tarjeta
                   </label>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {(task.tags || []).map(tag => (
                     <div key={tag.id} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-                      <input value={tag.label} onChange={e => updateTag(tag.id, 'label', e.target.value)} className="w-28 bg-transparent text-sm outline-none" placeholder="Etiqueta" />
-                      <select value={tag.color} onChange={e => updateTag(tag.id, 'color', e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
-                        {PLANNING_TAG_COLORS.map(color => <option key={color} value={color}>{color.split(' ')[0].replace('bg-', '')}</option>)}
-                      </select>
-                      <button onClick={() => updateField('tags', task.tags.filter(item => item.id !== tag.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>
+                      <input value={tag.label} readOnly={!canEditFull} onChange={e => updateTag(tag.id, 'label', e.target.value)} className="w-28 bg-transparent text-sm outline-none" placeholder="Etiqueta" />
+                      <PlanningTagPicker value={tag.color} onChange={(color) => updateTag(tag.id, 'color', color)} disabled={!canEditFull} />
+                      {canEditFull && <button onClick={() => updateField('tags', task.tags.filter(item => item.id !== tag.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>}
                     </div>
                   ))}
                 </div>
-                <div className="flex flex-col gap-2 md:flex-row">
-                  <input value={task.draftTagLabel || ''} onChange={e => updateField('draftTagLabel', e.target.value)} placeholder="Nueva etiqueta"
-                    className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
-                  <select value={task.draftTagColor || PLANNING_TAG_COLORS[0]} onChange={e => updateField('draftTagColor', e.target.value)} className="rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
-                    {PLANNING_TAG_COLORS.map(color => <option key={color} value={color}>{color.split(' ')[0].replace('bg-', '')}</option>)}
-                  </select>
-                  <button onClick={addTag} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm text-white hover:bg-blue-700">Agregar etiqueta</button>
-                </div>
+                {canEditFull && (
+                  <div className="flex flex-col gap-2">
+                    <input value={task.draftTagLabel || ''} onChange={e => updateField('draftTagLabel', e.target.value)} placeholder="Nueva etiqueta"
+                      className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
+                    <PlanningTagPicker value={task.draftTagColor || PLANNING_TAG_COLORS[0]} onChange={(color) => updateField('draftTagColor', color)} />
+                    <button onClick={addTag} className="self-start rounded-xl bg-blue-600 px-4 py-2.5 text-sm text-white hover:bg-blue-700">Agregar etiqueta</button>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-slate-800">Notas</p>
-                <textarea value={task.notes || ''} onChange={e => updateField('notes', e.target.value)} rows={6}
-                  className="w-full rounded-2xl bg-white border border-slate-200 px-4 py-3 text-sm leading-6 placeholder:text-slate-400" placeholder="Describe el alcance, restricciones y observaciones de la tarea." />
+                <textarea value={task.notes || ''} readOnly={!canEditFull} onChange={e => updateField('notes', e.target.value)} rows={6}
+                  className="w-full rounded-2xl bg-white border border-slate-200 px-4 py-3 text-sm leading-6 placeholder:text-slate-400 read-only:bg-slate-50" placeholder="Describe el alcance, restricciones y observaciones de la tarea." />
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-slate-800">Lista de comprobación</p>
-                  <label className="flex items-center gap-2 text-xs text-slate-500">
-                    <input type="checkbox" checked={cardVisible} onChange={e => updateField('showNotesOnCard', e.target.checked)} className="rounded border-slate-300" />
-                    Mostrar notas en la tarjeta
-                  </label>
                 </div>
                 <div className="space-y-2">
                   {(task.checklist || []).map(item => (
                     <label key={item.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                      <input type="checkbox" checked={Boolean(item.done)} onChange={e => updateField('checklist', task.checklist.map(entry => entry.id === item.id ? { ...entry, done: e.target.checked } : entry))} />
+                      <input type="checkbox" checked={Boolean(item.done)} disabled={!canEditFull} onChange={e => updateField('checklist', task.checklist.map(entry => entry.id === item.id ? { ...entry, done: e.target.checked } : entry))} />
                       <span className={`flex-1 ${item.done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.text}</span>
-                      <button onClick={() => updateField('checklist', task.checklist.filter(entry => entry.id !== item.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>
+                      {canEditFull && <button onClick={() => updateField('checklist', task.checklist.filter(entry => entry.id !== item.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>}
                     </label>
                   ))}
-                  <div className="flex gap-2">
-                    <input value={task.draftChecklist || ''} onChange={e => updateField('draftChecklist', e.target.value)} placeholder="Agregar un elemento"
-                      className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
-                    <button onClick={addChecklistItem} className="px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-sm">Agregar</button>
-                  </div>
+                  {canEditFull && (
+                    <div className="flex gap-2">
+                      <input value={task.draftChecklist || ''} onChange={e => updateField('draftChecklist', e.target.value)} placeholder="Agregar un elemento"
+                        className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
+                      <button onClick={addChecklistItem} className="px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-sm">Agregar</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1990,11 +2027,15 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
                         <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-slate-800 truncate block hover:text-blue-600">{item.name}</a>
                         <p className="text-[11px] text-slate-500 truncate">{item.type || 'Archivo'} · {item.size ? `${Math.round(item.size / 1024)} KB` : 'Sin tamaño'}</p>
                       </div>
-                      <button onClick={() => updateField('attachments', task.attachments.filter(entry => entry.id !== item.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>
+                      {canEditFull && <button onClick={() => updateField('attachments', task.attachments.filter(entry => entry.id !== item.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>}
                     </div>
                   ))}
-                  <input ref={attachmentInputRef} type="file" multiple className="hidden" onChange={handleAttachmentFiles} />
-                  <button onClick={() => attachmentInputRef.current?.click()} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-sm">Agregar datos adjuntos</button>
+                  {canEditFull && (
+                    <>
+                      <input ref={attachmentInputRef} type="file" multiple className="hidden" onChange={handleAttachmentFiles} />
+                      <button onClick={() => attachmentInputRef.current?.click()} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-sm">Agregar datos adjuntos</button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -2011,9 +2052,13 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
                     </div>
                   ))}
                 </div>
-                <textarea value={task.draftComment || ''} onChange={e => updateField('draftComment', e.target.value)} rows={3}
-                  className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Escribe un comentario" />
-                <button onClick={addComment} className="w-full px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm">Agregar comentario</button>
+                {canEditFull && (
+                  <>
+                    <textarea value={task.draftComment || ''} onChange={e => updateField('draftComment', e.target.value)} rows={3}
+                      className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Escribe un comentario" />
+                    <button onClick={addComment} className="w-full px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm">Agregar comentario</button>
+                  </>
+                )}
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2 text-sm">
@@ -2022,8 +2067,8 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
                 <p className="text-slate-600">Vence: {planningFormatDateLabel(task.dueDate)}</p>
                 <p className="text-slate-600">Checklist: {(task.checklist || []).filter(item => item.done).length}/{(task.checklist || []).length}</p>
                 <div className="pt-3 flex items-center justify-end gap-2">
-                  <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm hover:bg-slate-100">Cancelar</button>
-                  <button onClick={onSave} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700">Guardar tarea</button>
+                  <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm hover:bg-slate-100">Cerrar</button>
+                  {canEditStatus && <button onClick={onSave} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700">Guardar</button>}
                 </div>
               </div>
             </div>
@@ -2035,25 +2080,95 @@ const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setM
   );
 };
 
+const PlanningShareModal = ({ workspace, users, onClose, onSave }) => {
+  const [shares, setShares] = useState(workspace?.shares || []);
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [selectedRole, setSelectedRole] = useState('viewer');
+  if (!workspace) return null;
+  const availableUsers = users.filter(user => user.id !== workspace.ownerId && !shares.some(share => share.userId === user.id));
+  const addShare = () => {
+    if (!selectedUserId) return;
+    setShares(prev => [...prev, { userId: selectedUserId, role: selectedRole }]);
+    setSelectedUserId('');
+    setSelectedRole('viewer');
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-[126] bg-slate-950/30 backdrop-blur-sm p-4 flex items-center justify-center">
+      <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+          <div>
+            <h3 className="font-semibold text-slate-900">Compartir plan</h3>
+            <p className="text-sm text-slate-500">{workspace.name}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100"><X size={16} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_180px_auto] gap-3">
+            <select value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+              <option value="">Seleccionar usuario</option>
+              {availableUsers.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
+            </select>
+            <select value={selectedRole} onChange={e => setSelectedRole(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+              <option value="viewer">Visualizar</option>
+              <option value="editor">Editar</option>
+            </select>
+            <button onClick={addShare} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm text-white hover:bg-blue-700">Agregar</button>
+          </div>
+          <div className="space-y-2">
+            {(shares || []).map(share => (
+              <div key={share.userId} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div>
+                  <p className="font-medium text-slate-800">{planningShareName(users, share.userId)}</p>
+                  <p className="text-xs text-slate-500">{share.role === 'viewer' ? 'Visualiza y solo cambia progreso/deposito' : 'Puede editar el plan completo'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select value={share.role} onChange={e => setShares(prev => prev.map(item => item.userId === share.userId ? { ...item, role: e.target.value } : item))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <option value="viewer">Visualizar</option>
+                    <option value="editor">Editar</option>
+                  </select>
+                  <button onClick={() => setShares(prev => prev.filter(item => item.userId !== share.userId))} className="p-2 rounded-lg text-slate-400 hover:bg-white hover:text-rose-500"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+            {shares.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">Sin usuarios compartidos. El propietario mantiene el control total.</div>}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm hover:bg-slate-100">Cancelar</button>
+            <button onClick={() => onSave(shares)} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700">Guardar acceso</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 const DashboardPlanning = () => {
-  const { currentUser, usuarios, activeEmpresaId, currentEmpresa, planningBoard, setPlanningBoard } = useContext(ERPContext);
+  const { currentUser, usuarios, activeEmpresaId, planningBoard, setPlanningBoard } = useContext(ERPContext);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [columnDraft, setColumnDraft] = useState('');
   const [planModal, setPlanModal] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
   const [draggingTaskId, setDraggingTaskId] = useState('');
+  const [viewMode, setViewMode] = useState('plans');
 
   const companyKey = planningCompanyKey(activeEmpresaId);
   const board = normalizePlanningBoard(planningBoard);
   const planners = (usuarios || []).length > 0
     ? usuarios.map(user => ({ ...user, name: user.nombre || user.name || user.usuario || 'Usuario' }))
     : [{ id: currentUser.id || 'planner', name: currentUser.name || 'Planner' }];
-  const companyWorkspaces = board.workspaces.filter(workspace => planningCompanyKey(workspace.empresaId) === companyKey);
+  const companyWorkspaces = board.workspaces.filter(workspace => planningCompanyKey(workspace.empresaId) === companyKey && planningCanAccessWorkspace(workspace, currentUser));
+  const myDayWorkspace = companyWorkspaces.find(workspace => workspace.type === 'my-day' && workspace.ownerId === currentUser.id) || null;
+  const planWorkspaces = companyWorkspaces.filter(workspace => workspace.type !== 'my-day');
   const activeWorkspaceId = board.activeWorkspaceIdByEmpresa[companyKey] && companyWorkspaces.some(workspace => workspace.id === board.activeWorkspaceIdByEmpresa[companyKey])
     ? board.activeWorkspaceIdByEmpresa[companyKey]
-    : companyWorkspaces[0]?.id || '';
+    : (planWorkspaces[0]?.id || myDayWorkspace?.id || '');
   const activeWorkspace = companyWorkspaces.find(workspace => workspace.id === activeWorkspaceId) || null;
+  const activeWorkspaceRole = planningWorkspaceRole(activeWorkspace, currentUser);
+  const canEditFull = activeWorkspaceRole === 'editor';
+  const canEditLimited = canEditFull || activeWorkspaceRole === 'viewer';
 
   const updateBoard = (recipe) => setPlanningBoard(prev => {
     const current = normalizePlanningBoard(prev);
@@ -2061,24 +2176,29 @@ const DashboardPlanning = () => {
   });
 
   useEffect(() => {
-    if (companyWorkspaces.length > 0) return;
+    const missingMyDay = !board.workspaces.some(workspace => planningCompanyKey(workspace.empresaId) === companyKey && workspace.type === 'my-day' && workspace.ownerId === currentUser.id);
+    if (!missingMyDay && companyWorkspaces.length > 0) return;
     updateBoard(current => {
-      const workspace = createPlanningWorkspace({ empresaId: activeEmpresaId || null, currentUser, seed: true });
-      return {
-        ...current,
-        workspaces: [...current.workspaces, workspace],
-        activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: workspace.id },
-      };
+      const next = { ...current };
+      if (missingMyDay) {
+        next.workspaces = [...next.workspaces, createPlanningWorkspace({ empresaId: activeEmpresaId || null, currentUser, name: 'Mi dia', description: 'Vista personal del dia', type: 'my-day' })];
+      }
+      if (!next.workspaces.some(workspace => planningCompanyKey(workspace.empresaId) === companyKey && workspace.type === 'plan')) {
+        const seeded = createPlanningWorkspace({ empresaId: activeEmpresaId || null, currentUser, seed: true });
+        next.workspaces = [...next.workspaces, seeded];
+        next.activeWorkspaceIdByEmpresa = { ...next.activeWorkspaceIdByEmpresa, [companyKey]: seeded.id };
+      }
+      return next;
     });
-  }, [companyWorkspaces.length, companyKey, activeEmpresaId, currentUser.id]);
+  }, [companyKey, activeEmpresaId, currentUser.id, companyWorkspaces.length]);
 
   useEffect(() => {
-    if (!activeWorkspace || board.activeWorkspaceIdByEmpresa[companyKey]) return;
+    if (activeWorkspace || !companyWorkspaces.length) return;
     updateBoard(current => ({
       ...current,
-      activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: activeWorkspace.id },
+      activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: companyWorkspaces[0].id },
     }));
-  }, [activeWorkspace?.id, companyKey]);
+  }, [activeWorkspace?.id, companyWorkspaces.length, companyKey]);
 
   const setActiveWorkspace = (workspaceId) => updateBoard(current => ({
     ...current,
@@ -2101,75 +2221,81 @@ const DashboardPlanning = () => {
       };
     });
     setPlanModal(null);
-  };
-
-  const addColumn = () => {
-    if (!activeWorkspace || !columnDraft.trim()) return;
-    updateBoard(current => ({
-      ...current,
-      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
-        ? {
-            ...workspace,
-            columns: [...workspace.columns, { id: crypto.randomUUID(), title: columnDraft.trim(), accent: planningTone(workspace.columns.length) }],
-          }
-        : workspace),
-    }));
-    setColumnDraft('');
+    setViewMode('plans');
   };
 
   const deleteWorkspace = (workspaceId) => {
-    const workspace = companyWorkspaces.find(item => item.id === workspaceId);
-    if (!workspace) return;
+    const workspace = planWorkspaces.find(item => item.id === workspaceId);
+    if (!workspace || workspace.ownerId !== currentUser.id) return;
     const shouldDelete = typeof window === 'undefined' ? true : window.confirm(`Eliminar el plan "${workspace.name}"?`);
     if (!shouldDelete) return;
     updateBoard(current => {
       const remaining = current.workspaces.filter(item => item.id !== workspaceId);
-      const nextCompanyWorkspaces = remaining.filter(item => planningCompanyKey(item.empresaId) === companyKey);
+      const nextCompany = remaining.filter(item => planningCompanyKey(item.empresaId) === companyKey && planningCanAccessWorkspace(item, currentUser));
       return {
         ...current,
         workspaces: remaining,
         activeWorkspaceIdByEmpresa: {
           ...current.activeWorkspaceIdByEmpresa,
-          [companyKey]: current.activeWorkspaceIdByEmpresa[companyKey] === workspaceId ? (nextCompanyWorkspaces[0]?.id || '') : current.activeWorkspaceIdByEmpresa[companyKey],
+          [companyKey]: current.activeWorkspaceIdByEmpresa[companyKey] === workspaceId ? (nextCompany[0]?.id || '') : current.activeWorkspaceIdByEmpresa[companyKey],
         },
       };
     });
   };
 
-  const openTask = (columnId, existingTask = null) => {
-    if (!activeWorkspace) return;
+  const addColumn = () => {
+    if (!activeWorkspace || !columnDraft.trim() || !canEditFull) return;
+    updateBoard(current => ({
+      ...current,
+      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
+        ? { ...workspace, columns: [...workspace.columns, { id: crypto.randomUUID(), title: columnDraft.trim(), accent: planningTone(workspace.columns.length) }] }
+        : workspace),
+    }));
+    setColumnDraft('');
+  };
+
+  const openTask = (workspace, columnId, existingTask = null) => {
+    if (!workspace) return;
     setTaskModal({
+      workspaceId: workspace.id,
       mode: existingTask ? 'edit' : 'new',
-      data: existingTask
-        ? {
-            ...existingTask,
-            draftChecklist: '',
-            draftAttachmentName: '',
-            draftAttachmentUrl: '',
-            draftComment: '',
-          }
-        : createPlanningTask({ workspaceId: activeWorkspace.id, columnId, currentUser }),
+      data: existingTask ? {
+        ...existingTask,
+        draftChecklist: '',
+        draftComment: '',
+        draftTagLabel: '',
+      } : createPlanningTask({ workspaceId: workspace.id, columnId, currentUser, assignUsers: workspace.type !== 'my-day' }),
     });
   };
 
   const saveTask = () => {
-    if (!taskModal?.data?.title?.trim() || !activeWorkspace) return;
-    const cleanTask = sanitizePlanningTask({
+    if (!taskModal?.data?.title?.trim() || !taskModal?.workspaceId) return;
+    const targetWorkspace = companyWorkspaces.find(workspace => workspace.id === taskModal.workspaceId);
+    if (!targetWorkspace) return;
+    const role = planningWorkspaceRole(targetWorkspace, currentUser);
+    const sourceTask = targetWorkspace.tasks.find(task => task.id === taskModal.data.id);
+    let cleanTask = sanitizePlanningTask({
       ...taskModal.data,
       title: taskModal.data.title.trim(),
       notes: String(taskModal.data.notes || '').trim(),
       updatedAt: planningNowIso(),
     });
+    if (role === 'viewer' && sourceTask) {
+      cleanTask = {
+        ...sourceTask,
+        columnId: cleanTask.columnId,
+        progress: cleanTask.progress,
+        updatedAt: planningNowIso(),
+      };
+    }
     updateBoard(current => ({
       ...current,
       workspaces: current.workspaces.map(workspace => {
-        if (workspace.id !== activeWorkspace.id) return workspace;
+        if (workspace.id !== taskModal.workspaceId) return workspace;
         const exists = workspace.tasks.some(task => task.id === cleanTask.id);
         return {
           ...workspace,
-          tasks: exists
-            ? workspace.tasks.map(task => task.id === cleanTask.id ? cleanTask : task)
-            : [cleanTask, ...workspace.tasks],
+          tasks: exists ? workspace.tasks.map(task => task.id === cleanTask.id ? cleanTask : task) : [cleanTask, ...workspace.tasks],
         };
       }),
     }));
@@ -2177,7 +2303,7 @@ const DashboardPlanning = () => {
   };
 
   const duplicateTask = () => {
-    if (!taskModal?.data || !activeWorkspace) return;
+    if (!taskModal?.data || !taskModal?.workspaceId) return;
     const duplicated = sanitizePlanningTask({
       ...taskModal.data,
       id: crypto.randomUUID(),
@@ -2188,101 +2314,172 @@ const DashboardPlanning = () => {
     });
     updateBoard(current => ({
       ...current,
-      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
+      workspaces: current.workspaces.map(workspace => workspace.id === taskModal.workspaceId
         ? { ...workspace, tasks: [duplicated, ...workspace.tasks] }
         : workspace),
     }));
   };
 
   const deleteTask = () => {
-    if (!taskModal?.data || !activeWorkspace) return;
+    if (!taskModal?.data || !taskModal?.workspaceId) return;
     updateBoard(current => ({
       ...current,
-      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
+      workspaces: current.workspaces.map(workspace => workspace.id === taskModal.workspaceId
         ? { ...workspace, tasks: workspace.tasks.filter(task => task.id !== taskModal.data.id) }
         : workspace),
     }));
     setTaskModal(null);
   };
 
-  const filteredTasks = activeWorkspace
-    ? activeWorkspace.tasks.filter(task => {
-        const haystack = `${task.title} ${task.notes} ${(task.tags || []).map(tag => tag.label).join(' ')}`.toLowerCase();
-        return haystack.includes(searchTerm.toLowerCase());
-      })
-    : [];
-
-  const moveTaskToColumn = (taskId, columnId) => {
-    if (!activeWorkspace || !taskId || !columnId) return;
+  const saveShares = (shares) => {
+    if (!activeWorkspace || activeWorkspace.ownerId !== currentUser.id) return;
     updateBoard(current => ({
       ...current,
-      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
-        ? {
-            ...workspace,
-            tasks: workspace.tasks.map(task => task.id === taskId ? { ...task, columnId, updatedAt: planningNowIso() } : task),
-          }
-        : workspace),
+      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id ? { ...workspace, shares } : workspace),
+    }));
+    setShareModalOpen(false);
+  };
+
+  const moveTaskToColumn = (workspaceId, taskId, columnId) => {
+    const workspace = companyWorkspaces.find(item => item.id === workspaceId);
+    if (!workspace || !taskId || !columnId) return;
+    const role = planningWorkspaceRole(workspace, currentUser);
+    if (!['editor', 'viewer'].includes(role)) return;
+    updateBoard(current => ({
+      ...current,
+      workspaces: current.workspaces.map(item => item.id === workspaceId
+        ? { ...item, tasks: item.tasks.map(task => task.id === taskId ? { ...task, columnId, updatedAt: planningNowIso() } : task) }
+        : item),
     }));
     setDraggingTaskId('');
   };
+
+  const filteredWorkspaceTasks = (workspace) => (workspace?.tasks || []).filter(task => {
+    const haystack = `${task.title} ${task.notes} ${(task.tags || []).map(tag => tag.label).join(' ')}`.toLowerCase();
+    return haystack.includes(searchTerm.toLowerCase());
+  });
+  const myTaskWorkspaces = planWorkspaces
+    .map(workspace => ({ ...workspace, tasks: filteredWorkspaceTasks(workspace).filter(task => (task.assigneeIds || []).includes(currentUser.id)) }))
+    .filter(workspace => workspace.tasks.length > 0);
+  const visibleColumns = activeWorkspace?.columns || [];
+  const activeTasks = activeWorkspace ? filteredWorkspaceTasks(activeWorkspace) : [];
+  const showWorkspaceBoard = (workspace, { editable, limited, allowUsers, showAddTask = true, showAddColumn = false }) => (
+    <div className="flex gap-5 overflow-x-auto pb-4">
+      {workspace.columns.map((column, index) => {
+        const tasks = filteredWorkspaceTasks(workspace).filter(task => task.columnId === column.id);
+        return (
+          <div key={column.id} className={`w-[320px] shrink-0 rounded-3xl border ${draggingTaskId ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200 bg-white'} p-4 shadow-sm`}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => moveTaskToColumn(workspace.id, draggingTaskId, column.id)}>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`h-2.5 w-2.5 rounded-full ${column.accent || planningTone(index)}`}></span>
+                <h3 className="font-medium truncate">{column.title}</h3>
+                <span className="text-xs text-slate-500">{tasks.length}</span>
+              </div>
+            </div>
+            {showAddTask && editable && <button onClick={() => openTask(workspace, column.id)} className="w-full mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm text-blue-600 hover:bg-slate-100">+ Agregar tarea</button>}
+            <div className="space-y-4">
+              {tasks.map(task => {
+                const completedChecklist = (task.checklist || []).filter(item => item.done).length;
+                const assignees = planners.filter(user => (task.assigneeIds || []).includes(user.id));
+                return (
+                  <button key={task.id} onClick={() => openTask(workspace, column.id, task)} draggable={limited}
+                    onDragStart={() => setDraggingTaskId(task.id)}
+                    onDragEnd={() => setDraggingTaskId('')}
+                    className="w-full text-left rounded-3xl bg-white border border-slate-200 shadow-sm overflow-hidden hover:border-blue-200 transition-colors">
+                    <div className="h-24 bg-gradient-to-br from-slate-50 to-blue-50 border-b border-slate-100 flex items-center justify-center">
+                      <LayoutDashboard size={20} className="text-blue-400" />
+                    </div>
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium leading-5 text-slate-900">{task.title || 'Sin titulo'}</p>
+                          {(task.tags || []).length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {(task.tags || []).map(tag => <span key={tag.id} className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${tag.color}`}>{tag.label}</span>)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {task.showNotesOnCard !== false && task.notes && <p className="text-xs leading-5 text-slate-500">{planningPreviewText(task.notes)}</p>}
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                        {task.dueDate && <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 border border-rose-100 px-2 py-1 text-rose-600">{planningFormatShortDate(task.dueDate)}</span>}
+                        <span className="inline-flex items-center gap-1"><CheckCircle size={12} /> {completedChecklist}/{(task.checklist || []).length}</span>
+                        <span className="inline-flex items-center gap-1"><FileText size={12} /> {(task.attachments || []).length}</span>
+                        <span className="inline-flex items-center gap-1"><Bell size={12} /> {(task.comments || []).length}</span>
+                      </div>
+                      {allowUsers && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {assignees.map((user, assigneeIndex) => (
+                            <span key={user.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
+                              <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(assigneeIndex)}`}>{planningInitials(user.name)}</span>
+                              <span className="text-[11px] text-slate-600">{user.name}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {showAddColumn && editable && (
+        <div className="w-[280px] shrink-0">
+          <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+            <p className="text-sm font-medium text-slate-700">Agregar nuevo deposito</p>
+            <input value={columnDraft} onChange={e => setColumnDraft(e.target.value)} placeholder="Nombre de la columna" className="w-full rounded-2xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
+            <button onClick={addColumn} className="w-full rounded-2xl bg-slate-900 text-white hover:bg-slate-800 px-4 py-2.5 text-sm">Crear columna</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-[calc(100vh-10rem)] bg-white text-slate-900 rounded-[28px] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
       <div className="flex min-h-[calc(100vh-10rem)]">
         <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} shrink-0 border-r border-slate-200 bg-slate-50 transition-all duration-300 flex flex-col`}>
-          <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200">
-            <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
-              <div className="h-10 w-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-sm">
-                <LayoutDashboard size={18} />
-              </div>
-              {!sidebarCollapsed && (
-                <div>
-                  <p className="font-semibold">Planner</p>
-                  <p className="text-xs text-slate-500">{currentEmpresa?.nombre || currentEmpresa?.empresa || 'Espacio general'}</p>
-                </div>
-              )}
-            </div>
-            {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="p-2 rounded-lg hover:bg-slate-100"><ChevronLeft size={16} /></button>}
-            {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} className="absolute mt-14 ml-5 p-2 rounded-lg hover:bg-slate-100"><ChevronRight size={16} /></button>}
+          <div className="flex justify-end px-3 py-3 border-b border-slate-200">
+            <button onClick={() => setSidebarCollapsed(prev => !prev)} className="p-2 rounded-lg hover:bg-white">
+              {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            </button>
           </div>
 
           <div className="px-3 py-4 space-y-4">
             <div className="space-y-1">
-              {[
-                { label: 'Mi dia', icon: Bell },
-                { label: 'Mis tareas', icon: CheckCircle2 },
-                { label: 'Mis planes', icon: ClipboardList },
-              ].map(item => (
-                <button key={item.label} className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white ${sidebarCollapsed ? 'justify-center' : ''}`}>
+              {[{ id: 'my-day', label: 'Mi dia', icon: Bell }, { id: 'my-tasks', label: 'Mis tareas', icon: CheckCircle2 }].map(item => (
+                <button key={item.id} onClick={() => setViewMode(item.id)} className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 ${viewMode === item.id ? 'bg-white border border-slate-200 shadow-sm text-slate-900' : 'hover:bg-white text-slate-600'} ${sidebarCollapsed ? 'justify-center' : ''}`}>
                   <item.icon size={16} className="text-slate-400" />
-                  {!sidebarCollapsed && <span className="text-sm text-slate-600">{item.label}</span>}
+                  {!sidebarCollapsed && <span className="text-sm">{item.label}</span>}
                 </button>
               ))}
             </div>
 
-            {!sidebarCollapsed && <p className="px-3 text-[11px] uppercase tracking-[0.24em] text-slate-500">Anclado</p>}
+            {!sidebarCollapsed && <p className="px-3 text-[11px] uppercase tracking-[0.24em] text-slate-500">Planes</p>}
             <div className="space-y-1">
-              {companyWorkspaces.map((workspace, index) => (
-                <div key={workspace.id}
-                  className={`relative w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${activeWorkspace?.id === workspace.id ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'hover:bg-white text-slate-600'} ${sidebarCollapsed ? 'justify-center' : ''}`}>
+              {planWorkspaces.map((workspace, index) => (
+                <div key={workspace.id} className={`relative flex items-center gap-3 rounded-xl px-3 py-3 ${viewMode === 'plans' && activeWorkspace?.id === workspace.id ? 'bg-white border border-slate-200 shadow-sm' : 'hover:bg-white'}`}>
                   <span className={`h-8 w-8 rounded-xl flex items-center justify-center text-xs font-bold text-white ${workspace.color || planningTone(index)}`}>{planningInitials(workspace.name)}</span>
                   {!sidebarCollapsed ? (
-                    <button type="button" onClick={() => setActiveWorkspace(workspace.id)} className="min-w-0 flex-1 text-left">
+                    <button type="button" onClick={() => { setActiveWorkspace(workspace.id); setViewMode('plans'); }} className="min-w-0 flex-1 text-left">
                       <p className="text-sm font-medium truncate">{workspace.name}</p>
                       <p className="text-[11px] text-slate-500 truncate">{workspace.description || 'Sin descripción'}</p>
                     </button>
                   ) : (
-                    <button type="button" onClick={() => setActiveWorkspace(workspace.id)} className="absolute inset-0 rounded-xl" aria-label={workspace.name} />
+                    <button type="button" onClick={() => { setActiveWorkspace(workspace.id); setViewMode('plans'); }} className="absolute inset-0 rounded-xl" aria-label={workspace.name} />
                   )}
-                  {!sidebarCollapsed && <button type="button" onClick={(e) => { e.stopPropagation(); deleteWorkspace(workspace.id); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-500"><MoreVertical size={14} /></button>}
+                  {!sidebarCollapsed && workspace.ownerId === currentUser.id && <button type="button" onClick={(e) => { e.stopPropagation(); deleteWorkspace(workspace.id); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-500"><MoreVertical size={14} /></button>}
                 </div>
               ))}
             </div>
           </div>
 
           <div className="mt-auto px-3 pb-4">
-            <button onClick={() => setPlanModal({ name: '', description: '' })}
-              className={`w-full flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-100 ${sidebarCollapsed ? 'justify-center' : ''}`}>
+            <button onClick={() => setPlanModal({ name: '', description: '' })} className={`w-full flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-100 ${sidebarCollapsed ? 'justify-center' : ''}`}>
               <Plus size={16} />
               {!sidebarCollapsed && <span>Nuevo plan</span>}
             </button>
@@ -2294,123 +2491,40 @@ const DashboardPlanning = () => {
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-3 text-sm text-slate-500">
-                  <span>Mis planes</span>
-                  <span className="text-slate-300">/</span>
-                  <span className="text-blue-600">{activeWorkspace?.name || 'Planning'}</span>
-                  <span className="text-slate-300">/</span>
-                  <span className="text-slate-900 font-semibold">Panel</span>
+                  <span>{viewMode === 'my-day' ? 'Mi dia' : viewMode === 'my-tasks' ? 'Mis tareas' : 'Planning'}</span>
+                  {viewMode === 'plans' && activeWorkspace && (<><span className="text-slate-300">/</span><span className="text-blue-600">{activeWorkspace.name}</span></>)}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-sm text-slate-600">
                     <Search size={15} className="text-slate-500" />
-                    <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Buscar tarjeta"
-                      className="bg-transparent outline-none placeholder:text-slate-400 min-w-[180px]" />
+                    <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Buscar tarjeta" className="bg-transparent outline-none placeholder:text-slate-400 min-w-[180px]" />
                   </div>
-                  <button className="inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
-                    <Info size={14} />
-                    Filtros
-                  </button>
-                  <button className="inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
-                    <ArrowUpDown size={14} />
-                    Agrupar por deposito
-                  </button>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-sm text-slate-600">Compartir</button>
+                {viewMode === 'plans' && activeWorkspace?.type === 'plan' && activeWorkspace.ownerId === currentUser.id && <button onClick={() => setShareModalOpen(true)} className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-sm text-slate-600">Compartir</button>}
               </div>
             </div>
           </div>
 
           <div className="p-5 bg-gradient-to-b from-slate-50 to-white">
-            {!activeWorkspace ? (
-              <div className="rounded-3xl border border-dashed border-slate-200 p-10 text-center text-slate-400">Preparando planning...</div>
-            ) : (
-              <div className="flex gap-5 overflow-x-auto pb-4">
-                {activeWorkspace.columns.map((column, index) => {
-                  const tasks = filteredTasks.filter(task => task.columnId === column.id);
-                  return (
-                    <div key={column.id} className={`w-[320px] shrink-0 rounded-3xl border ${draggingTaskId ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200 bg-white'} p-4 shadow-sm`}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => moveTaskToColumn(draggingTaskId, column.id)}>
-                      <div className="flex items-center justify-between gap-3 mb-3">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`h-2.5 w-2.5 rounded-full ${column.accent || planningTone(index)}`}></span>
-                          <h3 className="font-medium truncate">{column.title}</h3>
-                          <span className="text-xs text-slate-500">{tasks.length}</span>
-                        </div>
-                      </div>
-                      <button onClick={() => openTask(column.id)} className="w-full mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm text-blue-600 hover:bg-slate-100">
-                        + Agregar tarea
-                      </button>
-                      <div className="space-y-4">
-                        {tasks.map(task => {
-                          const completedChecklist = (task.checklist || []).filter(item => item.done).length;
-                          const assignees = planners.filter(user => (task.assigneeIds || []).includes(user.id));
-                          return (
-                            <button key={task.id} onClick={() => openTask(column.id, task)} draggable
-                              onDragStart={() => setDraggingTaskId(task.id)}
-                              onDragEnd={() => setDraggingTaskId('')}
-                              className="w-full text-left rounded-3xl bg-white border border-slate-200 shadow-sm overflow-hidden hover:border-blue-200 transition-colors cursor-grab active:cursor-grabbing">
-                              <div className="h-24 bg-gradient-to-br from-slate-50 to-blue-50 border-b border-slate-100 flex items-center justify-center">
-                                <LayoutDashboard size={20} className="text-blue-400" />
-                              </div>
-                              <div className="p-4 space-y-3">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <p className="font-medium leading-5 text-slate-900">{task.title || 'Sin titulo'}</p>
-                                    {(task.tags || []).length > 0 && (
-                                      <div className="mt-2 flex flex-wrap gap-1.5">
-                                        {(task.tags || []).map(tag => <span key={tag.id} className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${tag.color}`}>{tag.label}</span>)}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <MoreVertical size={15} className="text-slate-400 shrink-0" />
-                                </div>
-                                {task.showNotesOnCard !== false && task.notes && (
-                                  <p className="text-xs leading-5 text-slate-500">{planningPreviewText(task.notes)}</p>
-                                )}
-                                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-                                  {task.dueDate && <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 border border-rose-100 px-2 py-1 text-rose-600">{planningFormatShortDate(task.dueDate)}</span>}
-                                  <span className="inline-flex items-center gap-1"><CheckCircle size={12} /> {completedChecklist}/{(task.checklist || []).length}</span>
-                                  <span className="inline-flex items-center gap-1"><FileText size={12} /> {(task.attachments || []).length}</span>
-                                  <span className="inline-flex items-center gap-1"><Bell size={12} /> {(task.comments || []).length}</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    {assignees.map((user, assigneeIndex) => (
-                                      <span key={user.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                                        <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(assigneeIndex)}`}>
-                                          {planningInitials(user.name)}
-                                        </span>
-                                        <span className="text-[11px] text-slate-600">{user.name}</span>
-                                      </span>
-                                    ))}
-                                  </div>
-                                  <span className="inline-flex items-center gap-2 text-xs text-slate-500">
-                                    <span className={`h-2.5 w-2.5 rounded-full ${planningPriorityTone(task.priority)}`}></span>
-                                    {task.priority}
-                                  </span>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+            {viewMode === 'my-day' && myDayWorkspace && showWorkspaceBoard(myDayWorkspace, { editable: true, limited: true, allowUsers: false, showAddTask: true, showAddColumn: true })}
+            {viewMode === 'my-tasks' && (
+              <div className="space-y-8">
+                {myTaskWorkspaces.length === 0 && <div className="rounded-3xl border border-dashed border-slate-200 p-10 text-center text-slate-400">No tienes tareas asignadas.</div>}
+                {myTaskWorkspaces.map(workspace => (
+                  <div key={workspace.id} className="space-y-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900">{workspace.name}</h3>
+                      <p className="text-sm text-slate-500">{workspace.description || 'Sin descripción'}</p>
                     </div>
-                  );
-                })}
-
-                <div className="w-[280px] shrink-0">
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-4 space-y-3 shadow-sm">
-                    <p className="text-sm font-medium text-slate-700">Agregar nuevo deposito</p>
-                    <input value={columnDraft} onChange={e => setColumnDraft(e.target.value)} placeholder="Nombre de la columna"
-                      className="w-full rounded-2xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
-                    <button onClick={addColumn} className="w-full rounded-2xl bg-slate-900 text-white hover:bg-slate-800 px-4 py-2.5 text-sm">Crear columna</button>
+                    {showWorkspaceBoard(workspace, { editable: false, limited: true, allowUsers: true, showAddTask: false, showAddColumn: false })}
                   </div>
-                </div>
+                ))}
               </div>
             )}
+            {viewMode === 'plans' && !activeWorkspace && <div className="rounded-3xl border border-dashed border-slate-200 p-10 text-center text-slate-400">Preparando planning...</div>}
+            {viewMode === 'plans' && activeWorkspace && showWorkspaceBoard(activeWorkspace, { editable: canEditFull, limited: canEditLimited, allowUsers: activeWorkspace.type !== 'my-day', showAddTask: canEditFull, showAddColumn: canEditFull })}
           </div>
         </section>
       </div>
@@ -2425,13 +2539,11 @@ const DashboardPlanning = () => {
             <div className="p-5 space-y-4">
               <label className="space-y-1.5 block">
                 <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Nombre</span>
-                <input value={planModal.name} onChange={e => setPlanModal(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Gestión de Proveedores" />
+                <input value={planModal.name} onChange={e => setPlanModal(prev => ({ ...prev, name: e.target.value }))} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Gestión de Proveedores" />
               </label>
               <label className="space-y-1.5 block">
                 <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Descripción</span>
-                <textarea value={planModal.description} onChange={e => setPlanModal(prev => ({ ...prev, description: e.target.value }))} rows={4}
-                  className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Operaciones - Gestión Interna" />
+                <textarea value={planModal.description} onChange={e => setPlanModal(prev => ({ ...prev, description: e.target.value }))} rows={4} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Operaciones - Gestión Interna" />
               </label>
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button onClick={() => setPlanModal(null)} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm hover:bg-slate-100">Cancelar</button>
@@ -2443,9 +2555,11 @@ const DashboardPlanning = () => {
         document.body
       )}
 
+      {shareModalOpen && <PlanningShareModal workspace={activeWorkspace} users={planners} onClose={() => setShareModalOpen(false)} onSave={saveShares} />}
+
       <PlanningTaskModal
-        workspace={activeWorkspace || { id: '', name: '', description: '' }}
-        columns={activeWorkspace?.columns || []}
+        workspace={companyWorkspaces.find(workspace => workspace.id === taskModal?.workspaceId) || activeWorkspace || { id: '', name: '', description: '' }}
+        columns={(companyWorkspaces.find(workspace => workspace.id === taskModal?.workspaceId) || activeWorkspace)?.columns || []}
         users={planners}
         currentUser={currentUser}
         modal={taskModal}
@@ -2454,6 +2568,9 @@ const DashboardPlanning = () => {
         onSave={saveTask}
         onDelete={deleteTask}
         onDuplicate={duplicateTask}
+        canEditFull={taskModal ? planningWorkspaceRole(companyWorkspaces.find(workspace => workspace.id === taskModal.workspaceId), currentUser) === 'editor' : canEditFull}
+        canEditLimited={taskModal ? ['editor', 'viewer'].includes(planningWorkspaceRole(companyWorkspaces.find(workspace => workspace.id === taskModal.workspaceId), currentUser)) : canEditLimited}
+        allowAssignees={(companyWorkspaces.find(workspace => workspace.id === taskModal?.workspaceId) || activeWorkspace)?.type !== 'my-day'}
       />
     </div>
   );
