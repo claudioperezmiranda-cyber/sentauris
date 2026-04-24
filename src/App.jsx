@@ -925,6 +925,7 @@ const ERPProvider = ({ children }) => {
   const [planificacionTecnicos, setPlanificacionTecnicos] = useState(() => readLocalObj('sentauris_planificacion_tecnicos') || {});
   const [planningBoard, setPlanningBoard] = useState(() => readLocalObj('sentauris_planning_board') || {});
   const [planningNotifications, setPlanningNotifications] = useState(() => readLocalList('sentauris_planning_notifications'));
+  const [planningOpenTarget, setPlanningOpenTarget] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dbStatus, setDbStatus] = useState('connecting'); // 'connecting' | 'ok' | 'error'
   const appDataLoadedRef = useRef(false);
@@ -1285,6 +1286,7 @@ const ERPProvider = ({ children }) => {
       planificacionTecnicos, setPlanificacionTecnicos,
       planningBoard, setPlanningBoard,
       planningNotifications, setPlanningNotifications,
+      planningOpenTarget, setPlanningOpenTarget,
       parametros, setParametros,
       loading, dbStatus
     }}>
@@ -2346,7 +2348,7 @@ const PlanningShareModal = ({ workspace, users, onClose, onSave }) => {
 };
 
 const DashboardPlanning = () => {
-  const { currentUser, usuarios, activeEmpresaId, planningBoard, setPlanningBoard, planningNotifications, setPlanningNotifications } = useContext(ERPContext);
+  const { currentUser, usuarios, activeEmpresaId, planningBoard, setPlanningBoard, planningNotifications, setPlanningNotifications, planningOpenTarget, setPlanningOpenTarget } = useContext(ERPContext);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [columnDraft, setColumnDraft] = useState('');
@@ -2401,6 +2403,33 @@ const DashboardPlanning = () => {
       activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: companyWorkspaces[0].id },
     }));
   }, [activeWorkspace?.id, companyWorkspaces.length, companyKey]);
+
+  useEffect(() => {
+    if (!planningOpenTarget || planningOpenTarget.empresaId !== companyKey) return;
+    const targetWorkspace = companyWorkspaces.find(workspace => workspace.id === planningOpenTarget.workspaceId);
+    if (!targetWorkspace) return;
+    if (board.activeWorkspaceIdByEmpresa[companyKey] !== targetWorkspace.id) {
+      updateBoard(current => ({
+        ...current,
+        activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: targetWorkspace.id },
+      }));
+    }
+    const targetTask = targetWorkspace.tasks.find(task => task.id === planningOpenTarget.taskId);
+    if (targetTask) {
+      setViewMode('plans');
+      setTaskModal({
+        workspaceId: targetWorkspace.id,
+        mode: 'edit',
+        data: {
+          ...targetTask,
+          draftChecklist: '',
+          draftComment: '',
+          draftTagLabel: '',
+        },
+      });
+      setPlanningOpenTarget(null);
+    }
+  }, [planningOpenTarget, companyKey, companyWorkspaces, board.activeWorkspaceIdByEmpresa]);
 
   const setActiveWorkspace = (workspaceId) => updateBoard(current => ({
     ...current,
@@ -15093,7 +15122,7 @@ const Sidebar = () => {
 };
 
 const Header = () => {
-  const { setSidebarOpen, sidebarOpen, effectiveSidebarOpen, activeModule, empresas, activeEmpresaId, setActiveEmpresaId, getAccessibleEmpresaIds, currentUser, planningNotifications, setPlanningNotifications } = useContext(ERPContext);
+  const { setSidebarOpen, sidebarOpen, effectiveSidebarOpen, activeModule, setActiveModule, empresas, activeEmpresaId, setActiveEmpresaId, getAccessibleEmpresaIds, currentUser, planningNotifications, setPlanningNotifications, setPlanningOpenTarget } = useContext(ERPContext);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const titleMap = {
     'dashboard': 'Dashboard Principal',
@@ -15139,6 +15168,16 @@ const Header = () => {
   const unreadNotifications = userNotifications.filter(item => !item.read);
   const markNotificationRead = (notificationId) => setPlanningNotifications(prev => prev.map(item => item.id === notificationId ? { ...item, read: true } : item));
   const markAllNotificationsRead = () => setPlanningNotifications(prev => prev.map(item => item.userId === currentUser.id ? { ...item, read: true } : item));
+  const openNotification = (notification) => {
+    markNotificationRead(notification.id);
+    setPlanningOpenTarget({
+      empresaId: planningCompanyKey(activeEmpresaId),
+      workspaceId: notification.workspaceId,
+      taskId: notification.taskId,
+    });
+    setActiveModule('dashboard-planning');
+    setNotificationsOpen(false);
+  };
   return (
     <header className="min-h-16 bg-white border-b border-slate-100 flex items-center justify-between gap-4 px-4 md:px-8 py-3 sticky top-0 z-40">
       <div className="flex items-center gap-3 md:gap-6 min-w-0">
@@ -15179,7 +15218,7 @@ const Header = () => {
               <div className="max-h-96 overflow-y-auto">
                 {userNotifications.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-400">Sin notificaciones.</div>}
                 {userNotifications.map(notification => (
-                  <button key={notification.id} onClick={() => markNotificationRead(notification.id)} className={`w-full text-left px-4 py-3 border-b border-slate-100 hover:bg-slate-50 ${notification.read ? 'bg-white' : 'bg-blue-50/50'}`}>
+                  <button key={notification.id} onClick={() => openNotification(notification)} className={`w-full text-left px-4 py-3 border-b border-slate-100 hover:bg-slate-50 ${notification.read ? 'bg-white' : 'bg-blue-50/50'}`}>
                     <div className="flex items-start gap-3">
                       <div className={`mt-1 h-2.5 w-2.5 rounded-full ${notification.read ? 'bg-slate-300' : 'bg-blue-500'}`}></div>
                       <div className="min-w-0">
