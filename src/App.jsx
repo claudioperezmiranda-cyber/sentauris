@@ -1775,7 +1775,7 @@ const planningResolveMaintenanceAccess = (usuarios = [], currentUser = null) => 
     assigneeIds: assignedUsers.map(user => user.id).filter(Boolean),
     shares: assignedUsers
       .filter(user => user.id && user.id !== (cperezUser?.id || currentUser?.id))
-      .map(user => ({ userId: user.id, role: planningUsername(user) === 'cperez' ? 'editor' : 'viewer' })),
+      .map(user => ({ userId: user.id, role: 'viewer' })),
   };
 };
 const planningBuildNotifications = ({ task, workspace, recipientIds = [], authorName = '' }) => recipientIds.map(userId => ({
