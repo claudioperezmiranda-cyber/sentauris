@@ -714,6 +714,7 @@ const APP_DATA_KEYS = {
   protocolos_preventivos: 'sentauris_protocolos_preventivos',
   monedas_indicadores: 'sentauris_monedas_indicadores',
   planificacion_tecnicos: 'sentauris_planificacion_tecnicos',
+  planning_board: 'sentauris_planning_board',
 };
 
 const appDataParamId = (key) => `app_data:${key}`;
@@ -921,6 +922,7 @@ const ERPProvider = ({ children }) => {
     ...(readLocalObj('sentauris_protocolos_preventivos') || {}),
   }));
   const [planificacionTecnicos, setPlanificacionTecnicos] = useState(() => readLocalObj('sentauris_planificacion_tecnicos') || {});
+  const [planningBoard, setPlanningBoard] = useState(() => readLocalObj('sentauris_planning_board') || {});
   const [loading, setLoading] = useState(true);
   const [dbStatus, setDbStatus] = useState('connecting'); // 'connecting' | 'ok' | 'error'
   const appDataLoadedRef = useRef(false);
@@ -986,6 +988,7 @@ const ERPProvider = ({ children }) => {
             monedas_indicadores: setMonedasIndicadores,
             protocolos_preventivos: setProtocolosPreventivos,
             planificacion_tecnicos: setPlanificacionTecnicos,
+            planning_board: setPlanningBoard,
           };
           const appDataResponse = await loadAppDataFromSupabase(Object.keys(appDataSetters));
           if (appDataResponse.error) {
@@ -1000,11 +1003,13 @@ const ERPProvider = ({ children }) => {
                   ? normalizeMonedasIndicadores(remoteByKey.get(key) || {})
                   : key === 'planificacion_tecnicos'
                   ? (remoteByKey.get(key) || {})
+                  : key === 'planning_board'
+                  ? (remoteByKey.get(key) || {})
                   : (Array.isArray(remoteByKey.get(key)) ? remoteByKey.get(key) : []);
                 if (setter) setter(remoteValue);
                 localStorage.setItem(APP_DATA_KEYS[key], JSON.stringify(remoteValue));
               } else {
-                const localValue = key === 'protocolos_preventivos' || key === 'monedas_indicadores' || key === 'planificacion_tecnicos'
+                const localValue = key === 'protocolos_preventivos' || key === 'monedas_indicadores' || key === 'planificacion_tecnicos' || key === 'planning_board'
                   ? readLocalObj(APP_DATA_KEYS[key])
                   : readLocalList(APP_DATA_KEYS[key]);
                 if ((Array.isArray(localValue) && localValue.length > 0) || (localValue && typeof localValue === 'object' && Object.keys(localValue).length > 0)) {
@@ -1106,6 +1111,10 @@ const ERPProvider = ({ children }) => {
   useEffect(() => {
     persistAppData('planificacion_tecnicos', APP_DATA_KEYS.planificacion_tecnicos, planificacionTecnicos);
   }, [planificacionTecnicos]);
+
+  useEffect(() => {
+    persistAppData('planning_board', APP_DATA_KEYS.planning_board, planningBoard);
+  }, [planningBoard]);
 
   const setParametros = async (nextParametros) => {
     setParametrosState(nextParametros);
@@ -1221,6 +1230,7 @@ const ERPProvider = ({ children }) => {
       monedasIndicadores, setMonedasIndicadores,
       protocolosPreventivos, setProtocolosPreventivos,
       planificacionTecnicos, setPlanificacionTecnicos,
+      planningBoard, setPlanningBoard,
       parametros, setParametros,
       loading, dbStatus
     }}>
@@ -1611,44 +1621,734 @@ const Dashboard = () => {
   );
 };
 
+const PLANNING_COLUMN_TEMPLATES = [
+  { title: 'Pendiente', accent: 'bg-slate-500' },
+  { title: 'En curso', accent: 'bg-blue-500' },
+  { title: 'Bloqueado', accent: 'bg-amber-500' },
+  { title: 'Pendientes de Pago', accent: 'bg-fuchsia-500' },
+  { title: 'Completado', accent: 'bg-emerald-500' },
+];
+const PLANNING_PROGRESS_OPTIONS = ['No iniciado', 'En curso', 'Bloqueado', 'Completado'];
+const PLANNING_PRIORITY_OPTIONS = ['Baja', 'Media', 'Alta', 'Urgente'];
+const PLANNING_REPEAT_OPTIONS = ['No se repite', 'Diario', 'Semanal', 'Mensual'];
+
+const planningCompanyKey = (empresaId) => empresaId || 'global';
+const planningNowIso = () => new Date().toISOString();
+const planningDateInputValue = (days = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+const planningInitials = (value = '') => value.split(' ').filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() || '').join('') || 'PL';
+const planningTone = (index = 0) => ['bg-fuchsia-600', 'bg-violet-600', 'bg-emerald-600', 'bg-sky-600', 'bg-amber-500', 'bg-rose-600'][index % 6];
+const planningPriorityTone = (priority) => ({
+  'Baja': 'bg-slate-400',
+  'Media': 'bg-emerald-400',
+  'Alta': 'bg-amber-400',
+  'Urgente': 'bg-rose-500',
+}[priority] || 'bg-emerald-400');
+const planningFormatShortDate = (value) => {
+  if (!value) return '';
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit' });
+};
+const planningFormatDateLabel = (value) => {
+  if (!value) return 'Sin fecha';
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
+const planningPreviewText = (value = '', max = 120) => {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
+};
+const normalizePlanningBoard = (raw) => {
+  const board = raw && typeof raw === 'object' ? raw : {};
+  return {
+    version: 1,
+    activeWorkspaceIdByEmpresa: board.activeWorkspaceIdByEmpresa && typeof board.activeWorkspaceIdByEmpresa === 'object' ? board.activeWorkspaceIdByEmpresa : {},
+    workspaces: Array.isArray(board.workspaces) ? board.workspaces.map(workspace => ({
+      id: workspace?.id || crypto.randomUUID(),
+      empresaId: workspace?.empresaId || null,
+      name: workspace?.name || 'Nuevo plan',
+      description: workspace?.description || '',
+      color: workspace?.color || 'bg-fuchsia-600',
+      columns: Array.isArray(workspace?.columns) ? workspace.columns.map((column, index) => ({
+        id: column?.id || crypto.randomUUID(),
+        title: column?.title || `Columna ${index + 1}`,
+        accent: column?.accent || planningTone(index),
+      })) : [],
+      tasks: Array.isArray(workspace?.tasks) ? workspace.tasks.map(task => ({
+        ...task,
+        id: task?.id || crypto.randomUUID(),
+        checklist: Array.isArray(task?.checklist) ? task.checklist : [],
+        attachments: Array.isArray(task?.attachments) ? task.attachments : [],
+        comments: Array.isArray(task?.comments) ? task.comments : [],
+        assigneeIds: Array.isArray(task?.assigneeIds) ? task.assigneeIds : [],
+        priority: task?.priority || 'Media',
+        progress: task?.progress || 'No iniciado',
+        repeat: task?.repeat || 'No se repite',
+        showNotesOnCard: task?.showNotesOnCard !== false,
+      })) : [],
+    })) : [],
+  };
+};
+const createPlanningTask = ({ workspaceId, columnId, currentUser, overrides = {} }) => ({
+  id: crypto.randomUUID(),
+  workspaceId,
+  columnId,
+  title: '',
+  tag: '',
+  progress: 'No iniciado',
+  priority: 'Media',
+  repeat: 'No se repite',
+  startDate: '',
+  dueDate: planningDateInputValue(7),
+  notes: '',
+  showNotesOnCard: true,
+  assigneeIds: currentUser?.id ? [currentUser.id] : [],
+  checklist: [],
+  attachments: [],
+  comments: [],
+  createdAt: planningNowIso(),
+  updatedAt: planningNowIso(),
+  createdBy: currentUser?.id || 'planner',
+  ...overrides,
+});
+const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 'Gestion de Proveedores', description = 'Operaciones - Gestion Interna' }) => {
+  const id = crypto.randomUUID();
+  const columns = PLANNING_COLUMN_TEMPLATES.map((column, index) => ({
+    id: crypto.randomUUID(),
+    title: column.title,
+    accent: column.accent || planningTone(index),
+  }));
+  const workspace = {
+    id,
+    empresaId: empresaId || null,
+    name,
+    description,
+    color: 'bg-fuchsia-600',
+    columns,
+    tasks: [],
+  };
+  if (seed) {
+    workspace.tasks = [
+      createPlanningTask({
+        workspaceId: id,
+        columnId: columns[0].id,
+        currentUser,
+        overrides: {
+          title: 'Fabricación de Baranda - JosonCare Es-99HD',
+          tag: 'Operaciones',
+          dueDate: planningDateInputValue(4),
+          notes: 'Cantidad 2. Reparación de barras paralela y fabricación de armazón de baranda para replicar modelo de plástico y pintura electrostática.',
+          checklist: [
+            { id: crypto.randomUUID(), text: 'Confirmar material disponible', done: true },
+            { id: crypto.randomUUID(), text: 'Validar anticipo del cliente', done: false },
+          ],
+        },
+      }),
+    ];
+  }
+  return workspace;
+};
+const sanitizePlanningTask = (task) => {
+  const {
+    draftChecklist,
+    draftAttachmentName,
+    draftAttachmentUrl,
+    draftComment,
+    ...cleanTask
+  } = task || {};
+  return {
+  ...cleanTask,
+  checklist: (task.checklist || []).map(item => ({ id: item.id || crypto.randomUUID(), text: item.text || '', done: Boolean(item.done) })),
+  attachments: (task.attachments || []).map(item => ({ id: item.id || crypto.randomUUID(), name: item.name || 'Adjunto', url: item.url || '' })),
+  comments: (task.comments || []).map(item => ({ id: item.id || crypto.randomUUID(), text: item.text || '', authorId: item.authorId || '', authorName: item.authorName || '', createdAt: item.createdAt || planningNowIso() })),
+  };
+};
+
+const PlanningTaskModal = ({ workspace, columns, users, modal, setModal, onClose, onSave, onDelete, onDuplicate }) => {
+  if (!modal) return null;
+  const task = modal.data;
+  const cardVisible = task.showNotesOnCard !== false;
+  const toggleAssignee = (id) => setModal(prev => ({
+    ...prev,
+    data: {
+      ...prev.data,
+      assigneeIds: prev.data.assigneeIds.includes(id)
+        ? prev.data.assigneeIds.filter(item => item !== id)
+        : [...prev.data.assigneeIds, id],
+    },
+  }));
+  const updateField = (key, value) => setModal(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
+  const addChecklistItem = () => {
+    const text = String(task.draftChecklist || '').trim();
+    if (!text) return;
+    updateField('checklist', [...(task.checklist || []), { id: crypto.randomUUID(), text, done: false }]);
+    updateField('draftChecklist', '');
+  };
+  const addAttachment = () => {
+    const name = String(task.draftAttachmentName || '').trim();
+    const url = String(task.draftAttachmentUrl || '').trim();
+    if (!name && !url) return;
+    updateField('attachments', [...(task.attachments || []), { id: crypto.randomUUID(), name: name || url, url }]);
+    updateField('draftAttachmentName', '');
+    updateField('draftAttachmentUrl', '');
+  };
+  const addComment = () => {
+    const text = String(task.draftComment || '').trim();
+    if (!text) return;
+    updateField('comments', [...(task.comments || []), { id: crypto.randomUUID(), text, authorId: users[0]?.id || '', authorName: users[0]?.name || 'Equipo', createdAt: planningNowIso() }]);
+    updateField('draftComment', '');
+  };
+  const copyTaskRef = async () => {
+    const ref = `planning:${workspace.id}:${task.id}`;
+    try { await navigator.clipboard.writeText(ref); } catch {}
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[130] bg-black/65 backdrop-blur-sm p-3 md:p-6 overflow-y-auto">
+      <div className="min-h-full flex items-start justify-center">
+        <div className="w-full max-w-5xl bg-[#232323] text-slate-100 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-white/10 bg-[#1d1d1d]">
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-indigo-300">{workspace.name}</p>
+              <p className="text-sm text-slate-400 truncate">{workspace.description || 'Panel de planificación interno'}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={onDuplicate} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm">Copiar tarea</button>
+              <button onClick={copyTaskRef} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm">Copiar vinculo</button>
+              <button onClick={onDelete} className="px-3 py-2 rounded-lg bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 text-sm">Eliminar</button>
+              <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X size={18} /></button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="p-5 md:p-6 space-y-6">
+              <div className="space-y-2">
+                <input value={task.title} onChange={e => updateField('title', e.target.value)} placeholder="Titulo de la tarea"
+                  className="w-full bg-transparent text-2xl font-semibold outline-none border-b border-white/10 pb-3 placeholder:text-slate-500" />
+                <div className="flex flex-wrap gap-2">
+                  {users.map((user, index) => {
+                    const active = task.assigneeIds.includes(user.id);
+                    return (
+                      <button key={user.id} onClick={() => toggleAssignee(user.id)}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-transparent bg-white text-slate-900' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                        <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(index)}`}>{planningInitials(user.name || user.nombre || user.usuario)}</span>
+                        <span>{user.name || user.nombre || user.usuario}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <label className="space-y-1.5">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Deposito</span>
+                  <select value={task.columnId} onChange={e => updateField('columnId', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                    {columns.map(column => <option key={column.id} value={column.id} className="text-slate-900">{column.title}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Progreso</span>
+                  <select value={task.progress} onChange={e => updateField('progress', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                    {PLANNING_PROGRESS_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Prioridad</span>
+                  <select value={task.priority} onChange={e => updateField('priority', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                    {PLANNING_PRIORITY_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Fecha de inicio</span>
+                  <input type="date" value={task.startDate || ''} onChange={e => updateField('startDate', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm" />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Fecha de vencimiento</span>
+                  <input type="date" value={task.dueDate || ''} onChange={e => updateField('dueDate', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm" />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Repetir</span>
+                  <select value={task.repeat} onChange={e => updateField('repeat', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                    {PLANNING_REPEAT_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-4">
+                <label className="space-y-1.5">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Etiqueta</span>
+                  <input value={task.tag || ''} onChange={e => updateField('tag', e.target.value)} placeholder="Agregar etiqueta"
+                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
+                </label>
+                <label className="flex items-end gap-2 pb-2 text-sm text-slate-300">
+                  <input type="checkbox" checked={cardVisible} onChange={e => updateField('showNotesOnCard', e.target.checked)} className="rounded border-white/20 bg-transparent" />
+                  Mostrar notas en la tarjeta
+                </label>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-slate-200">Notas</p>
+                <textarea value={task.notes || ''} onChange={e => updateField('notes', e.target.value)} rows={6}
+                  className="w-full rounded-2xl bg-[#181818] border border-white/10 px-4 py-3 text-sm leading-6 placeholder:text-slate-500" placeholder="Describe el alcance, restricciones y observaciones de la tarea." />
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-200">Lista de comprobación</p>
+                <div className="space-y-2">
+                  {(task.checklist || []).map(item => (
+                    <label key={item.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm">
+                      <input type="checkbox" checked={Boolean(item.done)} onChange={e => updateField('checklist', task.checklist.map(entry => entry.id === item.id ? { ...entry, done: e.target.checked } : entry))} />
+                      <span className={`flex-1 ${item.done ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{item.text}</span>
+                      <button onClick={() => updateField('checklist', task.checklist.filter(entry => entry.id !== item.id))} className="text-slate-500 hover:text-rose-300"><Trash2 size={14} /></button>
+                    </label>
+                  ))}
+                  <div className="flex gap-2">
+                    <input value={task.draftChecklist || ''} onChange={e => updateField('draftChecklist', e.target.value)} placeholder="Agregar un elemento"
+                      className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
+                    <button onClick={addChecklistItem} className="px-4 rounded-xl bg-white/10 hover:bg-white/15 text-sm">Agregar</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t xl:border-t-0 xl:border-l border-white/10 bg-[#1e1e1e] p-5 md:p-6 space-y-5">
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-200">Datos adjuntos</p>
+                <div className="space-y-2">
+                  {(task.attachments || []).map(item => (
+                    <div key={item.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
+                      <FileText size={15} className="text-blue-300 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-slate-100 truncate">{item.name}</p>
+                        <p className="text-[11px] text-slate-500 truncate">{item.url || 'Sin URL'}</p>
+                      </div>
+                      <button onClick={() => updateField('attachments', task.attachments.filter(entry => entry.id !== item.id))} className="text-slate-500 hover:text-rose-300"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                  <input value={task.draftAttachmentName || ''} onChange={e => updateField('draftAttachmentName', e.target.value)} placeholder="Nombre del adjunto"
+                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
+                  <input value={task.draftAttachmentUrl || ''} onChange={e => updateField('draftAttachmentUrl', e.target.value)} placeholder="URL o referencia"
+                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
+                  <button onClick={addAttachment} className="w-full px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-sm">Agregar datos adjuntos</button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-200">Comentarios</p>
+                <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+                  {(task.comments || []).map(item => (
+                    <div key={item.id} className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                        <span>{item.authorName}</span>
+                        <span>{new Date(item.createdAt).toLocaleString('es-CL')}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-200 whitespace-pre-wrap">{item.text}</p>
+                    </div>
+                  ))}
+                </div>
+                <textarea value={task.draftComment || ''} onChange={e => updateField('draftComment', e.target.value)} rows={3}
+                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" placeholder="Escribe un comentario" />
+                <button onClick={addComment} className="w-full px-4 py-2.5 rounded-xl bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 text-sm">Agregar comentario</button>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2 text-sm">
+                <p className="font-semibold text-slate-200">Resumen de tarjeta</p>
+                <div className="flex items-center gap-2 text-slate-400"><span className={`h-2.5 w-2.5 rounded-full ${planningPriorityTone(task.priority)}`}></span>{task.priority}</div>
+                <p className="text-slate-400">Vence: {planningFormatDateLabel(task.dueDate)}</p>
+                <p className="text-slate-400">Checklist: {(task.checklist || []).filter(item => item.done).length}/{(task.checklist || []).length}</p>
+                <div className="pt-3 flex items-center justify-end gap-2">
+                  <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm hover:bg-white/5">Cancelar</button>
+                  <button onClick={onSave} className="px-4 py-2.5 rounded-xl bg-indigo-500 text-white text-sm hover:bg-indigo-400">Guardar tarea</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 const DashboardPlanning = () => {
-  const { clientes, licitaciones } = useContext(ERPContext);
+  const { currentUser, usuarios, activeEmpresaId, currentEmpresa, planningBoard, setPlanningBoard } = useContext(ERPContext);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [columnDraft, setColumnDraft] = useState('');
+  const [planModal, setPlanModal] = useState(null);
+  const [taskModal, setTaskModal] = useState(null);
+
+  const companyKey = planningCompanyKey(activeEmpresaId);
+  const board = normalizePlanningBoard(planningBoard);
+  const planners = (usuarios || []).length > 0
+    ? usuarios.map(user => ({ ...user, name: user.nombre || user.name || user.usuario || 'Usuario' }))
+    : [{ id: currentUser.id || 'planner', name: currentUser.name || 'Planner' }];
+  const companyWorkspaces = board.workspaces.filter(workspace => planningCompanyKey(workspace.empresaId) === companyKey);
+  const activeWorkspaceId = board.activeWorkspaceIdByEmpresa[companyKey] && companyWorkspaces.some(workspace => workspace.id === board.activeWorkspaceIdByEmpresa[companyKey])
+    ? board.activeWorkspaceIdByEmpresa[companyKey]
+    : companyWorkspaces[0]?.id || '';
+  const activeWorkspace = companyWorkspaces.find(workspace => workspace.id === activeWorkspaceId) || null;
+
+  const updateBoard = (recipe) => setPlanningBoard(prev => {
+    const current = normalizePlanningBoard(prev);
+    return normalizePlanningBoard(recipe(current));
+  });
+
+  useEffect(() => {
+    if (companyWorkspaces.length > 0) return;
+    updateBoard(current => {
+      const workspace = createPlanningWorkspace({ empresaId: activeEmpresaId || null, currentUser, seed: true });
+      return {
+        ...current,
+        workspaces: [...current.workspaces, workspace],
+        activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: workspace.id },
+      };
+    });
+  }, [companyWorkspaces.length, companyKey, activeEmpresaId, currentUser.id]);
+
+  useEffect(() => {
+    if (!activeWorkspace || board.activeWorkspaceIdByEmpresa[companyKey]) return;
+    updateBoard(current => ({
+      ...current,
+      activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: activeWorkspace.id },
+    }));
+  }, [activeWorkspace?.id, companyKey]);
+
+  const setActiveWorkspace = (workspaceId) => updateBoard(current => ({
+    ...current,
+    activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: workspaceId },
+  }));
+
+  const saveWorkspace = () => {
+    if (!planModal?.name?.trim()) return;
+    updateBoard(current => {
+      const workspace = createPlanningWorkspace({
+        empresaId: activeEmpresaId || null,
+        currentUser,
+        name: planModal.name.trim(),
+        description: String(planModal.description || '').trim(),
+      });
+      return {
+        ...current,
+        workspaces: [...current.workspaces, workspace],
+        activeWorkspaceIdByEmpresa: { ...current.activeWorkspaceIdByEmpresa, [companyKey]: workspace.id },
+      };
+    });
+    setPlanModal(null);
+  };
+
+  const addColumn = () => {
+    if (!activeWorkspace || !columnDraft.trim()) return;
+    updateBoard(current => ({
+      ...current,
+      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
+        ? {
+            ...workspace,
+            columns: [...workspace.columns, { id: crypto.randomUUID(), title: columnDraft.trim(), accent: planningTone(workspace.columns.length) }],
+          }
+        : workspace),
+    }));
+    setColumnDraft('');
+  };
+
+  const openTask = (columnId, existingTask = null) => {
+    if (!activeWorkspace) return;
+    setTaskModal({
+      mode: existingTask ? 'edit' : 'new',
+      data: existingTask
+        ? {
+            ...existingTask,
+            draftChecklist: '',
+            draftAttachmentName: '',
+            draftAttachmentUrl: '',
+            draftComment: '',
+          }
+        : createPlanningTask({ workspaceId: activeWorkspace.id, columnId, currentUser }),
+    });
+  };
+
+  const saveTask = () => {
+    if (!taskModal?.data?.title?.trim() || !activeWorkspace) return;
+    const cleanTask = sanitizePlanningTask({
+      ...taskModal.data,
+      title: taskModal.data.title.trim(),
+      tag: String(taskModal.data.tag || '').trim(),
+      notes: String(taskModal.data.notes || '').trim(),
+      updatedAt: planningNowIso(),
+    });
+    updateBoard(current => ({
+      ...current,
+      workspaces: current.workspaces.map(workspace => {
+        if (workspace.id !== activeWorkspace.id) return workspace;
+        const exists = workspace.tasks.some(task => task.id === cleanTask.id);
+        return {
+          ...workspace,
+          tasks: exists
+            ? workspace.tasks.map(task => task.id === cleanTask.id ? cleanTask : task)
+            : [cleanTask, ...workspace.tasks],
+        };
+      }),
+    }));
+    setTaskModal(null);
+  };
+
+  const duplicateTask = () => {
+    if (!taskModal?.data || !activeWorkspace) return;
+    const duplicated = sanitizePlanningTask({
+      ...taskModal.data,
+      id: crypto.randomUUID(),
+      title: `${taskModal.data.title || 'Tarea'} (copia)`,
+      createdAt: planningNowIso(),
+      updatedAt: planningNowIso(),
+      comments: [],
+    });
+    updateBoard(current => ({
+      ...current,
+      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
+        ? { ...workspace, tasks: [duplicated, ...workspace.tasks] }
+        : workspace),
+    }));
+  };
+
+  const deleteTask = () => {
+    if (!taskModal?.data || !activeWorkspace) return;
+    updateBoard(current => ({
+      ...current,
+      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
+        ? { ...workspace, tasks: workspace.tasks.filter(task => task.id !== taskModal.data.id) }
+        : workspace),
+    }));
+    setTaskModal(null);
+  };
+
+  const filteredTasks = activeWorkspace
+    ? activeWorkspace.tasks.filter(task => {
+        const haystack = `${task.title} ${task.notes} ${task.tag}`.toLowerCase();
+        return haystack.includes(searchTerm.toLowerCase());
+      })
+    : [];
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
-      <div>
-        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Dashboard</p>
-        <h2 className="text-2xl font-black text-slate-900">Planning</h2>
-        <p className="mt-2 text-sm text-slate-500">Submodulo listo para centralizar seguimiento, prioridades y plan de trabajo.</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <p className="text-[10px] font-black uppercase text-slate-400">Clientes base</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{clientes.length}</p>
-          <p className="mt-1 text-xs text-slate-500">Disponibles para asociar planificaciones.</p>
-        </Card>
-        <Card>
-          <p className="text-[10px] font-black uppercase text-slate-400">Licitaciones</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{licitaciones.length}</p>
-          <p className="mt-1 text-xs text-slate-500">Base operativa para futuros hitos y agenda.</p>
-        </Card>
-        <Card>
-          <p className="text-[10px] font-black uppercase text-slate-400">Estado</p>
-          <p className="mt-2 text-2xl font-black text-blue-600">Activo</p>
-          <p className="mt-1 text-xs text-slate-500">Vista creada y lista para extender con widgets.</p>
-        </Card>
-      </div>
-
-      <Card>
-        <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center">
-          <div className="w-12 h-12 mx-auto rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-            <LayoutDashboard size={24} />
+    <div className="min-h-[calc(100vh-10rem)] bg-[#1f1f1f] text-slate-100 rounded-[28px] border border-slate-800 shadow-[0_30px_70px_rgba(0,0,0,0.35)] overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+      <div className="flex min-h-[calc(100vh-10rem)]">
+        <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} shrink-0 border-r border-white/10 bg-[#242424] transition-all duration-300`}>
+          <div className="flex items-center justify-between px-4 py-4 border-b border-white/10">
+            <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
+              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-fuchsia-500/20">
+                <LayoutDashboard size={18} />
+              </div>
+              {!sidebarCollapsed && (
+                <div>
+                  <p className="font-semibold">Planner</p>
+                  <p className="text-xs text-slate-500">{currentEmpresa?.nombre || currentEmpresa?.empresa || 'Espacio general'}</p>
+                </div>
+              )}
+            </div>
+            {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="p-2 rounded-lg hover:bg-white/5"><ChevronLeft size={16} /></button>}
+            {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} className="absolute mt-14 ml-5 p-2 rounded-lg hover:bg-white/5"><ChevronRight size={16} /></button>}
           </div>
-          <p className="mt-3 text-sm font-semibold text-slate-700">Planning Dashboard</p>
-          <p className="mt-1 text-xs text-slate-400">Este espacio ya quedó integrado al Dashboard y puede recibir calendario, carga de trabajo, alertas y KPIs de planificación.</p>
-        </div>
-      </Card>
+
+          <div className="px-3 py-4 space-y-4">
+            <div className="space-y-1">
+              {[
+                { label: 'Mi dia', icon: Bell },
+                { label: 'Mis tareas', icon: CheckCircle2 },
+                { label: 'Mis planes', icon: ClipboardList },
+              ].map(item => (
+                <button key={item.label} className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/5 ${sidebarCollapsed ? 'justify-center' : ''}`}>
+                  <item.icon size={16} className="text-slate-400" />
+                  {!sidebarCollapsed && <span className="text-sm text-slate-300">{item.label}</span>}
+                </button>
+              ))}
+            </div>
+
+            {!sidebarCollapsed && <p className="px-3 text-[11px] uppercase tracking-[0.24em] text-slate-500">Anclado</p>}
+            <div className="space-y-1">
+              {companyWorkspaces.map((workspace, index) => (
+                <button key={workspace.id} onClick={() => setActiveWorkspace(workspace.id)}
+                  className={`w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${activeWorkspace?.id === workspace.id ? 'bg-white/10 text-white' : 'hover:bg-white/5 text-slate-300'} ${sidebarCollapsed ? 'justify-center' : ''}`}>
+                  <span className={`h-8 w-8 rounded-xl flex items-center justify-center text-xs font-bold text-white ${workspace.color || planningTone(index)}`}>{planningInitials(workspace.name)}</span>
+                  {!sidebarCollapsed && (
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{workspace.name}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{workspace.description || 'Sin descripción'}</p>
+                    </div>
+                  )}
+                  {!sidebarCollapsed && <MoreVertical size={14} className="text-slate-500" />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-auto px-3 pb-4">
+            <button onClick={() => setPlanModal({ name: '', description: '' })}
+              className={`w-full flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm hover:bg-white/10 ${sidebarCollapsed ? 'justify-center' : ''}`}>
+              <Plus size={16} />
+              {!sidebarCollapsed && <span>Nuevo plan</span>}
+            </button>
+          </div>
+        </aside>
+
+        <section className="flex-1 min-w-0 bg-[#1f1f1f]">
+          <div className="border-b border-white/10 px-5 py-4">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-3 text-sm text-slate-400">
+                  <span>Mis planes</span>
+                  <span className="text-slate-600">/</span>
+                  <span className="text-fuchsia-300">{activeWorkspace?.name || 'Planning'}</span>
+                  <span className="text-slate-600">/</span>
+                  <span className="text-white font-semibold">Panel</span>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm text-slate-300">
+                    <Search size={15} className="text-slate-500" />
+                    <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Buscar tarjeta"
+                      className="bg-transparent outline-none placeholder:text-slate-500 min-w-[180px]" />
+                  </div>
+                  <button className="inline-flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10">
+                    <Info size={14} />
+                    Filtros
+                  </button>
+                  <button className="inline-flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10">
+                    <ArrowUpDown size={14} />
+                    Agrupar por deposito
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300">Compartir</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5">
+            {!activeWorkspace ? (
+              <div className="rounded-3xl border border-dashed border-white/10 p-10 text-center text-slate-400">Preparando planning...</div>
+            ) : (
+              <div className="flex gap-5 overflow-x-auto pb-4">
+                {activeWorkspace.columns.map((column, index) => {
+                  const tasks = filteredTasks.filter(task => task.columnId === column.id);
+                  return (
+                    <div key={column.id} className="w-[320px] shrink-0">
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`h-2.5 w-2.5 rounded-full ${column.accent || planningTone(index)}`}></span>
+                          <h3 className="font-medium truncate">{column.title}</h3>
+                          <span className="text-xs text-slate-500">{tasks.length}</span>
+                        </div>
+                      </div>
+                      <button onClick={() => openTask(column.id)} className="w-full mb-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-indigo-300 hover:bg-white/10">
+                        + Agregar tarea
+                      </button>
+                      <div className="space-y-4">
+                        {tasks.map(task => {
+                          const completedChecklist = (task.checklist || []).filter(item => item.done).length;
+                          const assignees = planners.filter(user => (task.assigneeIds || []).includes(user.id));
+                          return (
+                            <button key={task.id} onClick={() => openTask(column.id, task)}
+                              className="w-full text-left rounded-3xl bg-[#262626] border border-white/10 shadow-lg shadow-black/15 overflow-hidden hover:border-white/20 transition-colors">
+                              <div className="h-28 bg-gradient-to-br from-white/5 to-transparent border-b border-white/5 flex items-center justify-center">
+                                <LayoutDashboard size={20} className="text-slate-500" />
+                              </div>
+                              <div className="p-4 space-y-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="font-medium leading-5 text-slate-100">{task.title || 'Sin titulo'}</p>
+                                    {task.tag && <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-indigo-300">{task.tag}</p>}
+                                  </div>
+                                  <MoreVertical size={15} className="text-slate-500 shrink-0" />
+                                </div>
+                                {task.showNotesOnCard !== false && task.notes && (
+                                  <p className="text-xs leading-5 text-slate-400">{planningPreviewText(task.notes)}</p>
+                                )}
+                                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                                  {task.dueDate && <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-2 py-1 text-rose-300">{planningFormatShortDate(task.dueDate)}</span>}
+                                  <span className="inline-flex items-center gap-1"><CheckCircle size={12} /> {completedChecklist}/{(task.checklist || []).length}</span>
+                                  <span className="inline-flex items-center gap-1"><FileText size={12} /> {(task.attachments || []).length}</span>
+                                  <span className="inline-flex items-center gap-1"><Bell size={12} /> {(task.comments || []).length}</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-1">
+                                    {assignees.slice(0, 3).map((user, assigneeIndex) => (
+                                      <span key={user.id} className={`h-7 w-7 rounded-full border border-[#262626] -ml-1 first:ml-0 flex items-center justify-center text-[10px] font-bold text-white ${planningTone(assigneeIndex)}`}>
+                                        {planningInitials(user.name)}
+                                      </span>
+                                    ))}
+                                    {assignees.length > 3 && <span className="text-[11px] text-slate-500 ml-1">+{assignees.length - 3}</span>}
+                                  </div>
+                                  <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                                    <span className={`h-2.5 w-2.5 rounded-full ${planningPriorityTone(task.priority)}`}></span>
+                                    {task.priority}
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div className="w-[280px] shrink-0">
+                  <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] p-4 space-y-3">
+                    <p className="text-sm font-medium text-slate-300">Agregar nuevo deposito</p>
+                    <input value={columnDraft} onChange={e => setColumnDraft(e.target.value)} placeholder="Nombre de la columna"
+                      className="w-full rounded-2xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
+                    <button onClick={addColumn} className="w-full rounded-2xl bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 px-4 py-2.5 text-sm">Crear columna</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {planModal && createPortal(
+        <div className="fixed inset-0 z-[125] bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center">
+          <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#232323] text-slate-100 shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+              <h3 className="font-semibold">Nuevo plan</h3>
+              <button onClick={() => setPlanModal(null)} className="p-2 rounded-lg hover:bg-white/10"><X size={16} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <label className="space-y-1.5 block">
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Nombre</span>
+                <input value={planModal.name} onChange={e => setPlanModal(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" placeholder="Gestión de Proveedores" />
+              </label>
+              <label className="space-y-1.5 block">
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Descripción</span>
+                <textarea value={planModal.description} onChange={e => setPlanModal(prev => ({ ...prev, description: e.target.value }))} rows={4}
+                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" placeholder="Operaciones - Gestión Interna" />
+              </label>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button onClick={() => setPlanModal(null)} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm hover:bg-white/5">Cancelar</button>
+                <button onClick={saveWorkspace} className="px-4 py-2.5 rounded-xl bg-indigo-500 text-white text-sm hover:bg-indigo-400">Guardar plan</button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      <PlanningTaskModal
+        workspace={activeWorkspace || { id: '', name: '', description: '' }}
+        columns={activeWorkspace?.columns || []}
+        users={planners}
+        modal={taskModal}
+        setModal={setTaskModal}
+        onClose={() => setTaskModal(null)}
+        onSave={saveTask}
+        onDelete={deleteTask}
+        onDuplicate={duplicateTask}
+      />
     </div>
   );
 };
