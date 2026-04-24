@@ -8582,7 +8582,7 @@ const MODULES_TREE = [
   },
   {
     id: 'calidad', label: 'Calidad', sub: [
-      { id: 'calidad-mantenimientos-calibraciones', label: 'Mantenimientos y/o Calibraciones' },
+      { id: 'calidad-equipamiento', label: 'Equipamiento' },
     ],
   },
   { id: 'personas',    label: 'Gestión de Personas',  sub: [] },
@@ -12407,6 +12407,9 @@ const emptyCalidadMantenimiento = () => ({
   fechaMantenimiento: '',
   responsable: '',
   estadoActivo: '',
+  fechaCalibracion: '',
+  responsableCalibracion: '',
+  estadoCalibracion: '',
 });
 
 const ActivosFijosContabilidad = () => {
@@ -12754,6 +12757,7 @@ const ActivosFijosContabilidad = () => {
 const CalidadMantenimientosCalibraciones = () => {
   const { activosFijos, calidadMantenimientos, setCalidadMantenimientos } = useContext(ERPContext);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('mantenciones');
   const [modal, setModal] = useState(null);
 
   const qualityRows = activosFijos
@@ -12768,13 +12772,16 @@ const CalidadMantenimientosCalibraciones = () => {
         fechaMantenimiento: extra.fechaMantenimiento || '',
         responsable: extra.responsable || '',
         estadoActivo: extra.estadoActivo || asset.estado || '',
+        fechaCalibracion: extra.fechaCalibracion || '',
+        responsableCalibracion: extra.responsableCalibracion || '',
+        estadoCalibracion: extra.estadoCalibracion || asset.estado || '',
       };
     })
     .filter(row => normalizeKey(Object.values(row).join(' ')).includes(normalizeKey(search)));
 
-  const openEdit = (row, maintenanceMode = false) => {
+  const openEdit = (row, maintenanceMode = false, calibrationMode = false) => {
     setModal({
-      mode: maintenanceMode ? 'maintenance' : 'edit',
+      mode: calibrationMode ? 'calibration' : (maintenanceMode ? 'maintenance' : 'edit'),
       data: {
         assetId: row.assetId,
         idActivo: row.idActivo,
@@ -12783,6 +12790,9 @@ const CalidadMantenimientosCalibraciones = () => {
         fechaMantenimiento: maintenanceMode ? accountingDate() : (row.fechaMantenimiento || ''),
         responsable: row.responsable || '',
         estadoActivo: maintenanceMode ? (row.estadoActivo || 'En mantenimiento') : (row.estadoActivo || ''),
+        fechaCalibracion: calibrationMode ? accountingDate() : (row.fechaCalibracion || ''),
+        responsableCalibracion: row.responsableCalibracion || '',
+        estadoCalibracion: calibrationMode ? (row.estadoCalibracion || 'Calibrado') : (row.estadoCalibracion || ''),
       },
     });
   };
@@ -12794,6 +12804,9 @@ const CalidadMantenimientosCalibraciones = () => {
       fechaMantenimiento: data.fechaMantenimiento || '',
       responsable: data.responsable || '',
       estadoActivo: data.estadoActivo || '',
+      fechaCalibracion: data.fechaCalibracion || '',
+      responsableCalibracion: data.responsableCalibracion || '',
+      estadoCalibracion: data.estadoCalibracion || '',
       updatedAt: new Date().toISOString(),
     };
     setCalidadMantenimientos(prev => {
@@ -12809,22 +12822,36 @@ const CalidadMantenimientosCalibraciones = () => {
     setModal(prev => ({ ...prev, data: { ...prev.data, [field]: value } }));
   };
 
+  const isMantencionesTab = activeTab === 'mantenciones';
+  const visibleRows = qualityRows;
+  const tabButtonClass = (tabId) => `px-4 py-2 text-sm font-bold border-b-2 transition-colors ${activeTab === tabId ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`;
+
   return (
     <div className="w-full max-w-none mx-auto animate-in fade-in slide-in-from-bottom-2 space-y-5">
       <div>
-        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad / Mantenimientos y/o Calibraciones</p>
-        <h2 className="text-2xl font-black text-slate-900">Mantenimientos y/o Calibraciones</h2>
-        <p className="mt-2 text-sm text-slate-500">Listado sincronizado con Activos Fijos, con control de mantenimiento, responsable y estado operativo del activo.</p>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad / Equipamiento</p>
+        <h2 className="text-2xl font-black text-slate-900">Equipamiento</h2>
+        <p className="mt-2 text-sm text-slate-500">Vista sincronizada con Activos Fijos para administrar mantenciones y calibraciones del equipamiento.</p>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="border-b border-slate-100 px-4 pt-3">
+          <div className="flex items-center gap-5">
+            <button type="button" onClick={() => setActiveTab('mantenciones')} className={tabButtonClass('mantenciones')}>
+              Mantenciones
+            </button>
+            <button type="button" onClick={() => setActiveTab('calibraciones')} className={tabButtonClass('calibraciones')}>
+              Calibraciones
+            </button>
+          </div>
+        </div>
         <div className="p-4 border-b border-slate-100">
           <div className="relative w-full md:max-w-xl">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar por ID activo, nombre, responsable o estado"
+              placeholder={isMantencionesTab ? 'Buscar por ID activo, nombre, responsable o estado de mantencion' : 'Buscar por ID activo, nombre, responsable o estado de calibracion'}
               className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
@@ -12836,37 +12863,37 @@ const CalidadMantenimientosCalibraciones = () => {
                 <th className="p-3 text-left">ID Activo</th>
                 <th className="p-3 text-left">Nombre Activo</th>
                 <th className="p-3 text-left">Fecha Adquisicion</th>
-                <th className="p-3 text-left">Fecha de Mantenimiento</th>
+                <th className="p-3 text-left">{isMantencionesTab ? 'Fecha de Mantencion' : 'Fecha de Calibracion'}</th>
                 <th className="p-3 text-left">Responsable</th>
-                <th className="p-3 text-left">Estado del Activo</th>
+                <th className="p-3 text-left">{isMantencionesTab ? 'Estado del Activo' : 'Estado de Calibracion'}</th>
                 <th className="p-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {qualityRows.map(row => (
+              {visibleRows.map(row => (
                 <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="p-3 font-semibold text-slate-800">{row.idActivo || '-'}</td>
                   <td className="p-3 min-w-64">{row.nombreActivo || '-'}</td>
                   <td className="p-3 font-mono">{row.fechaAdquisicion || '-'}</td>
-                  <td className="p-3 font-mono">{row.fechaMantenimiento || '-'}</td>
-                  <td className="p-3">{row.responsable || '-'}</td>
-                  <td className="p-3">{row.estadoActivo || '-'}</td>
+                  <td className="p-3 font-mono">{isMantencionesTab ? (row.fechaMantenimiento || '-') : (row.fechaCalibracion || '-')}</td>
+                  <td className="p-3">{isMantencionesTab ? (row.responsable || '-') : (row.responsableCalibracion || '-')}</td>
+                  <td className="p-3">{isMantencionesTab ? (row.estadoActivo || '-') : (row.estadoCalibracion || '-')}</td>
                   <td className="p-3">
                     <div className="flex items-center justify-end gap-1">
-                      <button type="button" onClick={() => openEdit(row, false)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Modificar datos">
+                      <button type="button" onClick={() => openEdit(row, false, !isMantencionesTab)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title={isMantencionesTab ? 'Modificar datos de mantencion' : 'Modificar datos de calibracion'}>
                         <Pencil size={15} />
                       </button>
-                      <button type="button" onClick={() => openEdit(row, true)} className="p-2 rounded-lg text-slate-400 hover:bg-emerald-50 hover:text-emerald-600" title="Registrar mantenimiento">
-                        <Wrench size={15} />
+                      <button type="button" onClick={() => openEdit(row, isMantencionesTab, !isMantencionesTab)} className="p-2 rounded-lg text-slate-400 hover:bg-emerald-50 hover:text-emerald-600" title={isMantencionesTab ? 'Registrar mantencion' : 'Registrar calibracion'}>
+                        {isMantencionesTab ? <Wrench size={15} /> : <CheckCircle size={15} />}
                       </button>
                     </div>
                   </td>
                 </tr>
               ))}
-              {qualityRows.length === 0 && (
+              {visibleRows.length === 0 && (
                 <tr>
                   <td colSpan="7" className="p-10 text-center text-sm text-slate-400">
-                    No hay activos fijos disponibles para mostrar en este submodulo.
+                    No hay activos fijos disponibles para mostrar en esta pestaña.
                   </td>
                 </tr>
               )}
@@ -12876,19 +12903,29 @@ const CalidadMantenimientosCalibraciones = () => {
       </div>
 
       {modal && (
-        <Modal title={modal.mode === 'maintenance' ? 'Registrar mantenimiento' : 'Modificar datos del activo'} onClose={() => setModal(null)} wide>
+        <Modal title={modal.mode === 'maintenance' ? 'Registrar mantencion' : modal.mode === 'calibration' ? 'Registrar calibracion' : 'Modificar datos del activo'} onClose={() => setModal(null)} wide>
           <p className="text-sm text-slate-500 mb-5">Los datos heredados de Activos Fijos son de solo lectura en este submodulo.</p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Input label="ID Activo" value={modal.data.idActivo || ''} disabled />
             <Input label="Nombre Activo" value={modal.data.nombreActivo || ''} disabled />
             <Input label="Fecha Adquisicion" type="date" value={modal.data.fechaAdquisicion || ''} disabled />
-            <Input label="Fecha de Mantenimiento" type="date" value={modal.data.fechaMantenimiento || ''} onChange={e => setField('fechaMantenimiento', e.target.value)} />
-            <Input label="Responsable" value={modal.data.responsable || ''} onChange={e => setField('responsable', e.target.value)} />
-            <Select label="Estado del Activo" value={modal.data.estadoActivo || ''} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
+            {modal.mode === 'calibration' ? (
+              <>
+                <Input label="Fecha de Calibracion" type="date" value={modal.data.fechaCalibracion || ''} onChange={e => setField('fechaCalibracion', e.target.value)} />
+                <Input label="Responsable" value={modal.data.responsableCalibracion || ''} onChange={e => setField('responsableCalibracion', e.target.value)} />
+                <Select label="Estado de Calibracion" value={modal.data.estadoCalibracion || ''} onChange={e => setField('estadoCalibracion', e.target.value)} options={['Calibrado', 'Pendiente de calibracion', 'En calibracion', 'Fuera de servicio', 'Baja']} />
+              </>
+            ) : (
+              <>
+                <Input label="Fecha de Mantencion" type="date" value={modal.data.fechaMantenimiento || ''} onChange={e => setField('fechaMantenimiento', e.target.value)} />
+                <Input label="Responsable" value={modal.data.responsable || ''} onChange={e => setField('responsable', e.target.value)} />
+                <Select label="Estado del Activo" value={modal.data.estadoActivo || ''} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
+              </>
+            )}
           </div>
           <div className="flex justify-end gap-3 mt-6">
             <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
-            <Button variant="accent" icon={CheckCircle} onClick={saveRow}>{modal.mode === 'maintenance' ? 'Guardar mantenimiento' : 'Guardar cambios'}</Button>
+            <Button variant="accent" icon={CheckCircle} onClick={saveRow}>{modal.mode === 'maintenance' ? 'Guardar mantencion' : modal.mode === 'calibration' ? 'Guardar calibracion' : 'Guardar cambios'}</Button>
           </div>
         </Modal>
       )}
@@ -14998,8 +15035,8 @@ const Sidebar = () => {
     'Usuarios': 'mantenedores-usuarios',
   }[label] || 'mantenedores-clientes');
   const calidadSubId = (label) => ({
-    'Mantenimientos y/o Calibraciones': 'calidad-mantenimientos-calibraciones',
-  }[label] || 'calidad-mantenimientos-calibraciones');
+    'Equipamiento': 'calidad-equipamiento',
+  }[label] || 'calidad-equipamiento');
 
   const subIdFor = (item, label) => {
     if (item.id.startsWith('operaciones'))     return opSubId(label);
@@ -15029,7 +15066,7 @@ const Sidebar = () => {
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
     { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Activos Fijos', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
-    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Mantenimientos y/o Calibraciones'] },
+    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Equipamiento'] },
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
   const menuBottom = [
@@ -15146,7 +15183,7 @@ const Header = () => {
     'contabilidad-informes-tributarios': 'Contabilidad / Informes Tributarios',
     'contabilidad-analiticos': 'Contabilidad / Analiticos',
     'contabilidad-estados-financieros': 'Contabilidad / Estados Financieros',
-    'calidad-mantenimientos-calibraciones': 'Calidad / Mantenimientos y/o Calibraciones',
+    'calidad-equipamiento': 'Calidad / Equipamiento',
     'mantenedores-clientes': 'Mantenedores / Clientes y/o Proveedores',
     'mantenedores-licitaciones': 'Mantenedores / Licitaciones',
     'mantenedores-equipos': 'Mantenedores / Equipos',
@@ -15527,7 +15564,7 @@ const ContentManager = () => {
     'contabilidad-informes-tributarios': 'contabilidad',
     'contabilidad-analiticos': 'contabilidad',
     'contabilidad-estados-financieros': 'contabilidad',
-    'calidad-mantenimientos-calibraciones': 'calidad',
+    'calidad-equipamiento': 'calidad',
     'mantenedores-monedas-indicadores': 'mantenedores-clientes',
   };
   const canAccess = (id) => {
@@ -15567,7 +15604,7 @@ const ContentManager = () => {
       case 'contabilidad-informes-tributarios': return <InformesTributarios />;
       case 'contabilidad-analiticos': return <AnaliticosContables />;
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
-      case 'calidad-mantenimientos-calibraciones': return <CalidadMantenimientosCalibraciones />;
+      case 'calidad-equipamiento': return <CalidadMantenimientosCalibraciones />;
       case 'mantenedores-clientes': return <MantenedoresClientesProveedores />;
       case 'mantenedores-licitaciones': return <MantenedoresLicitaciones />;
       case 'mantenedores-equipos': return <MantenedoresEquipos />;
