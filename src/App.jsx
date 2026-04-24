@@ -1634,6 +1634,7 @@ const PLANNING_REPEAT_OPTIONS = ['No se repite', 'Diario', 'Semanal', 'Mensual']
 
 const planningCompanyKey = (empresaId) => empresaId || 'global';
 const planningNowIso = () => new Date().toISOString();
+const PLANNING_TAG_COLORS = ['bg-blue-100 text-blue-700 border-blue-200', 'bg-emerald-100 text-emerald-700 border-emerald-200', 'bg-amber-100 text-amber-700 border-amber-200', 'bg-rose-100 text-rose-700 border-rose-200', 'bg-violet-100 text-violet-700 border-violet-200', 'bg-cyan-100 text-cyan-700 border-cyan-200'];
 const planningDateInputValue = (days = 0) => {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -1664,6 +1665,33 @@ const planningPreviewText = (value = '', max = 120) => {
   if (!clean) return '';
   return clean.length > max ? `${clean.slice(0, max)}...` : clean;
 };
+const planningNormalizeTags = (task) => {
+  if (Array.isArray(task?.tags)) {
+    return task.tags.map((tag, index) => ({
+      id: tag?.id || crypto.randomUUID(),
+      label: tag?.label || tag?.name || `Etiqueta ${index + 1}`,
+      color: tag?.color || PLANNING_TAG_COLORS[index % PLANNING_TAG_COLORS.length],
+    }));
+  }
+  if (task?.tag) {
+    return [{ id: crypto.randomUUID(), label: task.tag, color: PLANNING_TAG_COLORS[0] }];
+  }
+  return [];
+};
+const planningReadFilesAsDataUrl = (files) => Promise.all(
+  [...(files || [])].map(file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      id: crypto.randomUUID(),
+      name: file.name,
+      url: typeof reader.result === 'string' ? reader.result : '',
+      type: file.type || 'application/octet-stream',
+      size: file.size || 0,
+    });
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  }))
+);
 const normalizePlanningBoard = (raw) => {
   const board = raw && typeof raw === 'object' ? raw : {};
   return {
@@ -1687,6 +1715,7 @@ const normalizePlanningBoard = (raw) => {
         attachments: Array.isArray(task?.attachments) ? task.attachments : [],
         comments: Array.isArray(task?.comments) ? task.comments : [],
         assigneeIds: Array.isArray(task?.assigneeIds) ? task.assigneeIds : [],
+        tags: planningNormalizeTags(task),
         priority: task?.priority || 'Media',
         progress: task?.progress || 'No iniciado',
         repeat: task?.repeat || 'No se repite',
@@ -1700,7 +1729,6 @@ const createPlanningTask = ({ workspaceId, columnId, currentUser, overrides = {}
   workspaceId,
   columnId,
   title: '',
-  tag: '',
   progress: 'No iniciado',
   priority: 'Media',
   repeat: 'No se repite',
@@ -1709,6 +1737,7 @@ const createPlanningTask = ({ workspaceId, columnId, currentUser, overrides = {}
   notes: '',
   showNotesOnCard: true,
   assigneeIds: currentUser?.id ? [currentUser.id] : [],
+  tags: [],
   checklist: [],
   attachments: [],
   comments: [],
@@ -1741,9 +1770,9 @@ const createPlanningWorkspace = ({ empresaId, currentUser, seed = false, name = 
         currentUser,
         overrides: {
           title: 'Fabricación de Baranda - JosonCare Es-99HD',
-          tag: 'Operaciones',
           dueDate: planningDateInputValue(4),
           notes: 'Cantidad 2. Reparación de barras paralela y fabricación de armazón de baranda para replicar modelo de plástico y pintura electrostática.',
+          tags: [{ id: crypto.randomUUID(), label: 'Operaciones', color: PLANNING_TAG_COLORS[0] }],
           checklist: [
             { id: crypto.randomUUID(), text: 'Confirmar material disponible', done: true },
             { id: crypto.randomUUID(), text: 'Validar anticipo del cliente', done: false },
@@ -1764,15 +1793,17 @@ const sanitizePlanningTask = (task) => {
   } = task || {};
   return {
   ...cleanTask,
+  tags: planningNormalizeTags(cleanTask),
   checklist: (task.checklist || []).map(item => ({ id: item.id || crypto.randomUUID(), text: item.text || '', done: Boolean(item.done) })),
-  attachments: (task.attachments || []).map(item => ({ id: item.id || crypto.randomUUID(), name: item.name || 'Adjunto', url: item.url || '' })),
+  attachments: (task.attachments || []).map(item => ({ id: item.id || crypto.randomUUID(), name: item.name || 'Adjunto', url: item.url || '', type: item.type || '', size: Number(item.size) || 0 })),
   comments: (task.comments || []).map(item => ({ id: item.id || crypto.randomUUID(), text: item.text || '', authorId: item.authorId || '', authorName: item.authorName || '', createdAt: item.createdAt || planningNowIso() })),
   };
 };
 
-const PlanningTaskModal = ({ workspace, columns, users, modal, setModal, onClose, onSave, onDelete, onDuplicate }) => {
+const PlanningTaskModal = ({ workspace, columns, users, currentUser, modal, setModal, onClose, onSave, onDelete, onDuplicate }) => {
   if (!modal) return null;
   const task = modal.data;
+  const attachmentInputRef = useRef(null);
   const cardVisible = task.showNotesOnCard !== false;
   const toggleAssignee = (id) => setModal(prev => ({
     ...prev,
@@ -1784,25 +1815,34 @@ const PlanningTaskModal = ({ workspace, columns, users, modal, setModal, onClose
     },
   }));
   const updateField = (key, value) => setModal(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
+  const updateTag = (tagId, key, value) => updateField('tags', (task.tags || []).map(tag => tag.id === tagId ? { ...tag, [key]: value } : tag));
   const addChecklistItem = () => {
     const text = String(task.draftChecklist || '').trim();
     if (!text) return;
     updateField('checklist', [...(task.checklist || []), { id: crypto.randomUUID(), text, done: false }]);
     updateField('draftChecklist', '');
   };
-  const addAttachment = () => {
-    const name = String(task.draftAttachmentName || '').trim();
-    const url = String(task.draftAttachmentUrl || '').trim();
-    if (!name && !url) return;
-    updateField('attachments', [...(task.attachments || []), { id: crypto.randomUUID(), name: name || url, url }]);
-    updateField('draftAttachmentName', '');
-    updateField('draftAttachmentUrl', '');
+  const handleAttachmentFiles = async (event) => {
+    const files = event.target.files;
+    if (!files?.length) return;
+    try {
+      const uploaded = await planningReadFilesAsDataUrl(files);
+      updateField('attachments', [...(task.attachments || []), ...uploaded]);
+    } finally {
+      event.target.value = '';
+    }
   };
   const addComment = () => {
     const text = String(task.draftComment || '').trim();
     if (!text) return;
-    updateField('comments', [...(task.comments || []), { id: crypto.randomUUID(), text, authorId: users[0]?.id || '', authorName: users[0]?.name || 'Equipo', createdAt: planningNowIso() }]);
+    updateField('comments', [...(task.comments || []), { id: crypto.randomUUID(), text, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Equipo', createdAt: planningNowIso() }]);
     updateField('draftComment', '');
+  };
+  const addTag = () => {
+    const label = String(task.draftTagLabel || '').trim();
+    if (!label) return;
+    updateField('tags', [...(task.tags || []), { id: crypto.randomUUID(), label, color: task.draftTagColor || PLANNING_TAG_COLORS[0] }]);
+    updateField('draftTagLabel', '');
   };
   const copyTaskRef = async () => {
     const ref = `planning:${workspace.id}:${task.id}`;
@@ -1810,32 +1850,32 @@ const PlanningTaskModal = ({ workspace, columns, users, modal, setModal, onClose
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[130] bg-black/65 backdrop-blur-sm p-3 md:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-[130] bg-slate-950/30 backdrop-blur-sm p-3 md:p-6 overflow-y-auto">
       <div className="min-h-full flex items-start justify-center">
-        <div className="w-full max-w-5xl bg-[#232323] text-slate-100 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
-          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-white/10 bg-[#1d1d1d]">
+        <div className="w-full max-w-5xl bg-white text-slate-900 rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200 bg-slate-50">
             <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-indigo-300">{workspace.name}</p>
-              <p className="text-sm text-slate-400 truncate">{workspace.description || 'Panel de planificación interno'}</p>
+              <p className="text-[11px] uppercase tracking-[0.24em] text-blue-600">{workspace.name}</p>
+              <p className="text-sm text-slate-500 truncate">{workspace.description || 'Panel de planificación interno'}</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={onDuplicate} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm">Copiar tarea</button>
-              <button onClick={copyTaskRef} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm">Copiar vinculo</button>
-              <button onClick={onDelete} className="px-3 py-2 rounded-lg bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 text-sm">Eliminar</button>
-              <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X size={18} /></button>
+              <button onClick={onDuplicate} className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-sm">Copiar tarea</button>
+              <button onClick={copyTaskRef} className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-sm">Copiar vinculo</button>
+              <button onClick={onDelete} className="px-3 py-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 text-sm">Eliminar</button>
+              <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100"><X size={18} /></button>
             </div>
           </div>
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="p-5 md:p-6 space-y-6">
               <div className="space-y-2">
                 <input value={task.title} onChange={e => updateField('title', e.target.value)} placeholder="Titulo de la tarea"
-                  className="w-full bg-transparent text-2xl font-semibold outline-none border-b border-white/10 pb-3 placeholder:text-slate-500" />
+                  className="w-full bg-transparent text-2xl font-semibold outline-none border-b border-slate-200 pb-3 placeholder:text-slate-400" />
                 <div className="flex flex-wrap gap-2">
                   {users.map((user, index) => {
                     const active = task.assigneeIds.includes(user.id);
                     return (
                       <button key={user.id} onClick={() => toggleAssignee(user.id)}
-                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-transparent bg-white text-slate-900' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
                         <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(index)}`}>{planningInitials(user.name || user.nombre || user.usuario)}</span>
                         <span>{user.name || user.nombre || user.usuario}</span>
                       </button>
@@ -1846,124 +1886,144 @@ const PlanningTaskModal = ({ workspace, columns, users, modal, setModal, onClose
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Deposito</span>
-                  <select value={task.columnId} onChange={e => updateField('columnId', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Deposito</span>
+                  <select value={task.columnId} onChange={e => updateField('columnId', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
                     {columns.map(column => <option key={column.id} value={column.id} className="text-slate-900">{column.title}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Progreso</span>
-                  <select value={task.progress} onChange={e => updateField('progress', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Progreso</span>
+                  <select value={task.progress} onChange={e => updateField('progress', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
                     {PLANNING_PROGRESS_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Prioridad</span>
-                  <select value={task.priority} onChange={e => updateField('priority', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Prioridad</span>
+                  <select value={task.priority} onChange={e => updateField('priority', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
                     {PLANNING_PRIORITY_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Fecha de inicio</span>
-                  <input type="date" value={task.startDate || ''} onChange={e => updateField('startDate', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm" />
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Fecha de inicio</span>
+                  <input type="date" value={task.startDate || ''} onChange={e => updateField('startDate', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm" />
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Fecha de vencimiento</span>
-                  <input type="date" value={task.dueDate || ''} onChange={e => updateField('dueDate', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm" />
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Fecha de vencimiento</span>
+                  <input type="date" value={task.dueDate || ''} onChange={e => updateField('dueDate', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm" />
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Repetir</span>
-                  <select value={task.repeat} onChange={e => updateField('repeat', e.target.value)} className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Repetir</span>
+                  <select value={task.repeat} onChange={e => updateField('repeat', e.target.value)} className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
                     {PLANNING_REPEAT_OPTIONS.map(option => <option key={option} value={option} className="text-slate-900">{option}</option>)}
                   </select>
                 </label>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-4">
-                <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Etiqueta</span>
-                  <input value={task.tag || ''} onChange={e => updateField('tag', e.target.value)} placeholder="Agregar etiqueta"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
-                </label>
-                <label className="flex items-end gap-2 pb-2 text-sm text-slate-300">
-                  <input type="checkbox" checked={cardVisible} onChange={e => updateField('showNotesOnCard', e.target.checked)} className="rounded border-white/20 bg-transparent" />
-                  Mostrar notas en la tarjeta
-                </label>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-800">Etiquetas</p>
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    <input type="checkbox" checked={cardVisible} onChange={e => updateField('showNotesOnCard', e.target.checked)} className="rounded border-slate-300" />
+                    Mostrar notas en la tarjeta
+                  </label>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(task.tags || []).map(tag => (
+                    <div key={tag.id} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                      <input value={tag.label} onChange={e => updateTag(tag.id, 'label', e.target.value)} className="w-28 bg-transparent text-sm outline-none" placeholder="Etiqueta" />
+                      <select value={tag.color} onChange={e => updateTag(tag.id, 'color', e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                        {PLANNING_TAG_COLORS.map(color => <option key={color} value={color}>{color.split(' ')[0].replace('bg-', '')}</option>)}
+                      </select>
+                      <button onClick={() => updateField('tags', task.tags.filter(item => item.id !== tag.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-2 md:flex-row">
+                  <input value={task.draftTagLabel || ''} onChange={e => updateField('draftTagLabel', e.target.value)} placeholder="Nueva etiqueta"
+                    className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
+                  <select value={task.draftTagColor || PLANNING_TAG_COLORS[0]} onChange={e => updateField('draftTagColor', e.target.value)} className="rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm">
+                    {PLANNING_TAG_COLORS.map(color => <option key={color} value={color}>{color.split(' ')[0].replace('bg-', '')}</option>)}
+                  </select>
+                  <button onClick={addTag} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm text-white hover:bg-blue-700">Agregar etiqueta</button>
+                </div>
               </div>
 
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-slate-200">Notas</p>
+                <p className="text-sm font-semibold text-slate-800">Notas</p>
                 <textarea value={task.notes || ''} onChange={e => updateField('notes', e.target.value)} rows={6}
-                  className="w-full rounded-2xl bg-[#181818] border border-white/10 px-4 py-3 text-sm leading-6 placeholder:text-slate-500" placeholder="Describe el alcance, restricciones y observaciones de la tarea." />
+                  className="w-full rounded-2xl bg-white border border-slate-200 px-4 py-3 text-sm leading-6 placeholder:text-slate-400" placeholder="Describe el alcance, restricciones y observaciones de la tarea." />
               </div>
 
               <div className="space-y-3">
-                <p className="text-sm font-semibold text-slate-200">Lista de comprobación</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-800">Lista de comprobación</p>
+                  <label className="flex items-center gap-2 text-xs text-slate-500">
+                    <input type="checkbox" checked={cardVisible} onChange={e => updateField('showNotesOnCard', e.target.checked)} className="rounded border-slate-300" />
+                    Mostrar notas en la tarjeta
+                  </label>
+                </div>
                 <div className="space-y-2">
                   {(task.checklist || []).map(item => (
-                    <label key={item.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm">
+                    <label key={item.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
                       <input type="checkbox" checked={Boolean(item.done)} onChange={e => updateField('checklist', task.checklist.map(entry => entry.id === item.id ? { ...entry, done: e.target.checked } : entry))} />
-                      <span className={`flex-1 ${item.done ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{item.text}</span>
-                      <button onClick={() => updateField('checklist', task.checklist.filter(entry => entry.id !== item.id))} className="text-slate-500 hover:text-rose-300"><Trash2 size={14} /></button>
+                      <span className={`flex-1 ${item.done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.text}</span>
+                      <button onClick={() => updateField('checklist', task.checklist.filter(entry => entry.id !== item.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>
                     </label>
                   ))}
                   <div className="flex gap-2">
                     <input value={task.draftChecklist || ''} onChange={e => updateField('draftChecklist', e.target.value)} placeholder="Agregar un elemento"
-                      className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
-                    <button onClick={addChecklistItem} className="px-4 rounded-xl bg-white/10 hover:bg-white/15 text-sm">Agregar</button>
+                      className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
+                    <button onClick={addChecklistItem} className="px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-sm">Agregar</button>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="border-t xl:border-t-0 xl:border-l border-white/10 bg-[#1e1e1e] p-5 md:p-6 space-y-5">
+            <div className="border-t xl:border-t-0 xl:border-l border-slate-200 bg-slate-50 p-5 md:p-6 space-y-5">
               <div className="space-y-3">
-                <p className="text-sm font-semibold text-slate-200">Datos adjuntos</p>
+                <p className="text-sm font-semibold text-slate-800">Datos adjuntos</p>
                 <div className="space-y-2">
                   {(task.attachments || []).map(item => (
-                    <div key={item.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
-                      <FileText size={15} className="text-blue-300 shrink-0" />
+                    <div key={item.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <FileText size={15} className="text-blue-600 shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-slate-100 truncate">{item.name}</p>
-                        <p className="text-[11px] text-slate-500 truncate">{item.url || 'Sin URL'}</p>
+                        <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-slate-800 truncate block hover:text-blue-600">{item.name}</a>
+                        <p className="text-[11px] text-slate-500 truncate">{item.type || 'Archivo'} · {item.size ? `${Math.round(item.size / 1024)} KB` : 'Sin tamaño'}</p>
                       </div>
-                      <button onClick={() => updateField('attachments', task.attachments.filter(entry => entry.id !== item.id))} className="text-slate-500 hover:text-rose-300"><Trash2 size={14} /></button>
+                      <button onClick={() => updateField('attachments', task.attachments.filter(entry => entry.id !== item.id))} className="text-slate-400 hover:text-rose-500"><Trash2 size={14} /></button>
                     </div>
                   ))}
-                  <input value={task.draftAttachmentName || ''} onChange={e => updateField('draftAttachmentName', e.target.value)} placeholder="Nombre del adjunto"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
-                  <input value={task.draftAttachmentUrl || ''} onChange={e => updateField('draftAttachmentUrl', e.target.value)} placeholder="URL o referencia"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
-                  <button onClick={addAttachment} className="w-full px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-sm">Agregar datos adjuntos</button>
+                  <input ref={attachmentInputRef} type="file" multiple className="hidden" onChange={handleAttachmentFiles} />
+                  <button onClick={() => attachmentInputRef.current?.click()} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-sm">Agregar datos adjuntos</button>
                 </div>
               </div>
 
               <div className="space-y-3">
-                <p className="text-sm font-semibold text-slate-200">Comentarios</p>
+                <p className="text-sm font-semibold text-slate-800">Comentarios</p>
                 <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
                   {(task.comments || []).map(item => (
-                    <div key={item.id} className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                       <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
-                        <span>{item.authorName}</span>
+                        <span className="font-semibold text-slate-700">{item.authorName}</span>
                         <span>{new Date(item.createdAt).toLocaleString('es-CL')}</span>
                       </div>
-                      <p className="mt-2 text-sm text-slate-200 whitespace-pre-wrap">{item.text}</p>
+                      <p className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">{item.text}</p>
                     </div>
                   ))}
                 </div>
                 <textarea value={task.draftComment || ''} onChange={e => updateField('draftComment', e.target.value)} rows={3}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" placeholder="Escribe un comentario" />
-                <button onClick={addComment} className="w-full px-4 py-2.5 rounded-xl bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 text-sm">Agregar comentario</button>
+                  className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Escribe un comentario" />
+                <button onClick={addComment} className="w-full px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm">Agregar comentario</button>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2 text-sm">
-                <p className="font-semibold text-slate-200">Resumen de tarjeta</p>
-                <div className="flex items-center gap-2 text-slate-400"><span className={`h-2.5 w-2.5 rounded-full ${planningPriorityTone(task.priority)}`}></span>{task.priority}</div>
-                <p className="text-slate-400">Vence: {planningFormatDateLabel(task.dueDate)}</p>
-                <p className="text-slate-400">Checklist: {(task.checklist || []).filter(item => item.done).length}/{(task.checklist || []).length}</p>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2 text-sm">
+                <p className="font-semibold text-slate-800">Resumen de tarjeta</p>
+                <div className="flex items-center gap-2 text-slate-600"><span className={`h-2.5 w-2.5 rounded-full ${planningPriorityTone(task.priority)}`}></span>{task.priority}</div>
+                <p className="text-slate-600">Vence: {planningFormatDateLabel(task.dueDate)}</p>
+                <p className="text-slate-600">Checklist: {(task.checklist || []).filter(item => item.done).length}/{(task.checklist || []).length}</p>
                 <div className="pt-3 flex items-center justify-end gap-2">
-                  <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm hover:bg-white/5">Cancelar</button>
-                  <button onClick={onSave} className="px-4 py-2.5 rounded-xl bg-indigo-500 text-white text-sm hover:bg-indigo-400">Guardar tarea</button>
+                  <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm hover:bg-slate-100">Cancelar</button>
+                  <button onClick={onSave} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700">Guardar tarea</button>
                 </div>
               </div>
             </div>
@@ -1982,6 +2042,7 @@ const DashboardPlanning = () => {
   const [columnDraft, setColumnDraft] = useState('');
   const [planModal, setPlanModal] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
+  const [draggingTaskId, setDraggingTaskId] = useState('');
 
   const companyKey = planningCompanyKey(activeEmpresaId);
   const board = normalizePlanningBoard(planningBoard);
@@ -2056,6 +2117,25 @@ const DashboardPlanning = () => {
     setColumnDraft('');
   };
 
+  const deleteWorkspace = (workspaceId) => {
+    const workspace = companyWorkspaces.find(item => item.id === workspaceId);
+    if (!workspace) return;
+    const shouldDelete = typeof window === 'undefined' ? true : window.confirm(`Eliminar el plan "${workspace.name}"?`);
+    if (!shouldDelete) return;
+    updateBoard(current => {
+      const remaining = current.workspaces.filter(item => item.id !== workspaceId);
+      const nextCompanyWorkspaces = remaining.filter(item => planningCompanyKey(item.empresaId) === companyKey);
+      return {
+        ...current,
+        workspaces: remaining,
+        activeWorkspaceIdByEmpresa: {
+          ...current.activeWorkspaceIdByEmpresa,
+          [companyKey]: current.activeWorkspaceIdByEmpresa[companyKey] === workspaceId ? (nextCompanyWorkspaces[0]?.id || '') : current.activeWorkspaceIdByEmpresa[companyKey],
+        },
+      };
+    });
+  };
+
   const openTask = (columnId, existingTask = null) => {
     if (!activeWorkspace) return;
     setTaskModal({
@@ -2077,7 +2157,6 @@ const DashboardPlanning = () => {
     const cleanTask = sanitizePlanningTask({
       ...taskModal.data,
       title: taskModal.data.title.trim(),
-      tag: String(taskModal.data.tag || '').trim(),
       notes: String(taskModal.data.notes || '').trim(),
       updatedAt: planningNowIso(),
     });
@@ -2128,18 +2207,32 @@ const DashboardPlanning = () => {
 
   const filteredTasks = activeWorkspace
     ? activeWorkspace.tasks.filter(task => {
-        const haystack = `${task.title} ${task.notes} ${task.tag}`.toLowerCase();
+        const haystack = `${task.title} ${task.notes} ${(task.tags || []).map(tag => tag.label).join(' ')}`.toLowerCase();
         return haystack.includes(searchTerm.toLowerCase());
       })
     : [];
 
+  const moveTaskToColumn = (taskId, columnId) => {
+    if (!activeWorkspace || !taskId || !columnId) return;
+    updateBoard(current => ({
+      ...current,
+      workspaces: current.workspaces.map(workspace => workspace.id === activeWorkspace.id
+        ? {
+            ...workspace,
+            tasks: workspace.tasks.map(task => task.id === taskId ? { ...task, columnId, updatedAt: planningNowIso() } : task),
+          }
+        : workspace),
+    }));
+    setDraggingTaskId('');
+  };
+
   return (
-    <div className="min-h-[calc(100vh-10rem)] bg-[#1f1f1f] text-slate-100 rounded-[28px] border border-slate-800 shadow-[0_30px_70px_rgba(0,0,0,0.35)] overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+    <div className="min-h-[calc(100vh-10rem)] bg-white text-slate-900 rounded-[28px] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
       <div className="flex min-h-[calc(100vh-10rem)]">
-        <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} shrink-0 border-r border-white/10 bg-[#242424] transition-all duration-300`}>
-          <div className="flex items-center justify-between px-4 py-4 border-b border-white/10">
+        <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} shrink-0 border-r border-slate-200 bg-slate-50 transition-all duration-300 flex flex-col`}>
+          <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200">
             <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
-              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-fuchsia-500/20">
+              <div className="h-10 w-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-sm">
                 <LayoutDashboard size={18} />
               </div>
               {!sidebarCollapsed && (
@@ -2149,8 +2242,8 @@ const DashboardPlanning = () => {
                 </div>
               )}
             </div>
-            {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="p-2 rounded-lg hover:bg-white/5"><ChevronLeft size={16} /></button>}
-            {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} className="absolute mt-14 ml-5 p-2 rounded-lg hover:bg-white/5"><ChevronRight size={16} /></button>}
+            {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="p-2 rounded-lg hover:bg-slate-100"><ChevronLeft size={16} /></button>}
+            {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} className="absolute mt-14 ml-5 p-2 rounded-lg hover:bg-slate-100"><ChevronRight size={16} /></button>}
           </div>
 
           <div className="px-3 py-4 space-y-4">
@@ -2160,9 +2253,9 @@ const DashboardPlanning = () => {
                 { label: 'Mis tareas', icon: CheckCircle2 },
                 { label: 'Mis planes', icon: ClipboardList },
               ].map(item => (
-                <button key={item.label} className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/5 ${sidebarCollapsed ? 'justify-center' : ''}`}>
+                <button key={item.label} className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white ${sidebarCollapsed ? 'justify-center' : ''}`}>
                   <item.icon size={16} className="text-slate-400" />
-                  {!sidebarCollapsed && <span className="text-sm text-slate-300">{item.label}</span>}
+                  {!sidebarCollapsed && <span className="text-sm text-slate-600">{item.label}</span>}
                 </button>
               ))}
             </div>
@@ -2170,72 +2263,76 @@ const DashboardPlanning = () => {
             {!sidebarCollapsed && <p className="px-3 text-[11px] uppercase tracking-[0.24em] text-slate-500">Anclado</p>}
             <div className="space-y-1">
               {companyWorkspaces.map((workspace, index) => (
-                <button key={workspace.id} onClick={() => setActiveWorkspace(workspace.id)}
-                  className={`w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${activeWorkspace?.id === workspace.id ? 'bg-white/10 text-white' : 'hover:bg-white/5 text-slate-300'} ${sidebarCollapsed ? 'justify-center' : ''}`}>
+                <div key={workspace.id}
+                  className={`relative w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${activeWorkspace?.id === workspace.id ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'hover:bg-white text-slate-600'} ${sidebarCollapsed ? 'justify-center' : ''}`}>
                   <span className={`h-8 w-8 rounded-xl flex items-center justify-center text-xs font-bold text-white ${workspace.color || planningTone(index)}`}>{planningInitials(workspace.name)}</span>
-                  {!sidebarCollapsed && (
-                    <div className="min-w-0 flex-1">
+                  {!sidebarCollapsed ? (
+                    <button type="button" onClick={() => setActiveWorkspace(workspace.id)} className="min-w-0 flex-1 text-left">
                       <p className="text-sm font-medium truncate">{workspace.name}</p>
                       <p className="text-[11px] text-slate-500 truncate">{workspace.description || 'Sin descripción'}</p>
-                    </div>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setActiveWorkspace(workspace.id)} className="absolute inset-0 rounded-xl" aria-label={workspace.name} />
                   )}
-                  {!sidebarCollapsed && <MoreVertical size={14} className="text-slate-500" />}
-                </button>
+                  {!sidebarCollapsed && <button type="button" onClick={(e) => { e.stopPropagation(); deleteWorkspace(workspace.id); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-500"><MoreVertical size={14} /></button>}
+                </div>
               ))}
             </div>
           </div>
 
           <div className="mt-auto px-3 pb-4">
             <button onClick={() => setPlanModal({ name: '', description: '' })}
-              className={`w-full flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm hover:bg-white/10 ${sidebarCollapsed ? 'justify-center' : ''}`}>
+              className={`w-full flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-100 ${sidebarCollapsed ? 'justify-center' : ''}`}>
               <Plus size={16} />
               {!sidebarCollapsed && <span>Nuevo plan</span>}
             </button>
           </div>
         </aside>
 
-        <section className="flex-1 min-w-0 bg-[#1f1f1f]">
-          <div className="border-b border-white/10 px-5 py-4">
+        <section className="flex-1 min-w-0 bg-white">
+          <div className="border-b border-slate-200 px-5 py-4">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="min-w-0">
-                <div className="flex items-center gap-3 text-sm text-slate-400">
+                <div className="flex items-center gap-3 text-sm text-slate-500">
                   <span>Mis planes</span>
-                  <span className="text-slate-600">/</span>
-                  <span className="text-fuchsia-300">{activeWorkspace?.name || 'Planning'}</span>
-                  <span className="text-slate-600">/</span>
-                  <span className="text-white font-semibold">Panel</span>
+                  <span className="text-slate-300">/</span>
+                  <span className="text-blue-600">{activeWorkspace?.name || 'Planning'}</span>
+                  <span className="text-slate-300">/</span>
+                  <span className="text-slate-900 font-semibold">Panel</span>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm text-slate-300">
+                  <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-sm text-slate-600">
                     <Search size={15} className="text-slate-500" />
                     <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Buscar tarjeta"
-                      className="bg-transparent outline-none placeholder:text-slate-500 min-w-[180px]" />
+                      className="bg-transparent outline-none placeholder:text-slate-400 min-w-[180px]" />
                   </div>
-                  <button className="inline-flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10">
+                  <button className="inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
                     <Info size={14} />
                     Filtros
                   </button>
-                  <button className="inline-flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10">
+                  <button className="inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
                     <ArrowUpDown size={14} />
                     Agrupar por deposito
                   </button>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300">Compartir</button>
+                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-sm text-slate-600">Compartir</button>
               </div>
             </div>
           </div>
 
-          <div className="p-5">
+          <div className="p-5 bg-gradient-to-b from-slate-50 to-white">
             {!activeWorkspace ? (
-              <div className="rounded-3xl border border-dashed border-white/10 p-10 text-center text-slate-400">Preparando planning...</div>
+              <div className="rounded-3xl border border-dashed border-slate-200 p-10 text-center text-slate-400">Preparando planning...</div>
             ) : (
               <div className="flex gap-5 overflow-x-auto pb-4">
                 {activeWorkspace.columns.map((column, index) => {
                   const tasks = filteredTasks.filter(task => task.columnId === column.id);
                   return (
-                    <div key={column.id} className="w-[320px] shrink-0">
+                    <div key={column.id} className={`w-[320px] shrink-0 rounded-3xl border ${draggingTaskId ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200 bg-white'} p-4 shadow-sm`}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => moveTaskToColumn(draggingTaskId, column.id)}>
                       <div className="flex items-center justify-between gap-3 mb-3">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className={`h-2.5 w-2.5 rounded-full ${column.accent || planningTone(index)}`}></span>
@@ -2243,7 +2340,7 @@ const DashboardPlanning = () => {
                           <span className="text-xs text-slate-500">{tasks.length}</span>
                         </div>
                       </div>
-                      <button onClick={() => openTask(column.id)} className="w-full mb-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-indigo-300 hover:bg-white/10">
+                      <button onClick={() => openTask(column.id)} className="w-full mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm text-blue-600 hover:bg-slate-100">
                         + Agregar tarea
                       </button>
                       <div className="space-y-4">
@@ -2251,38 +2348,46 @@ const DashboardPlanning = () => {
                           const completedChecklist = (task.checklist || []).filter(item => item.done).length;
                           const assignees = planners.filter(user => (task.assigneeIds || []).includes(user.id));
                           return (
-                            <button key={task.id} onClick={() => openTask(column.id, task)}
-                              className="w-full text-left rounded-3xl bg-[#262626] border border-white/10 shadow-lg shadow-black/15 overflow-hidden hover:border-white/20 transition-colors">
-                              <div className="h-28 bg-gradient-to-br from-white/5 to-transparent border-b border-white/5 flex items-center justify-center">
-                                <LayoutDashboard size={20} className="text-slate-500" />
+                            <button key={task.id} onClick={() => openTask(column.id, task)} draggable
+                              onDragStart={() => setDraggingTaskId(task.id)}
+                              onDragEnd={() => setDraggingTaskId('')}
+                              className="w-full text-left rounded-3xl bg-white border border-slate-200 shadow-sm overflow-hidden hover:border-blue-200 transition-colors cursor-grab active:cursor-grabbing">
+                              <div className="h-24 bg-gradient-to-br from-slate-50 to-blue-50 border-b border-slate-100 flex items-center justify-center">
+                                <LayoutDashboard size={20} className="text-blue-400" />
                               </div>
                               <div className="p-4 space-y-3">
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
-                                    <p className="font-medium leading-5 text-slate-100">{task.title || 'Sin titulo'}</p>
-                                    {task.tag && <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-indigo-300">{task.tag}</p>}
+                                    <p className="font-medium leading-5 text-slate-900">{task.title || 'Sin titulo'}</p>
+                                    {(task.tags || []).length > 0 && (
+                                      <div className="mt-2 flex flex-wrap gap-1.5">
+                                        {(task.tags || []).map(tag => <span key={tag.id} className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${tag.color}`}>{tag.label}</span>)}
+                                      </div>
+                                    )}
                                   </div>
-                                  <MoreVertical size={15} className="text-slate-500 shrink-0" />
+                                  <MoreVertical size={15} className="text-slate-400 shrink-0" />
                                 </div>
                                 {task.showNotesOnCard !== false && task.notes && (
-                                  <p className="text-xs leading-5 text-slate-400">{planningPreviewText(task.notes)}</p>
+                                  <p className="text-xs leading-5 text-slate-500">{planningPreviewText(task.notes)}</p>
                                 )}
                                 <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-                                  {task.dueDate && <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-2 py-1 text-rose-300">{planningFormatShortDate(task.dueDate)}</span>}
+                                  {task.dueDate && <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 border border-rose-100 px-2 py-1 text-rose-600">{planningFormatShortDate(task.dueDate)}</span>}
                                   <span className="inline-flex items-center gap-1"><CheckCircle size={12} /> {completedChecklist}/{(task.checklist || []).length}</span>
                                   <span className="inline-flex items-center gap-1"><FileText size={12} /> {(task.attachments || []).length}</span>
                                   <span className="inline-flex items-center gap-1"><Bell size={12} /> {(task.comments || []).length}</span>
                                 </div>
                                 <div className="flex items-center justify-between gap-3">
-                                  <div className="flex items-center gap-1">
-                                    {assignees.slice(0, 3).map((user, assigneeIndex) => (
-                                      <span key={user.id} className={`h-7 w-7 rounded-full border border-[#262626] -ml-1 first:ml-0 flex items-center justify-center text-[10px] font-bold text-white ${planningTone(assigneeIndex)}`}>
-                                        {planningInitials(user.name)}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {assignees.map((user, assigneeIndex) => (
+                                      <span key={user.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
+                                        <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${planningTone(assigneeIndex)}`}>
+                                          {planningInitials(user.name)}
+                                        </span>
+                                        <span className="text-[11px] text-slate-600">{user.name}</span>
                                       </span>
                                     ))}
-                                    {assignees.length > 3 && <span className="text-[11px] text-slate-500 ml-1">+{assignees.length - 3}</span>}
                                   </div>
-                                  <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                                  <span className="inline-flex items-center gap-2 text-xs text-slate-500">
                                     <span className={`h-2.5 w-2.5 rounded-full ${planningPriorityTone(task.priority)}`}></span>
                                     {task.priority}
                                   </span>
@@ -2297,11 +2402,11 @@ const DashboardPlanning = () => {
                 })}
 
                 <div className="w-[280px] shrink-0">
-                  <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] p-4 space-y-3">
-                    <p className="text-sm font-medium text-slate-300">Agregar nuevo deposito</p>
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                    <p className="text-sm font-medium text-slate-700">Agregar nuevo deposito</p>
                     <input value={columnDraft} onChange={e => setColumnDraft(e.target.value)} placeholder="Nombre de la columna"
-                      className="w-full rounded-2xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" />
-                    <button onClick={addColumn} className="w-full rounded-2xl bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 px-4 py-2.5 text-sm">Crear columna</button>
+                      className="w-full rounded-2xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" />
+                    <button onClick={addColumn} className="w-full rounded-2xl bg-slate-900 text-white hover:bg-slate-800 px-4 py-2.5 text-sm">Crear columna</button>
                   </div>
                 </div>
               </div>
@@ -2311,26 +2416,26 @@ const DashboardPlanning = () => {
       </div>
 
       {planModal && createPortal(
-        <div className="fixed inset-0 z-[125] bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center">
-          <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#232323] text-slate-100 shadow-2xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+        <div className="fixed inset-0 z-[125] bg-slate-950/30 backdrop-blur-sm p-4 flex items-center justify-center">
+          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
               <h3 className="font-semibold">Nuevo plan</h3>
-              <button onClick={() => setPlanModal(null)} className="p-2 rounded-lg hover:bg-white/10"><X size={16} /></button>
+              <button onClick={() => setPlanModal(null)} className="p-2 rounded-lg hover:bg-slate-100"><X size={16} /></button>
             </div>
             <div className="p-5 space-y-4">
               <label className="space-y-1.5 block">
-                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Nombre</span>
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Nombre</span>
                 <input value={planModal.name} onChange={e => setPlanModal(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" placeholder="Gestión de Proveedores" />
+                  className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Gestión de Proveedores" />
               </label>
               <label className="space-y-1.5 block">
-                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Descripción</span>
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Descripción</span>
                 <textarea value={planModal.description} onChange={e => setPlanModal(prev => ({ ...prev, description: e.target.value }))} rows={4}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm placeholder:text-slate-500" placeholder="Operaciones - Gestión Interna" />
+                  className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm placeholder:text-slate-400" placeholder="Operaciones - Gestión Interna" />
               </label>
               <div className="flex items-center justify-end gap-2 pt-2">
-                <button onClick={() => setPlanModal(null)} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm hover:bg-white/5">Cancelar</button>
-                <button onClick={saveWorkspace} className="px-4 py-2.5 rounded-xl bg-indigo-500 text-white text-sm hover:bg-indigo-400">Guardar plan</button>
+                <button onClick={() => setPlanModal(null)} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm hover:bg-slate-100">Cancelar</button>
+                <button onClick={saveWorkspace} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700">Guardar plan</button>
               </div>
             </div>
           </div>
@@ -2342,6 +2447,7 @@ const DashboardPlanning = () => {
         workspace={activeWorkspace || { id: '', name: '', description: '' }}
         columns={activeWorkspace?.columns || []}
         users={planners}
+        currentUser={currentUser}
         modal={taskModal}
         setModal={setTaskModal}
         onClose={() => setTaskModal(null)}
