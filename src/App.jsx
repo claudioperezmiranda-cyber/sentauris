@@ -1805,6 +1805,20 @@ const planningReadFilesAsDataUrl = (files) => Promise.all(
     reader.readAsDataURL(file);
   }))
 );
+const readFilesAsDataUrl = (files) => Promise.all(
+  [...(files || [])].map(file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      id: crypto.randomUUID(),
+      name: file.name,
+      url: typeof reader.result === 'string' ? reader.result : '',
+      type: file.type || 'application/octet-stream',
+      size: file.size || 0,
+    });
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  }))
+);
 const normalizePlanningBoard = (raw) => {
   const board = raw && typeof raw === 'object' ? raw : {};
   return {
@@ -12271,6 +12285,9 @@ const buildBalanceHtml = (rows, filters) => {
 const ACTIVOS_FIJOS_CREATE_FIELDS = [
   { key: 'idActivo', label: 'ID Activo', type: 'text', required: true },
   { key: 'nombreActivo', label: 'Nombre Activo', type: 'text', required: true },
+  { key: 'modelo', label: 'Modelo', type: 'text' },
+  { key: 'numeroSerie', label: 'Numero de Serie', type: 'text' },
+  { key: 'dominio', label: 'Dominio', type: 'text' },
   { key: 'categoria', label: 'Categoria', type: 'text' },
   { key: 'fechaAdquisicion', label: 'Fecha Adquisicion', type: 'date' },
   { key: 'fechaInicioUso', label: 'Fecha Inicio Uso', type: 'date' },
@@ -12287,11 +12304,15 @@ const ACTIVOS_FIJOS_CREATE_FIELDS = [
 const ACTIVOS_FIJOS_TABLE_COLUMNS = [
   { id: 'idActivo', label: 'ID Activo', align: 'left' },
   { id: 'nombreActivo', label: 'Nombre Activo', align: 'left' },
+  { id: 'modelo', label: 'Modelo', align: 'left' },
+  { id: 'numeroSerie', label: 'Numero de Serie', align: 'left' },
+  { id: 'dominio', label: 'Dominio', align: 'left' },
   { id: 'categoria', label: 'Categoria', align: 'left' },
   { id: 'fechaAdquisicion', label: 'Fecha Adquisicion', align: 'left' },
   { id: 'fechaInicioUso', label: 'Fecha Inicio Uso', align: 'left' },
   { id: 'centroCosto', label: 'Centro de Costo', align: 'left' },
   { id: 'estado', label: 'Estado', align: 'left' },
+  { id: 'adjuntos', label: 'Imagen / Adjuntos', align: 'left' },
   { id: 'costoHistorico', label: 'Costo Historico', align: 'right' },
   { id: 'valorResidual', label: 'Valor Residual', align: 'right' },
   { id: 'vidaUtilIfrsMeses', label: 'Vida Util IFRS', align: 'right' },
@@ -12378,6 +12399,9 @@ const emptyActivoFijo = () => ({
   id: '',
   idActivo: '',
   nombreActivo: '',
+  modelo: '',
+  numeroSerie: '',
+  dominio: '',
   categoria: '',
   fechaAdquisicion: '',
   fechaInicioUso: '',
@@ -12400,11 +12424,19 @@ const emptyActivoFijo = () => ({
   diferenciaTemp: '',
   factorCm: '',
   valorTributarioCorregido: '',
+  adjuntos: [],
 });
 
 const emptyCalidadMantenimiento = () => ({
+  id: '',
   assetId: '',
+  fechaAsignacion: '',
   fechaMantenimiento: '',
+  fechaProximaMantenimiento: '',
+  tipoMantencion: 'Preventiva',
+  condicion: 'Operativo',
+  observaciones: '',
+  adjuntos: [],
   responsable: '',
   estadoActivo: '',
   fechaCalibracion: '',
@@ -12425,7 +12457,7 @@ const ActivosFijosContabilidad = () => {
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => {
     const saved = readLocalList(ACTIVOS_FIJOS_COLUMN_STORAGE_KEY);
-    return saved.length ? saved : ['idActivo', 'nombreActivo', 'categoria', 'fechaAdquisicion', 'centroCosto', 'estado', 'costoHistorico', 'valorLibroIfrs', 'depIfrsMensual', 'depTributaria'];
+    return saved.length ? saved : ['idActivo', 'nombreActivo', 'modelo', 'numeroSerie', 'dominio', 'categoria', 'fechaAdquisicion', 'centroCosto', 'estado', 'adjuntos', 'costoHistorico', 'valorLibroIfrs', 'depIfrsMensual', 'depTributaria'];
   });
 
   useEffect(() => {
@@ -12493,6 +12525,29 @@ const ActivosFijosContabilidad = () => {
         </span>
       );
     }
+    if (columnId === 'adjuntos') {
+      const files = Array.isArray(asset.adjuntos) ? asset.adjuntos : [];
+      if (!files.length) return '-';
+      return (
+        <div className="flex flex-col gap-1 min-w-40">
+          <span className="text-xs font-semibold text-slate-700">{files.length} adjunto(s)</span>
+          <div className="flex flex-wrap gap-1">
+            {files.slice(0, 2).map(file => (
+              <a
+                key={file.id || file.name}
+                href={file.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex max-w-36 truncate rounded-full bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+              >
+                {file.name}
+              </a>
+            ))}
+            {files.length > 2 && <span className="text-[11px] text-slate-400">+{files.length - 2}</span>}
+          </div>
+        </div>
+      );
+    }
     if (['costoHistorico', 'valorResidual', 'depIfrsMensual', 'depAcumIfrs', 'depAcumIfrsMesAnterior', 'valorLibroIfrs', 'depTributaria', 'depAcumTributaria', 'depAcumTributariaMesAnterior', 'valorTributario', 'diferenciaTemp', 'valorTributarioCorregido'].includes(columnId)) {
       return money(asset[columnId]);
     }
@@ -12505,7 +12560,7 @@ const ActivosFijosContabilidad = () => {
       setError('Debe ingresar al menos el ID Activo y el Nombre Activo.');
       return;
     }
-    const duplicated = activosFijos.some(asset => normalizeKey(asset.idActivo) === normalizeKey(draft.idActivo));
+    const duplicated = activosFijos.some(asset => asset.id !== editingAssetId && normalizeKey(asset.idActivo) === normalizeKey(draft.idActivo));
     if (duplicated) {
       setError('Ya existe un activo fijo con ese ID Activo.');
       return;
@@ -12530,6 +12585,20 @@ const ActivosFijosContabilidad = () => {
       : null);
     setPreviewFechaCierre('');
     closeModal();
+  };
+
+  const handleAssetFiles = async (files) => {
+    if (!files?.length) return;
+    try {
+      const uploaded = await readFilesAsDataUrl(files);
+      setDraft(prev => ({ ...prev, adjuntos: [...(prev.adjuntos || []), ...uploaded] }));
+    } catch {
+      setError('No fue posible leer los archivos seleccionados.');
+    }
+  };
+
+  const removeAssetFile = (fileId) => {
+    setDraft(prev => ({ ...prev, adjuntos: (prev.adjuntos || []).filter(file => file.id !== fileId) }));
   };
 
   const editAsset = (asset) => {
@@ -12741,6 +12810,29 @@ const ActivosFijosContabilidad = () => {
                     )}
                   </div>
                 ))}
+                <div className="md:col-span-2 xl:col-span-2 2xl:col-span-2">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Imagen / Adjuntos</p>
+                  <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:border-blue-400 hover:bg-blue-50/40">
+                    <Upload size={18} className="mb-2 text-slate-400" />
+                    <span className="text-sm font-semibold text-slate-700">Adjuntar archivos o imagenes</span>
+                    <span className="mt-1 text-xs text-slate-400">Se guardaran con el activo para mantener trazabilidad.</span>
+                    <input type="file" multiple className="hidden" onChange={e => handleAssetFiles(e.target.files)} />
+                  </label>
+                  {(draft.adjuntos || []).length > 0 && (
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {(draft.adjuntos || []).map(file => (
+                        <div key={file.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <a href={file.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sm font-medium text-blue-700 hover:text-blue-800">
+                            {file.name}
+                          </a>
+                          <button type="button" onClick={() => removeAssetFile(file.id)} className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar adjunto">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
@@ -12758,18 +12850,28 @@ const CalidadMantenimientosCalibraciones = () => {
   const { activosFijos, calidadMantenimientos, setCalidadMantenimientos } = useContext(ERPContext);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('mantenciones');
+  const [sortConfig, setSortConfig] = useState({ key: 'fechaAsignacion', direction: 'desc' });
   const [modal, setModal] = useState(null);
-
-  const qualityRows = activosFijos
-    .map(asset => {
-      const extra = calidadMantenimientos.find(item => item.assetId === asset.id) || emptyCalidadMantenimiento();
+  const qualityRows = (calidadMantenimientos || [])
+    .map(record => {
+      const asset = activosFijos.find(item => item.id === record.assetId);
+      if (!asset) return null;
+      const extra = { ...emptyCalidadMantenimiento(), ...record };
       return {
-        id: asset.id,
+        id: extra.id || extra.assetId,
         assetId: asset.id,
         idActivo: asset.idActivo || '',
         nombreActivo: asset.nombreActivo || '',
-        fechaAdquisicion: asset.fechaAdquisicion || '',
+        modelo: asset.modelo || '',
+        numeroSerie: asset.numeroSerie || '',
+        dominio: asset.dominio || '',
+        fechaAsignacion: extra.fechaAsignacion || '',
         fechaMantenimiento: extra.fechaMantenimiento || '',
+        fechaProximaMantenimiento: extra.fechaProximaMantenimiento || '',
+        tipoMantencion: extra.tipoMantencion || 'Preventiva',
+        condicion: extra.condicion || 'Operativo',
+        observaciones: extra.observaciones || '',
+        adjuntos: Array.isArray(extra.adjuntos) ? extra.adjuntos : [],
         responsable: extra.responsable || '',
         estadoActivo: extra.estadoActivo || asset.estado || '',
         fechaCalibracion: extra.fechaCalibracion || '',
@@ -12777,36 +12879,108 @@ const CalidadMantenimientosCalibraciones = () => {
         estadoCalibracion: extra.estadoCalibracion || asset.estado || '',
       };
     })
-    .filter(row => normalizeKey(Object.values(row).join(' ')).includes(normalizeKey(search)));
+    .filter(Boolean)
+    .filter(row => normalizeKey(Object.values({
+      ...row,
+      adjuntos: (row.adjuntos || []).map(file => file.name).join(' '),
+    }).join(' ')).includes(normalizeKey(search)));
+
+  const availableAssets = activosFijos.filter(asset => !calidadMantenimientos.some(item => item.assetId === asset.id));
+  const isMantencionesTab = activeTab === 'mantenciones';
+  const maintenanceColumns = [
+    { key: 'idActivo', label: 'ID Activo' },
+    { key: 'nombreActivo', label: 'Nombre Activo' },
+    { key: 'modelo', label: 'Modelo' },
+    { key: 'numeroSerie', label: 'Numero de Serie' },
+    { key: 'dominio', label: 'Dominio' },
+    { key: 'fechaAsignacion', label: 'Fecha de Asignacion' },
+    { key: 'fechaMantenimiento', label: 'Fecha de Mantencion' },
+    { key: 'fechaProximaMantenimiento', label: 'Fecha Proxima Mantencion' },
+    { key: 'tipoMantencion', label: 'Tipo de Mantencion' },
+    { key: 'condicion', label: 'Condicion' },
+    { key: 'responsable', label: 'Responsable' },
+    { key: 'estadoActivo', label: 'Estado del Activo' },
+    { key: 'observaciones', label: 'Observaciones' },
+    { key: 'adjuntos', label: 'Adjuntos' },
+  ];
+  const calibrationColumns = [
+    { key: 'idActivo', label: 'ID Activo' },
+    { key: 'nombreActivo', label: 'Nombre Activo' },
+    { key: 'modelo', label: 'Modelo' },
+    { key: 'numeroSerie', label: 'Numero de Serie' },
+    { key: 'fechaCalibracion', label: 'Fecha de Calibracion' },
+    { key: 'responsableCalibracion', label: 'Responsable' },
+    { key: 'estadoCalibracion', label: 'Estado de Calibracion' },
+  ];
+  const activeColumns = isMantencionesTab ? maintenanceColumns : calibrationColumns;
+  const sortedRows = [...qualityRows].sort((a, b) => {
+    const normalizeValue = (value) => {
+      if (Array.isArray(value)) return value.length;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return String(value || '');
+      return normalizeKey(value);
+    };
+    const av = normalizeValue(a?.[sortConfig.key]);
+    const bv = normalizeValue(b?.[sortConfig.key]);
+    if (av === bv) return 0;
+    const result = av > bv ? 1 : -1;
+    return sortConfig.direction === 'asc' ? result : -result;
+  });
+  const tabButtonClass = (tabId) => `px-4 py-2 text-sm font-bold border-b-2 transition-colors ${activeTab === tabId ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`;
+
+  const toggleSort = (key) => {
+    setSortConfig(prev => prev.key === key
+      ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: 'asc' });
+  };
+
+  const openNewMaintenance = () => {
+    if (!availableAssets.length) {
+      alert('Todos los activos fijos ya tienen un registro en Mantenciones.');
+      return;
+    }
+    setModal({
+      mode: 'new-maintenance',
+      data: {
+        ...emptyCalidadMantenimiento(),
+        assetId: availableAssets[0].id,
+        fechaAsignacion: accountingDate(),
+        fechaMantenimiento: accountingDate(),
+        tipoMantencion: 'Preventiva',
+        condicion: 'Operativo',
+        estadoActivo: 'Vigente',
+      },
+    });
+  };
 
   const openEdit = (row, maintenanceMode = false, calibrationMode = false) => {
     setModal({
       mode: calibrationMode ? 'calibration' : (maintenanceMode ? 'maintenance' : 'edit'),
       data: {
-        assetId: row.assetId,
-        idActivo: row.idActivo,
-        nombreActivo: row.nombreActivo,
-        fechaAdquisicion: row.fechaAdquisicion,
-        fechaMantenimiento: maintenanceMode ? accountingDate() : (row.fechaMantenimiento || ''),
-        responsable: row.responsable || '',
-        estadoActivo: maintenanceMode ? (row.estadoActivo || 'En mantenimiento') : (row.estadoActivo || ''),
-        fechaCalibracion: calibrationMode ? accountingDate() : (row.fechaCalibracion || ''),
-        responsableCalibracion: row.responsableCalibracion || '',
-        estadoCalibracion: calibrationMode ? (row.estadoCalibracion || 'Calibrado') : (row.estadoCalibracion || ''),
+        ...emptyCalidadMantenimiento(),
+        ...row,
+        fechaAsignacion: row.fechaAsignacion || accountingDate(),
+        fechaMantenimiento: maintenanceMode && !row.fechaMantenimiento ? accountingDate() : (row.fechaMantenimiento || ''),
+        fechaCalibracion: calibrationMode && !row.fechaCalibracion ? accountingDate() : (row.fechaCalibracion || ''),
+        tipoMantencion: row.tipoMantencion || 'Preventiva',
+        condicion: row.condicion || 'Operativo',
+        estadoActivo: row.estadoActivo || 'Vigente',
+        adjuntos: Array.isArray(row.adjuntos) ? row.adjuntos : [],
       },
     });
   };
 
   const saveRow = () => {
     const data = modal?.data || {};
+    if (!data.assetId) {
+      alert('Debes seleccionar un activo fijo.');
+      return;
+    }
     const payload = {
+      ...emptyCalidadMantenimiento(),
+      ...data,
+      id: data.id || data.assetId,
       assetId: data.assetId,
-      fechaMantenimiento: data.fechaMantenimiento || '',
-      responsable: data.responsable || '',
-      estadoActivo: data.estadoActivo || '',
-      fechaCalibracion: data.fechaCalibracion || '',
-      responsableCalibracion: data.responsableCalibracion || '',
-      estadoCalibracion: data.estadoCalibracion || '',
+      adjuntos: Array.isArray(data.adjuntos) ? data.adjuntos : [],
       updatedAt: new Date().toISOString(),
     };
     setCalidadMantenimientos(prev => {
@@ -12822,9 +12996,64 @@ const CalidadMantenimientosCalibraciones = () => {
     setModal(prev => ({ ...prev, data: { ...prev.data, [field]: value } }));
   };
 
-  const isMantencionesTab = activeTab === 'mantenciones';
-  const visibleRows = qualityRows;
-  const tabButtonClass = (tabId) => `px-4 py-2 text-sm font-bold border-b-2 transition-colors ${activeTab === tabId ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`;
+  const handleMaintenanceFiles = async (files) => {
+    if (!files?.length) return;
+    const uploaded = await readFilesAsDataUrl(files);
+    setModal(prev => ({ ...prev, data: { ...prev.data, adjuntos: [...(prev?.data?.adjuntos || []), ...uploaded] } }));
+  };
+
+  const removeMaintenanceFile = (fileId) => {
+    setModal(prev => ({ ...prev, data: { ...prev.data, adjuntos: (prev?.data?.adjuntos || []).filter(file => file.id !== fileId) } }));
+  };
+
+  const exportRows = () => {
+    const rows = sortedRows.map(row => isMantencionesTab ? ({
+      'ID Activo': row.idActivo,
+      'Nombre Activo': row.nombreActivo,
+      Modelo: row.modelo,
+      'Numero de Serie': row.numeroSerie,
+      Dominio: row.dominio,
+      'Fecha de Asignacion': row.fechaAsignacion,
+      'Fecha de Mantencion': row.fechaMantenimiento,
+      'Fecha Proxima Mantencion': row.fechaProximaMantenimiento,
+      'Tipo de Mantencion': row.tipoMantencion,
+      Condicion: row.condicion,
+      Responsable: row.responsable,
+      'Estado del Activo': row.estadoActivo,
+      Observaciones: row.observaciones,
+      Adjuntos: (row.adjuntos || []).map(file => file.name).join(', '),
+    }) : ({
+      'ID Activo': row.idActivo,
+      'Nombre Activo': row.nombreActivo,
+      Modelo: row.modelo,
+      'Numero de Serie': row.numeroSerie,
+      'Fecha de Calibracion': row.fechaCalibracion,
+      Responsable: row.responsableCalibracion,
+      'Estado de Calibracion': row.estadoCalibracion,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, isMantencionesTab ? 'Mantenciones' : 'Calibraciones');
+    XLSX.writeFile(wb, `calidad_${isMantencionesTab ? 'mantenciones' : 'calibraciones'}_${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}.xlsx`);
+  };
+
+  const renderCell = (row, key) => {
+    if (key === 'observaciones') return <span className="block max-w-72 truncate">{row.observaciones || '-'}</span>;
+    if (key === 'adjuntos') {
+      if (!(row.adjuntos || []).length) return '-';
+      return (
+        <div className="flex flex-wrap gap-1">
+          {row.adjuntos.slice(0, 2).map(file => (
+            <a key={file.id || file.name} href={file.url} target="_blank" rel="noreferrer" className="inline-flex max-w-32 truncate rounded-full bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100">
+              {file.name}
+            </a>
+          ))}
+          {row.adjuntos.length > 2 && <span className="text-[11px] text-slate-400">+{row.adjuntos.length - 2}</span>}
+        </div>
+      );
+    }
+    return row[key] || '-';
+  };
 
   return (
     <div className="w-full max-w-none mx-auto animate-in fade-in slide-in-from-bottom-2 space-y-5">
@@ -12836,13 +13065,19 @@ const CalidadMantenimientosCalibraciones = () => {
 
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="border-b border-slate-100 px-4 pt-3">
-          <div className="flex items-center gap-5">
-            <button type="button" onClick={() => setActiveTab('mantenciones')} className={tabButtonClass('mantenciones')}>
-              Mantenciones
-            </button>
-            <button type="button" onClick={() => setActiveTab('calibraciones')} className={tabButtonClass('calibraciones')}>
-              Calibraciones
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-5">
+              <button type="button" onClick={() => setActiveTab('mantenciones')} className={tabButtonClass('mantenciones')}>
+                Mantenciones
+              </button>
+              <button type="button" onClick={() => setActiveTab('calibraciones')} className={tabButtonClass('calibraciones')}>
+                Calibraciones
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pb-3">
+              {isMantencionesTab && <Button variant="accent" icon={Plus} onClick={openNewMaintenance}>Agregar activo</Button>}
+              <Button variant="secondary" icon={FileSpreadsheet} onClick={exportRows}>Exportar Excel</Button>
+            </div>
           </div>
         </div>
         <div className="p-4 border-b border-slate-100">
@@ -12851,7 +13086,7 @@ const CalidadMantenimientosCalibraciones = () => {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder={isMantencionesTab ? 'Buscar por ID activo, nombre, responsable o estado de mantencion' : 'Buscar por ID activo, nombre, responsable o estado de calibracion'}
+              placeholder={isMantencionesTab ? 'Buscar por activo, modelo, serie, tipo, condicion o responsable' : 'Buscar por activo, modelo, serie, responsable o estado de calibracion'}
               className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
@@ -12860,40 +13095,41 @@ const CalidadMantenimientosCalibraciones = () => {
           <table className="w-full text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="p-3 text-left">ID Activo</th>
-                <th className="p-3 text-left">Nombre Activo</th>
-                <th className="p-3 text-left">Fecha Adquisicion</th>
-                <th className="p-3 text-left">{isMantencionesTab ? 'Fecha de Mantencion' : 'Fecha de Calibracion'}</th>
-                <th className="p-3 text-left">Responsable</th>
-                <th className="p-3 text-left">{isMantencionesTab ? 'Estado del Activo' : 'Estado de Calibracion'}</th>
+                {activeColumns.map(column => (
+                  <th key={column.key} className="p-3 text-left">
+                    <button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-slate-900">
+                      <span>{column.label}</span>
+                      <ArrowUpDown size={12} className={sortConfig.key === column.key ? 'text-blue-600' : 'text-slate-300'} />
+                    </button>
+                  </th>
+                ))}
                 <th className="p-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(row => (
+              {sortedRows.map(row => (
                 <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="p-3 font-semibold text-slate-800">{row.idActivo || '-'}</td>
-                  <td className="p-3 min-w-64">{row.nombreActivo || '-'}</td>
-                  <td className="p-3 font-mono">{row.fechaAdquisicion || '-'}</td>
-                  <td className="p-3 font-mono">{isMantencionesTab ? (row.fechaMantenimiento || '-') : (row.fechaCalibracion || '-')}</td>
-                  <td className="p-3">{isMantencionesTab ? (row.responsable || '-') : (row.responsableCalibracion || '-')}</td>
-                  <td className="p-3">{isMantencionesTab ? (row.estadoActivo || '-') : (row.estadoCalibracion || '-')}</td>
+                  {activeColumns.map(column => (
+                    <td key={column.key} className={`p-3 ${['observaciones', 'nombreActivo'].includes(column.key) ? 'min-w-56' : ''} ${String(column.key).includes('fecha') ? 'font-mono' : ''}`}>
+                      {renderCell(row, column.key)}
+                    </td>
+                  ))}
                   <td className="p-3">
                     <div className="flex items-center justify-end gap-1">
-                      <button type="button" onClick={() => openEdit(row, false, !isMantencionesTab)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title={isMantencionesTab ? 'Modificar datos de mantencion' : 'Modificar datos de calibracion'}>
+                      <button type="button" onClick={() => openEdit(row, false, !isMantencionesTab)} className="p-2 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600" title={isMantencionesTab ? 'Modificar mantencion' : 'Modificar calibracion'}>
                         <Pencil size={15} />
                       </button>
-                      <button type="button" onClick={() => openEdit(row, isMantencionesTab, !isMantencionesTab)} className="p-2 rounded-lg text-slate-400 hover:bg-emerald-50 hover:text-emerald-600" title={isMantencionesTab ? 'Registrar mantencion' : 'Registrar calibracion'}>
+                      <button type="button" onClick={() => openEdit(row, isMantencionesTab, !isMantencionesTab)} className="p-2 rounded-lg text-slate-400 hover:bg-emerald-50 hover:text-emerald-600" title={isMantencionesTab ? 'Actualizar mantencion' : 'Registrar calibracion'}>
                         {isMantencionesTab ? <Wrench size={15} /> : <CheckCircle size={15} />}
                       </button>
                     </div>
                   </td>
                 </tr>
               ))}
-              {visibleRows.length === 0 && (
+              {sortedRows.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="p-10 text-center text-sm text-slate-400">
-                    No hay activos fijos disponibles para mostrar en esta pestaña.
+                  <td colSpan={activeColumns.length + 1} className="p-10 text-center text-sm text-slate-400">
+                    {isMantencionesTab ? 'No hay mantenciones registradas. Agrega activos uno a uno desde Activos Fijos.' : 'No hay calibraciones registradas para los activos trazados.'}
                   </td>
                 </tr>
               )}
@@ -12903,29 +13139,106 @@ const CalidadMantenimientosCalibraciones = () => {
       </div>
 
       {modal && (
-        <Modal title={modal.mode === 'maintenance' ? 'Registrar mantencion' : modal.mode === 'calibration' ? 'Registrar calibracion' : 'Modificar datos del activo'} onClose={() => setModal(null)} wide>
-          <p className="text-sm text-slate-500 mb-5">Los datos heredados de Activos Fijos son de solo lectura en este submodulo.</p>
+        <Modal
+          title={
+            modal.mode === 'new-maintenance'
+              ? 'Agregar activo a mantenciones'
+              : modal.mode === 'maintenance'
+                ? 'Registrar mantencion'
+                : modal.mode === 'calibration'
+                  ? 'Registrar calibracion'
+                  : 'Modificar datos del activo'
+          }
+          onClose={() => setModal(null)}
+          wide
+        >
+          <p className="text-sm text-slate-500 mb-5">La trazabilidad se basa en los activos creados en Activos Fijos y cada registro queda persistido para consulta y exportacion.</p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Input label="ID Activo" value={modal.data.idActivo || ''} disabled />
-            <Input label="Nombre Activo" value={modal.data.nombreActivo || ''} disabled />
-            <Input label="Fecha Adquisicion" type="date" value={modal.data.fechaAdquisicion || ''} disabled />
-            {modal.mode === 'calibration' ? (
+            {modal.mode === 'new-maintenance' ? (
+              <label className="block md:col-span-2">
+                <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-500">Activo fijo</span>
+                <select
+                  value={modal.data.assetId || ''}
+                  onChange={e => setField('assetId', e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  {availableAssets.map(asset => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.idActivo || 'Sin ID'} - {asset.nombreActivo || 'Activo sin nombre'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <>
+                <Input label="ID Activo" value={modal.data.idActivo || activosFijos.find(asset => asset.id === modal.data.assetId)?.idActivo || ''} disabled />
+                <Input label="Nombre Activo" value={modal.data.nombreActivo || activosFijos.find(asset => asset.id === modal.data.assetId)?.nombreActivo || ''} disabled />
+              </>
+            )}
+            {modal.mode !== 'calibration' ? (
+              <>
+                <Input label="Fecha de Asignacion" type="date" value={modal.data.fechaAsignacion || ''} onChange={e => setField('fechaAsignacion', e.target.value)} />
+                <Input label="Fecha de Mantencion" type="date" value={modal.data.fechaMantenimiento || ''} onChange={e => setField('fechaMantenimiento', e.target.value)} />
+                <Input label="Fecha Proxima Mantencion" type="date" value={modal.data.fechaProximaMantenimiento || ''} onChange={e => setField('fechaProximaMantenimiento', e.target.value)} />
+                <Select label="Tipo de Mantencion" value={modal.data.tipoMantencion || 'Preventiva'} onChange={e => setField('tipoMantencion', e.target.value)} options={['Preventiva', 'Correctiva']} />
+                <Select label="Condicion" value={modal.data.condicion || 'Operativo'} onChange={e => setField('condicion', e.target.value)} options={['Operativo', 'No Operativo', 'Operativo con Obs.']} />
+                <Input label="Responsable" value={modal.data.responsable || ''} onChange={e => setField('responsable', e.target.value)} />
+                <Select label="Estado del Activo" value={modal.data.estadoActivo || ''} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
+                <div className="md:col-span-2">
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-500">Observaciones</span>
+                    <textarea
+                      value={modal.data.observaciones || ''}
+                      onChange={e => setField('observaciones', e.target.value)}
+                      rows={4}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      placeholder="Detalla hallazgos, seguimiento o comentarios relevantes."
+                    />
+                  </label>
+                </div>
+                <div className="md:col-span-2">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Adjuntos</p>
+                  <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:border-blue-400 hover:bg-blue-50/40">
+                    <Upload size={18} className="mb-2 text-slate-400" />
+                    <span className="text-sm font-semibold text-slate-700">Adjuntar archivos o imagenes</span>
+                    <span className="mt-1 text-xs text-slate-400">Puedes cargar respaldos, informes, fotografias o evidencias.</span>
+                    <input type="file" multiple className="hidden" onChange={e => handleMaintenanceFiles(e.target.files)} />
+                  </label>
+                  {(modal.data.adjuntos || []).length > 0 && (
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {(modal.data.adjuntos || []).map(file => (
+                        <div key={file.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <a href={file.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sm font-medium text-blue-700 hover:text-blue-800">
+                            {file.name}
+                          </a>
+                          <button type="button" onClick={() => removeMaintenanceFile(file.id)} className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar adjunto">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
               <>
                 <Input label="Fecha de Calibracion" type="date" value={modal.data.fechaCalibracion || ''} onChange={e => setField('fechaCalibracion', e.target.value)} />
                 <Input label="Responsable" value={modal.data.responsableCalibracion || ''} onChange={e => setField('responsableCalibracion', e.target.value)} />
                 <Select label="Estado de Calibracion" value={modal.data.estadoCalibracion || ''} onChange={e => setField('estadoCalibracion', e.target.value)} options={['Calibrado', 'Pendiente de calibracion', 'En calibracion', 'Fuera de servicio', 'Baja']} />
               </>
-            ) : (
-              <>
-                <Input label="Fecha de Mantencion" type="date" value={modal.data.fechaMantenimiento || ''} onChange={e => setField('fechaMantenimiento', e.target.value)} />
-                <Input label="Responsable" value={modal.data.responsable || ''} onChange={e => setField('responsable', e.target.value)} />
-                <Select label="Estado del Activo" value={modal.data.estadoActivo || ''} onChange={e => setField('estadoActivo', e.target.value)} options={['Vigente', 'En mantenimiento', 'Calibrado', 'Fuera de servicio', 'Baja']} />
-              </>
             )}
           </div>
           <div className="flex justify-end gap-3 mt-6">
             <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
-            <Button variant="accent" icon={CheckCircle} onClick={saveRow}>{modal.mode === 'maintenance' ? 'Guardar mantencion' : modal.mode === 'calibration' ? 'Guardar calibracion' : 'Guardar cambios'}</Button>
+            <Button variant="accent" icon={CheckCircle} onClick={saveRow}>
+              {modal.mode === 'new-maintenance'
+                ? 'Agregar activo'
+                : modal.mode === 'maintenance'
+                  ? 'Guardar mantencion'
+                  : modal.mode === 'calibration'
+                    ? 'Guardar calibracion'
+                    : 'Guardar cambios'}
+            </Button>
           </div>
         </Modal>
       )}
