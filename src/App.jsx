@@ -163,6 +163,8 @@ const looksLikeEmail = (value) => String(value || '').includes('@');
 const looksLikeTimestamp = (value) => /^\d{4}-\d{2}-\d{2}/.test(String(value || ''));
 const normalizeKey = (value) => String(value || '').toLowerCase().replace(/[\s.]/g, '').trim();
 const normalizeRutKey = (value) => normalizeKey(value).replace(/[^0-9k]/g, '');
+const isClienteTipoC = (cliente = {}) => normalizeKey(cliente.tipoCliente ?? cliente.tipo_cliente ?? cliente['Tipo Cliente']) === 'c';
+const filterClientesTipoC = (clientes = []) => clientes.filter(isClienteTipoC);
 const isNetworkFetchError = (err) => /failed to fetch|fetch failed|networkerror|econn|etimedout/i.test(String(err?.message || err || ''));
 const isMissingTableError = (err, table) => {
   const message = String(err?.message || err || '').toLowerCase();
@@ -205,7 +207,7 @@ const normalizeCliente = (cliente) => cliente ? ({
   telefono: cliente.telefono || '',
   giro: cliente.giro || '',
   nombreFantasia: cliente.nombreFantasia || cliente.nombre_fantasia || '',
-  tipoCliente: cliente.tipoCliente || cliente.tipo_cliente || 'No',
+  tipoCliente: cliente.tipoCliente || cliente.tipo_cliente || cliente['Tipo Cliente'] || 'No',
   tipoProveedor: cliente.tipoProveedor || cliente.tipo_proveedor || 'No',
   correoSii: cliente.correoSii || cliente.correo_sii || '',
   correoComercial: cliente.correoComercial || cliente.correo_comercial || '',
@@ -259,7 +261,7 @@ const clienteExtendedSnapshot = (data = {}) => ({
   telefono: data.telefono || '',
   giro: data.giro || '',
   nombreFantasia: data.nombreFantasia || data.nombre_fantasia || '',
-  tipoCliente: data.tipoCliente || data.tipo_cliente || 'No',
+  tipoCliente: data.tipoCliente || data.tipo_cliente || data['Tipo Cliente'] || 'No',
   tipoProveedor: data.tipoProveedor || data.tipo_proveedor || 'No',
   correoSii: data.correoSii || data.correo_sii || '',
   correoComercial: data.correoComercial || data.correo_comercial || '',
@@ -1594,6 +1596,7 @@ const DbStatusBadge = () => {
 const Dashboard = () => {
   const { currentUser, clientes, licitaciones, dbStatus } = useContext(ERPContext);
   const [ordenes, setOrdenes] = useState([]);
+  const clientesTipoC = filterClientesTipoC(clientes);
 
   useEffect(() => {
     supabase.from('ordenes_trabajo').select('*').order('created_at', { ascending: false }).limit(4)
@@ -1601,7 +1604,7 @@ const Dashboard = () => {
   }, []);
 
   const kpis = [
-    { label: "Clientes Activos", value: clientes.length, trend: "+0", icon: Users },
+    { label: "Clientes Activos", value: clientesTipoC.length, trend: "+0", icon: Users },
     { label: "Licitaciones", value: licitaciones.length, trend: "+0", icon: FileText },
     { label: "Órdenes Totales", value: ordenes.length, trend: "+0", icon: ClipboardList },
     { label: "SLA Cumplido", value: "98.5%", trend: "+1.2%", icon: CheckCircle2 }
@@ -1635,13 +1638,13 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <h3 className="font-bold text-slate-800 mb-4">Clientes registrados en Supabase</h3>
-          {clientes.length === 0 ? (
+          {clientesTipoC.length === 0 ? (
             <div className="h-32 flex items-center justify-center text-slate-400 italic text-sm">
               {dbStatus === 'ok' ? 'No hay clientes aún. Agrega uno desde Nuevo Registro.' : 'Cargando...'}
             </div>
           ) : (
             <div className="divide-y divide-slate-50">
-              {clientes.map(c => (
+              {clientesTipoC.map(c => (
                 <div key={c.id} className="flex justify-between items-center py-3">
                   <div>
                     <p className="text-sm font-bold text-slate-800">{c.name}</p>
@@ -2837,8 +2840,9 @@ const NuevoRegistro = () => {
   const { formData, setFormData, setActiveModule, generateFolio, clientes, licitaciones, equipos, setEquipos, repuestos, activeEmpresaId } = useContext(ERPContext);
   const clientesEmpresa = (() => {
     const base = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
+    const clientesOnly = filterClientesTipoC(base);
     const seen = new Set();
-    return base.filter(c => {
+    return clientesOnly.filter(c => {
       const key = (c.rut || c.id || '').toLowerCase().replace(/[\s.]/g, '');
       if (seen.has(key)) return false;
       seen.add(key);
@@ -2849,7 +2853,7 @@ const NuevoRegistro = () => {
   const availableLicitations = licitaciones.filter(l => {
     if (l.cliente_id === formData.clienteId) return true;
     if (selectedCliente) {
-      const licCliente = clientes.find(c => c.id === l.cliente_id);
+      const licCliente = filterClientesTipoC(clientes).find(c => c.id === l.cliente_id);
       return licCliente && normalizeKey(licCliente.rut) === normalizeKey(selectedCliente.rut);
     }
     return false;
@@ -2998,13 +3002,14 @@ const NuevoRegistro = () => {
       return;
     }
 
-    let { data, error } = await supabase.from('clientes').insert([clienteFullPayload(newCliente)]).select().single();
+    const clienteData = { ...newCliente, tipoCliente: 'C' };
+    let { data, error } = await supabase.from('clientes').insert([clienteFullPayload(clienteData)]).select().single();
     if (error && error.message && (error.message.includes('schema cache') || error.message.includes('column'))) {
-      ({ data, error } = await supabase.from('clientes').insert([clienteBasePayload(newCliente)]).select().single());
+      ({ data, error } = await supabase.from('clientes').insert([clienteBasePayload(clienteData)]).select().single());
     }
     if (!error && data) data = normalizeCliente(data);
     if (!error && data) {
-      setClientes(prev => [...prev, { ...data, empresaId: data.empresa_id || null }]);
+      setClientes(prev => [...prev, { ...data, tipoCliente: 'C', empresaId: data.empresa_id || null }]);
       handleChange('clienteId', data.id);
       setShowNewCliente(false);
       setNewCliente({ name: '', rut: '', email: '' });
@@ -4836,19 +4841,20 @@ const Cotizaciones = () => {
   const centroCostoOptions = (currentEmpresa?.centrosCosto || []).map(empresaCentroCostoValue).filter(Boolean);
   const clientesEmpresa = (() => {
     const base = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
+    const clientesOnly = filterClientesTipoC(base);
     const seen = new Set();
-    return base.filter(c => {
+    return clientesOnly.filter(c => {
       const key = normalizeRutKey(c.rut) || String(c.id || c.id_RUT || '');
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
   })();
-  const selectedCliente = clientes.find(c => String(c.id || c.id_RUT || '') === String(draft.clienteId || ''))
+  const selectedCliente = clientesEmpresa.find(c => String(c.id || c.id_RUT || '') === String(draft.clienteId || ''))
     || clientesEmpresa.find(c => normalizeRutKey(c.rut) && normalizeRutKey(c.rut) === normalizeRutKey(draft.rut));
   const filteredLicitaciones = selectedCliente ? licitaciones.filter(l => {
     if (String(l.cliente_id || '') === String(selectedCliente.id || selectedCliente.id_RUT || '')) return true;
-    const licCliente = clientes.find(c => String(c.id || c.id_RUT || '') === String(l.cliente_id || ''));
+    const licCliente = clientesEmpresa.find(c => String(c.id || c.id_RUT || '') === String(l.cliente_id || ''));
     return licCliente && normalizeRutKey(licCliente.rut) === normalizeRutKey(selectedCliente.rut);
   }) : [];
   const selectedLic = filteredLicitaciones.find(l =>
@@ -6308,7 +6314,8 @@ const MantenedoresClientes = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const filtered = clientes.filter(c => {
+  const clientesTipoC = filterClientesTipoC(clientes);
+  const filtered = clientesTipoC.filter(c => {
     const t = search.toLowerCase();
     return (
       c.name?.toLowerCase().includes(t) ||
@@ -6483,7 +6490,7 @@ const MantenedoresClientes = () => {
             <input type="text" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)}
               className="pl-8 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 w-full sm:w-56" />
           </div>
-          <h3 className="font-bold text-slate-800">Clientes registrados ({clientes.length})</h3>
+          <h3 className="font-bold text-slate-800">Clientes registrados ({clientesTipoC.length})</h3>
         </div>
         {selectedIds.length > 0 && (
           <div className="flex items-center justify-between gap-3 px-6 py-3 bg-blue-50 border-b border-blue-100">
@@ -6513,7 +6520,7 @@ const MantenedoresClientes = () => {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan="8" className="px-6 py-12 text-center text-slate-400 italic">
-                    {clientes.length === 0 ? 'No hay clientes. Usa "Nuevo Cliente" o carga un Excel.' : 'Sin resultados para la búsqueda.'}
+                    {clientesTipoC.length === 0 ? 'No hay clientes. Usa "Nuevo Cliente" o carga un Excel.' : 'Sin resultados para la búsqueda.'}
                   </td>
                 </tr>
               ) : filtered.map(c => (
@@ -6553,7 +6560,7 @@ const MantenedoresClientes = () => {
   );
 };
 
-const CLIENTE_TIPOS = ['No', 'Nacional', 'Prospecto', 'Extranjero', 'Zona Franca'];
+const CLIENTE_TIPOS = ['No', 'C', 'Nacional', 'Prospecto', 'Extranjero', 'Zona Franca'];
 const PROVEEDOR_TIPOS = ['No', 'Nacional', 'Honorario', 'Extranjero', 'Agente de Aduanas', 'Zona Franca'];
 const TIPOS_CUENTA_BANCO = ['Cuenta Corriente', 'Cuenta Vista', 'Cuenta de Ahorro', 'Cuenta RUT'];
 
@@ -6956,7 +6963,7 @@ const isSchemaError = (msg) => msg && (msg.includes('schema cache') || msg.inclu
 
 const MantenedoresLicitaciones = () => {
   const { clientes, licitaciones, setLicitaciones, equipos, setEquipos, activeEmpresaId } = useContext(ERPContext);
-  const clientesEmpresa = activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes;
+  const clientesEmpresa = filterClientesTipoC(activeEmpresaId ? clientes.filter(c => c.empresaId === activeEmpresaId) : clientes);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [preview, setPreview] = useState([]);
@@ -7135,7 +7142,7 @@ const MantenedoresLicitaciones = () => {
     ws['!cols'] = [{ wch: 14 }, { wch: 38 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 28 }, { wch: 24 }, { wch: 24 }, { wch: 14 }];
 
     const clientesData = [['Nombre Cliente', 'RUT Cliente']];
-    clientes.forEach(c => clientesData.push([c.name, c.rut]));
+    clientesEmpresa.forEach(c => clientesData.push([c.name, c.rut]));
     const wsClientes = XLSX.utils.aoa_to_sheet(clientesData);
     wsClientes['!cols'] = [{ wch: 40 }, { wch: 20 }];
 
@@ -7196,7 +7203,7 @@ const MantenedoresLicitaciones = () => {
         if (!r.name)        errors.push(`Fila ${r._row}: "Nombre Licitación" es requerido`);
         if (!r.rut_cliente) errors.push(`Fila ${r._row}: "RUT Cliente" es requerido`);
         else {
-          const ok = clientes.find(c => c.rut?.toLowerCase().replace(/[\s.]/g, '') === r.rut_cliente.toLowerCase().replace(/[\s.]/g, ''));
+          const ok = clientesEmpresa.find(c => c.rut?.toLowerCase().replace(/[\s.]/g, '') === r.rut_cliente.toLowerCase().replace(/[\s.]/g, ''));
           if (!ok) errors.push(`Fila ${r._row}: RUT "${r.rut_cliente}" no existe en el sistema`);
         }
       });
@@ -7210,7 +7217,7 @@ const MantenedoresLicitaciones = () => {
 
   const resolveClienteId = (rut) => {
     const norm = (v) => v?.toLowerCase().replace(/[\s.]/g, '') || '';
-    return clientes.find(c => norm(c.rut) === norm(rut))?.id || null;
+    return clientesEmpresa.find(c => norm(c.rut) === norm(rut))?.id || null;
   };
 
   const handleImport = async () => {
@@ -7309,7 +7316,8 @@ const MantenedoresLicitaciones = () => {
   };
 
   const filtered = licitaciones.filter(l => {
-    const cliente = clientes.find(c => c.id === l.cliente_id);
+    const cliente = clientesEmpresa.find(c => String(c.id || c.id_RUT || '') === String(l.cliente_id || ''));
+    if (!cliente) return false;
     const t = search.toLowerCase();
     return (
       l.name?.toLowerCase().includes(t) ||
@@ -7424,7 +7432,7 @@ const MantenedoresLicitaciones = () => {
         </div>
       </div>
 
-      {clientes.length === 0 && (
+      {clientesEmpresa.length === 0 && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
           <div>
@@ -7492,7 +7500,7 @@ const MantenedoresLicitaciones = () => {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {preview.map((row, i) => {
-                  const cm = clientes.find(c => c.rut?.toLowerCase().replace(/[\s.]/g, '') === row.rut_cliente.toLowerCase().replace(/[\s.]/g, ''));
+                  const cm = clientesEmpresa.find(c => c.rut?.toLowerCase().replace(/[\s.]/g, '') === row.rut_cliente.toLowerCase().replace(/[\s.]/g, ''));
                   return (
                     <tr key={i} className="hover:bg-slate-50">
                       <td className="px-4 py-3 text-slate-400 text-xs">{row._row}</td>
@@ -7592,7 +7600,7 @@ const MantenedoresLicitaciones = () => {
                   </td>
                 </tr>
               ) : filtered.map(l => {
-                const cliente = clientes.find(c => c.id === l.cliente_id);
+                const cliente = clientesEmpresa.find(c => String(c.id || c.id_RUT || '') === String(l.cliente_id || ''));
                 return (
                   <tr key={l.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-4">
@@ -14464,7 +14472,7 @@ const Planificacion = () => {
   };
 
   const clienteId = (cliente) => cliente?.id || cliente?.id_RUT || '';
-  const allClientes = clientes.filter(c => (c.razonSocial || c.name || c.nombre || '').trim());
+  const allClientes = filterClientesTipoC(clientes).filter(c => (c.razonSocial || c.name || c.nombre || '').trim());
   const usuariosList = usuarios.filter(u => (u.nombre || '').trim());
 
   const data = planificacionTecnicos || {};
