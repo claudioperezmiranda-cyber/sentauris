@@ -1680,6 +1680,207 @@ const Dashboard = () => {
   );
 };
 
+const emptyCertificacionEmpresa = () => ({
+  id: `cert-${Date.now()}-${Math.random()}`,
+  norma: '',
+  descripcion: '',
+  estado: 'Vigente',
+  vigencia: '',
+});
+
+const emptyOrgCargoEmpresa = () => ({
+  id: `org-${Date.now()}-${Math.random()}`,
+  nivel: 1,
+  cargo: '',
+  usuarioId: '',
+  nombre: '',
+});
+
+const MiEmpresa = () => {
+  const { currentEmpresa, activeEmpresaId, empresas, setEmpresas, usuarios } = useContext(ERPContext);
+  const [activeTab, setActiveTab] = useState('empresa');
+  const empresa = currentEmpresa || {};
+  const empresaId = activeEmpresaId || empresa.id || '';
+  const certificaciones = Array.isArray(empresa.certificaciones) ? empresa.certificaciones : [];
+  const organigrama = Array.isArray(empresa.organigrama) ? empresa.organigrama : [];
+  const usuariosEmpresa = usuarios.filter(usuario => {
+    const permisos = usuario.permisosEmpresas || usuario.permisos_empresas || {};
+    if (!empresaId || Object.keys(permisos).length === 0) return true;
+    return Array.isArray(permisos[empresaId]) && permisos[empresaId].length > 0;
+  });
+  const orgRows = organigrama.length > 0
+    ? organigrama
+    : usuariosEmpresa
+        .filter(usuario => (usuario.cargo || '').trim())
+        .map((usuario, index) => ({
+          id: `org-user-${usuario.id || index}`,
+          nivel: index + 1,
+          cargo: usuario.cargo || '',
+          usuarioId: usuario.id || '',
+          nombre: usuario.nombre || usuario.usuario || '',
+        }));
+  const sortedOrgRows = [...orgRows].sort((a, b) => (Number(a.nivel) || 0) - (Number(b.nivel) || 0));
+  const empresaNombre = empresa.razonSocial || empresa.nombreFantasia || 'Sin empresa activa';
+  const fieldClass = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const labelClass = "text-[10px] font-bold uppercase tracking-wider text-slate-400";
+
+  const saveEmpresaPatch = (patch) => {
+    if (!empresaId) return;
+    setEmpresas(prev => prev.map(item => String(item.id) === String(empresaId) ? { ...item, ...patch } : item));
+  };
+  const updateCertificacion = (id, key, value) => {
+    saveEmpresaPatch({ certificaciones: certificaciones.map(item => item.id === id ? { ...item, [key]: value } : item) });
+  };
+  const addCertificacion = () => saveEmpresaPatch({ certificaciones: [...certificaciones, emptyCertificacionEmpresa()] });
+  const removeCertificacion = (id) => {
+    if (!window.confirm('Eliminar certificacion?')) return;
+    saveEmpresaPatch({ certificaciones: certificaciones.filter(item => item.id !== id) });
+  };
+  const updateOrgRow = (id, key, value) => {
+    const next = orgRows.map(item => item.id === id ? { ...item, [key]: key === 'nivel' ? Number(value) || 1 : value } : item);
+    saveEmpresaPatch({ organigrama: next });
+  };
+  const addOrgRow = () => saveEmpresaPatch({ organigrama: [...orgRows, emptyOrgCargoEmpresa()] });
+  const removeOrgRow = (id) => {
+    if (!window.confirm('Eliminar cargo del organigrama?')) return;
+    saveEmpresaPatch({ organigrama: orgRows.filter(item => item.id !== id) });
+  };
+  const applyUserToOrgRow = (id, userId) => {
+    const user = usuarios.find(item => String(item.id || '') === String(userId || ''));
+    const next = orgRows.map(item => item.id === id ? {
+      ...item,
+      usuarioId: userId,
+      nombre: user?.nombre || item.nombre || '',
+      cargo: user?.cargo || item.cargo || '',
+    } : item);
+    saveEmpresaPatch({ organigrama: next });
+  };
+
+  if (!empresaId) {
+    return (
+      <div className="max-w-4xl mx-auto rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
+        Selecciona una empresa activa para ver Mi Empresa.
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Dashboard</p>
+          <h2 className="text-2xl font-bold text-slate-900">Mi Empresa</h2>
+          <p className="text-sm text-slate-500 mt-1">Empresa activa: {empresaNombre}</p>
+        </div>
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          <button onClick={() => setActiveTab('empresa')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'empresa' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            {empresaNombre}
+          </button>
+          <button onClick={() => setActiveTab('organigrama')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'organigrama' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            Organigrama
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'empresa' ? (
+        <div className="space-y-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                ['Nombre', empresa.razonSocial || empresa.nombreFantasia],
+                ['RUT', empresa.rut],
+                ['Direccion', empresa.direccion],
+                ['Comuna', empresa.comuna],
+                ['Ciudad', empresa.ciudad],
+                ['Region', empresa.region],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                  <p className={labelClass}>{label}</p>
+                  <p className="mt-1 min-h-5 text-sm font-semibold text-slate-800">{value || '-'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
+              <h3 className="font-bold text-slate-900">Certificaciones</h3>
+              <Button variant="primary" icon={Plus} onClick={addCertificacion}>Agregar</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left">
+                    {['Norma', 'Descripcion', 'Estado', 'Vigencia', 'Acciones'].map(head => (
+                      <th key={head} className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {certificaciones.length === 0 ? (
+                    <tr><td colSpan="5" className="px-6 py-10 text-center text-slate-400 italic">Sin certificaciones registradas.</td></tr>
+                  ) : certificaciones.map(item => (
+                    <tr key={item.id} className="hover:bg-slate-50">
+                      <td className="p-3 min-w-44"><input value={item.norma || ''} onChange={e => updateCertificacion(item.id, 'norma', e.target.value)} className={fieldClass} placeholder="ISO 9001" /></td>
+                      <td className="p-3 min-w-72"><input value={item.descripcion || ''} onChange={e => updateCertificacion(item.id, 'descripcion', e.target.value)} className={fieldClass} placeholder="Sistema de gestion de calidad" /></td>
+                      <td className="p-3 min-w-40">
+                        <select value={item.estado || 'Vigente'} onChange={e => updateCertificacion(item.id, 'estado', e.target.value)} className={fieldClass}>
+                          {['Vigente', 'En renovacion', 'Vencida', 'Suspendida'].map(value => <option key={value}>{value}</option>)}
+                        </select>
+                      </td>
+                      <td className="p-3 min-w-40"><input type="date" value={item.vigencia || ''} onChange={e => updateCertificacion(item.id, 'vigencia', e.target.value)} className={fieldClass} /></td>
+                      <td className="p-3 text-right"><button onClick={() => removeCertificacion(item.id)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar"><Trash2 size={15} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
+            <div>
+              <h3 className="font-bold text-slate-900">Organigrama</h3>
+              <p className="mt-1 text-xs text-slate-500">Los cargos se ordenan por nivel jerarquico.</p>
+            </div>
+            <Button variant="primary" icon={Plus} onClick={addOrgRow}>Agregar cargo</Button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  {['Nivel', 'Usuario', 'Nombre', 'Cargo', 'Acciones'].map(head => (
+                    <th key={head} className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">{head}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {sortedOrgRows.length === 0 ? (
+                  <tr><td colSpan="5" className="px-6 py-10 text-center text-slate-400 italic">Sin cargos registrados.</td></tr>
+                ) : sortedOrgRows.map(item => (
+                  <tr key={item.id} className="hover:bg-slate-50">
+                    <td className="p-3 w-28"><input type="number" min="1" value={item.nivel || 1} onChange={e => updateOrgRow(item.id, 'nivel', e.target.value)} className={fieldClass} /></td>
+                    <td className="p-3 min-w-56">
+                      <select value={item.usuarioId || ''} onChange={e => applyUserToOrgRow(item.id, e.target.value)} className={fieldClass}>
+                        <option value="">Sin usuario asignado</option>
+                        {usuariosEmpresa.map(user => <option key={user.id || user.usuario} value={user.id || ''}>{user.nombre || user.usuario}</option>)}
+                      </select>
+                    </td>
+                    <td className="p-3 min-w-56"><input value={item.nombre || ''} onChange={e => updateOrgRow(item.id, 'nombre', e.target.value)} className={fieldClass} placeholder="Nombre" /></td>
+                    <td className="p-3 min-w-64"><input value={item.cargo || ''} onChange={e => updateOrgRow(item.id, 'cargo', e.target.value)} className={fieldClass} placeholder="Cargo" /></td>
+                    <td className="p-3 text-right"><button onClick={() => removeOrgRow(item.id)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar"><Trash2 size={15} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PLANNING_COLUMN_TEMPLATES = [
   { title: 'Pendiente', accent: 'bg-slate-500' },
   { title: 'En curso', accent: 'bg-blue-500' },
@@ -8570,6 +8771,7 @@ const MantenedoresMonedasIndicadores = () => {
 const MODULES_TREE = [
   { id: 'dashboard', label: 'Dashboard', sub: [
     { id: 'dashboard-planning', label: 'Planning' },
+    { id: 'dashboard-mi-empresa', label: 'Mi Empresa' },
   ] },
   {
     id: 'operaciones', label: 'Operaciones', sub: [
@@ -15370,6 +15572,12 @@ const Sidebar = () => {
   }[label] || 'calidad-equipamiento');
 
   const subIdFor = (item, label) => {
+    if (item.id === 'dashboard') {
+      return {
+        'Planning': 'dashboard-planning',
+        'Mi Empresa': 'dashboard-mi-empresa',
+      }[label] || 'dashboard';
+    }
     if (item.id.startsWith('operaciones'))     return opSubId(label);
     if (item.id.startsWith('abastecimiento'))  return abastecimientoSubId(label);
     if (item.id.startsWith('calidad'))         return calidadSubId(label);
@@ -15392,7 +15600,7 @@ const Sidebar = () => {
     item.sub ? visibleSubs(item).length > 0 : canAccess(item.id);
 
   const menuTop = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, sub: ['Planning'] },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, sub: ['Planning', 'Mi Empresa'] },
     { id: 'operaciones-registro', label: 'Operaciones', icon: ClipboardList, sub: ['Nuevo Registro', 'Planificacion', 'Historial Preventivo', 'Historial Correctivo', 'Cotizaciones', 'Historial Cotizaciones', 'OC Recibidas', 'Rendiciones', 'Historial Rendiciones'] },
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
@@ -15495,6 +15703,7 @@ const Header = () => {
   const titleMap = {
     'dashboard': 'Dashboard Principal',
     'dashboard-planning': 'Dashboard / Planning',
+    'dashboard-mi-empresa': 'Dashboard / Mi Empresa',
     'operaciones-registro': 'Nueva Operación',
     'operaciones-preventiva': 'Mantención Preventiva',
     'operaciones-correctiva': 'Mantención Correctiva',
@@ -15884,6 +16093,7 @@ const ContentManager = () => {
   // Sub-pages accessible if parent module is accessible
   const MODULE_PARENT = {
     'dashboard-planning': 'dashboard',
+    'dashboard-mi-empresa': 'dashboard',
     'operaciones-preventiva': 'operaciones-registro',
     'operaciones-correctiva': 'operaciones-registro',
     'abastecimiento-documentos': 'abastecimiento',
@@ -15915,6 +16125,7 @@ const ContentManager = () => {
     switch (activeModule) {
       case 'dashboard': return <Dashboard />;
       case 'dashboard-planning': return <DashboardPlanning />;
+      case 'dashboard-mi-empresa': return <MiEmpresa />;
       case 'operaciones-planificacion': return <Planificacion />;
       case 'operaciones-registro': return <NuevoRegistro />;
       case 'operaciones-preventiva': return <MantencionPreventiva />;
