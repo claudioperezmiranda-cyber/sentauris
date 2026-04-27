@@ -1696,6 +1696,13 @@ const emptyOrgCargoEmpresa = () => ({
   nombre: '',
 });
 
+const emptyParteInteresadaEmpresa = () => ({
+  id: `parte-${Date.now()}-${Math.random()}`,
+  parte: '',
+  necesidad: '',
+  seguimiento: '',
+});
+
 const MiEmpresa = () => {
   const { currentEmpresa, activeEmpresaId, empresas, setEmpresas, usuarios } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('empresa');
@@ -1703,6 +1710,10 @@ const MiEmpresa = () => {
   const empresaId = activeEmpresaId || empresa.id || '';
   const certificaciones = Array.isArray(empresa.certificaciones) ? empresa.certificaciones : [];
   const organigrama = Array.isArray(empresa.organigrama) ? empresa.organigrama : [];
+  const objetivosContexto = empresa.objetivosContexto && typeof empresa.objetivosContexto === 'object'
+    ? empresa.objetivosContexto
+    : { objetivos: '', contexto: '', partesInteresadas: [] };
+  const partesInteresadas = Array.isArray(objetivosContexto.partesInteresadas) ? objetivosContexto.partesInteresadas : [];
   const usuariosEmpresa = usuarios.filter(usuario => {
     const permisos = usuario.permisosEmpresas || usuario.permisos_empresas || {};
     if (!empresaId || Object.keys(permisos).length === 0) return true;
@@ -1764,6 +1775,29 @@ const MiEmpresa = () => {
     } : item);
     saveEmpresaPatch({ organigrama: next });
   };
+  const updateObjetivosContexto = (key, value) => {
+    saveEmpresaPatch({ objetivosContexto: { ...objetivosContexto, [key]: value } });
+  };
+  const addParteInteresada = () => {
+    saveEmpresaPatch({ objetivosContexto: { ...objetivosContexto, partesInteresadas: [...partesInteresadas, emptyParteInteresadaEmpresa()] } });
+  };
+  const updateParteInteresada = (id, key, value) => {
+    saveEmpresaPatch({
+      objetivosContexto: {
+        ...objetivosContexto,
+        partesInteresadas: partesInteresadas.map(item => item.id === id ? { ...item, [key]: value } : item),
+      },
+    });
+  };
+  const removeParteInteresada = (id) => {
+    if (!window.confirm('Eliminar parte interesada?')) return;
+    saveEmpresaPatch({
+      objetivosContexto: {
+        ...objetivosContexto,
+        partesInteresadas: partesInteresadas.filter(item => item.id !== id),
+      },
+    });
+  };
 
   if (!empresaId) {
     return (
@@ -1787,6 +1821,9 @@ const MiEmpresa = () => {
           </button>
           <button onClick={() => setActiveTab('organigrama')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'organigrama' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
             Organigrama
+          </button>
+          <button onClick={() => setActiveTab('objetivos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'objetivos' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            Objetivos, contexto, partes interesadas
           </button>
         </div>
       </div>
@@ -1839,6 +1876,63 @@ const MiEmpresa = () => {
                       </td>
                       <td className="p-3 min-w-40"><input type="date" value={item.vigencia || ''} onChange={e => updateCertificacion(item.id, 'vigencia', e.target.value)} className={fieldClass} /></td>
                       <td className="p-3 text-right"><button onClick={() => removeCertificacion(item.id)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar"><Trash2 size={15} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === 'objetivos' ? (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <label className="block">
+                <span className="text-sm font-bold text-slate-800">Objetivos</span>
+                <textarea
+                  value={objetivosContexto.objetivos || ''}
+                  onChange={e => updateObjetivosContexto('objetivos', e.target.value)}
+                  className="mt-3 min-h-48 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Objetivos estrategicos, de calidad, cumplimiento y mejora continua..."
+                />
+              </label>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <label className="block">
+                <span className="text-sm font-bold text-slate-800">Contexto</span>
+                <textarea
+                  value={objetivosContexto.contexto || ''}
+                  onChange={e => updateObjetivosContexto('contexto', e.target.value)}
+                  className="mt-3 min-h-48 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Contexto interno y externo de la organizacion..."
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
+              <h3 className="font-bold text-slate-900">Partes interesadas</h3>
+              <Button variant="primary" icon={Plus} onClick={addParteInteresada}>Agregar</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left">
+                    {['Parte interesada', 'Necesidad / expectativa', 'Seguimiento', 'Acciones'].map(head => (
+                      <th key={head} className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {partesInteresadas.length === 0 ? (
+                    <tr><td colSpan="4" className="px-6 py-10 text-center text-slate-400 italic">Sin partes interesadas registradas.</td></tr>
+                  ) : partesInteresadas.map(item => (
+                    <tr key={item.id} className="hover:bg-slate-50">
+                      <td className="p-3 min-w-56"><input value={item.parte || ''} onChange={e => updateParteInteresada(item.id, 'parte', e.target.value)} className={fieldClass} placeholder="Cliente, proveedor, autoridad..." /></td>
+                      <td className="p-3 min-w-80"><input value={item.necesidad || ''} onChange={e => updateParteInteresada(item.id, 'necesidad', e.target.value)} className={fieldClass} placeholder="Requisitos o expectativas relevantes" /></td>
+                      <td className="p-3 min-w-72"><input value={item.seguimiento || ''} onChange={e => updateParteInteresada(item.id, 'seguimiento', e.target.value)} className={fieldClass} placeholder="Indicador, reunion, revision..." /></td>
+                      <td className="p-3 text-right"><button onClick={() => removeParteInteresada(item.id)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar"><Trash2 size={15} /></button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -8836,6 +8930,13 @@ const MODULES_TREE = [
   {
     id: 'calidad', label: 'Calidad', sub: [
       { id: 'calidad-equipamiento', label: 'Equipamiento' },
+      { id: 'calidad-biblioteca', label: 'Biblioteca' },
+      { id: 'calidad-riesgos', label: 'Riesgos' },
+      { id: 'calidad-no-conformidades', label: 'Gestion de No Conformidades' },
+      { id: 'calidad-auditorias', label: 'Auditorias' },
+      { id: 'calidad-proveedores', label: 'Gestion de Proveedores' },
+      { id: 'calidad-clientes', label: 'Gestion de Clientes' },
+      { id: 'calidad-reportes-indicadores', label: 'Reportes e Indicadores' },
     ],
   },
   { id: 'personas',    label: 'Gestión de Personas',  sub: [] },
@@ -13495,6 +13596,27 @@ const CalidadMantenimientosCalibraciones = () => {
   );
 };
 
+const CalidadSubmoduloBase = ({ titulo }) => (
+  <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
+    <div>
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad</p>
+      <h2 className="text-2xl font-black text-slate-900">{titulo}</h2>
+      <p className="mt-2 text-sm text-slate-500">Espacio de trabajo del sistema de gestion de calidad para registrar, revisar y mantener la informacion asociada.</p>
+    </div>
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      {['Registros', 'Pendientes', 'Indicadores'].map((label, index) => (
+        <Card key={label} className="p-5">
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+          <p className={`mt-2 text-3xl font-black ${index === 0 ? 'text-slate-900' : index === 1 ? 'text-amber-600' : 'text-blue-600'}`}>0</p>
+        </Card>
+      ))}
+    </div>
+    <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
+      Modulo preparado para comenzar a cargar informacion de {titulo.toLowerCase()}.
+    </div>
+  </div>
+);
+
 const EstadosFinancieros = () => {
   const { comprobantes } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('Balance');
@@ -15598,6 +15720,13 @@ const Sidebar = () => {
   }[label] || 'mantenedores-clientes');
   const calidadSubId = (label) => ({
     'Equipamiento': 'calidad-equipamiento',
+    'Biblioteca': 'calidad-biblioteca',
+    'Riesgos': 'calidad-riesgos',
+    'Gestion de No Conformidades': 'calidad-no-conformidades',
+    'Auditorias': 'calidad-auditorias',
+    'Gestion de Proveedores': 'calidad-proveedores',
+    'Gestion de Clientes': 'calidad-clientes',
+    'Reportes e Indicadores': 'calidad-reportes-indicadores',
   }[label] || 'calidad-equipamiento');
 
   const subIdFor = (item, label) => {
@@ -15634,7 +15763,7 @@ const Sidebar = () => {
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
     { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Activos Fijos', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
-    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Equipamiento'] },
+    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Equipamiento', 'Biblioteca', 'Riesgos', 'Gestion de No Conformidades', 'Auditorias', 'Gestion de Proveedores', 'Gestion de Clientes', 'Reportes e Indicadores'] },
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
   const menuBottom = [
@@ -15753,6 +15882,13 @@ const Header = () => {
     'contabilidad-analiticos': 'Contabilidad / Analiticos',
     'contabilidad-estados-financieros': 'Contabilidad / Estados Financieros',
     'calidad-equipamiento': 'Calidad / Equipamiento',
+    'calidad-biblioteca': 'Calidad / Biblioteca',
+    'calidad-riesgos': 'Calidad / Riesgos',
+    'calidad-no-conformidades': 'Calidad / Gestion de No Conformidades',
+    'calidad-auditorias': 'Calidad / Auditorias',
+    'calidad-proveedores': 'Calidad / Gestion de Proveedores',
+    'calidad-clientes': 'Calidad / Gestion de Clientes',
+    'calidad-reportes-indicadores': 'Calidad / Reportes e Indicadores',
     'mantenedores-clientes': 'Mantenedores / Clientes y/o Proveedores',
     'mantenedores-licitaciones': 'Mantenedores / Licitaciones',
     'mantenedores-equipos': 'Mantenedores / Equipos',
@@ -16135,6 +16271,13 @@ const ContentManager = () => {
     'contabilidad-analiticos': 'contabilidad',
     'contabilidad-estados-financieros': 'contabilidad',
     'calidad-equipamiento': 'calidad',
+    'calidad-biblioteca': 'calidad',
+    'calidad-riesgos': 'calidad',
+    'calidad-no-conformidades': 'calidad',
+    'calidad-auditorias': 'calidad',
+    'calidad-proveedores': 'calidad',
+    'calidad-clientes': 'calidad',
+    'calidad-reportes-indicadores': 'calidad',
     'mantenedores-monedas-indicadores': 'mantenedores-clientes',
   };
   const canAccess = (id) => {
@@ -16176,6 +16319,13 @@ const ContentManager = () => {
       case 'contabilidad-analiticos': return <AnaliticosContables />;
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
       case 'calidad-equipamiento': return <CalidadMantenimientosCalibraciones />;
+      case 'calidad-biblioteca': return <CalidadSubmoduloBase titulo="Biblioteca" />;
+      case 'calidad-riesgos': return <CalidadSubmoduloBase titulo="Riesgos" />;
+      case 'calidad-no-conformidades': return <CalidadSubmoduloBase titulo="Gestion de No Conformidades" />;
+      case 'calidad-auditorias': return <CalidadSubmoduloBase titulo="Auditorias" />;
+      case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" />;
+      case 'calidad-clientes': return <CalidadSubmoduloBase titulo="Gestion de Clientes" />;
+      case 'calidad-reportes-indicadores': return <CalidadSubmoduloBase titulo="Reportes e Indicadores" />;
       case 'mantenedores-clientes': return <MantenedoresClientesProveedores />;
       case 'mantenedores-licitaciones': return <MantenedoresLicitaciones />;
       case 'mantenedores-equipos': return <MantenedoresEquipos />;
