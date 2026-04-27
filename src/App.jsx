@@ -1712,7 +1712,7 @@ const MiEmpresa = () => {
   const organigrama = Array.isArray(empresa.organigrama) ? empresa.organigrama : [];
   const objetivosContexto = empresa.objetivosContexto && typeof empresa.objetivosContexto === 'object'
     ? empresa.objetivosContexto
-    : { objetivos: '', contexto: '', partesInteresadas: [] };
+    : { objetivos: '', contexto: '', partesInteresadas: [], politicaCalidad: '', alcanceSgc: '' };
   const partesInteresadas = Array.isArray(objetivosContexto.partesInteresadas) ? objetivosContexto.partesInteresadas : [];
   const usuariosEmpresa = usuarios.filter(usuario => {
     const permisos = usuario.permisosEmpresas || usuario.permisos_empresas || {};
@@ -1823,7 +1823,16 @@ const MiEmpresa = () => {
             Organigrama
           </button>
           <button onClick={() => setActiveTab('objetivos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'objetivos' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-            Objetivos, contexto, partes interesadas
+            Objetivos
+          </button>
+          <button onClick={() => setActiveTab('contexto')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'contexto' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            Contexto
+          </button>
+          <button onClick={() => setActiveTab('partes-interesadas')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'partes-interesadas' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            Partes interesadas
+          </button>
+          <button onClick={() => setActiveTab('politica-calidad')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'politica-calidad' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            Política de Calidad
           </button>
         </div>
       </div>
@@ -1846,6 +1855,18 @@ const MiEmpresa = () => {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <label className="block">
+              <span className="text-sm font-bold text-slate-800">Alcance del Sistema de Gestion de Calidad</span>
+              <textarea
+                value={objetivosContexto.alcanceSgc || ''}
+                onChange={e => updateObjetivosContexto('alcanceSgc', e.target.value)}
+                className="mt-3 min-h-40 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Describe procesos, servicios, ubicaciones, limites y exclusiones aplicables al sistema de gestion de calidad..."
+              />
+            </label>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -1884,32 +1905,31 @@ const MiEmpresa = () => {
           </div>
         </div>
       ) : activeTab === 'objetivos' ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <label className="block">
+            <span className="text-sm font-bold text-slate-800">Objetivos</span>
+            <textarea
+              value={objetivosContexto.objetivos || ''}
+              onChange={e => updateObjetivosContexto('objetivos', e.target.value)}
+              className="mt-3 min-h-72 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Objetivos estrategicos, de calidad, cumplimiento y mejora continua..."
+            />
+          </label>
+        </div>
+      ) : activeTab === 'contexto' ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <label className="block">
+            <span className="text-sm font-bold text-slate-800">Contexto</span>
+            <textarea
+              value={objetivosContexto.contexto || ''}
+              onChange={e => updateObjetivosContexto('contexto', e.target.value)}
+              className="mt-3 min-h-72 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Contexto interno y externo de la organizacion..."
+            />
+          </label>
+        </div>
+      ) : activeTab === 'partes-interesadas' ? (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <label className="block">
-                <span className="text-sm font-bold text-slate-800">Objetivos</span>
-                <textarea
-                  value={objetivosContexto.objetivos || ''}
-                  onChange={e => updateObjetivosContexto('objetivos', e.target.value)}
-                  className="mt-3 min-h-48 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Objetivos estrategicos, de calidad, cumplimiento y mejora continua..."
-                />
-              </label>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <label className="block">
-                <span className="text-sm font-bold text-slate-800">Contexto</span>
-                <textarea
-                  value={objetivosContexto.contexto || ''}
-                  onChange={e => updateObjetivosContexto('contexto', e.target.value)}
-                  className="mt-3 min-h-48 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Contexto interno y externo de la organizacion..."
-                />
-              </label>
-            </div>
-          </div>
-
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
               <h3 className="font-bold text-slate-900">Partes interesadas</h3>
@@ -1939,6 +1959,18 @@ const MiEmpresa = () => {
               </table>
             </div>
           </div>
+        </div>
+      ) : activeTab === 'politica-calidad' ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <label className="block">
+            <span className="text-sm font-bold text-slate-800">Política de Calidad</span>
+            <textarea
+              value={objetivosContexto.politicaCalidad || ''}
+              onChange={e => updateObjetivosContexto('politicaCalidad', e.target.value)}
+              className="mt-3 min-h-72 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Define el compromiso de calidad, mejora continua, satisfaccion del cliente y cumplimiento de requisitos aplicables..."
+            />
+          </label>
         </div>
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
