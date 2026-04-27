@@ -1720,9 +1720,18 @@ const MiEmpresa = () => {
           nombre: usuario.nombre || usuario.usuario || '',
         }));
   const sortedOrgRows = [...orgRows].sort((a, b) => (Number(a.nivel) || 0) - (Number(b.nivel) || 0));
+  const orgLevels = sortedOrgRows.reduce((acc, item) => {
+    const nivel = Math.max(1, Number(item.nivel) || 1);
+    if (!acc[nivel]) acc[nivel] = [];
+    acc[nivel].push(item);
+    return acc;
+  }, {});
+  const orgLevelEntries = Object.entries(orgLevels).sort(([a], [b]) => Number(a) - Number(b));
   const empresaNombre = empresa.razonSocial || empresa.nombreFantasia || 'Sin empresa activa';
   const fieldClass = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const compactOrgFieldClass = "w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
   const labelClass = "text-[10px] font-bold uppercase tracking-wider text-slate-400";
+  const orgInitials = (value = '') => String(value || '').split(' ').filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() || '').join('') || 'NN';
 
   const saveEmpresaPatch = (patch) => {
     if (!empresaId) return;
@@ -1842,38 +1851,58 @@ const MiEmpresa = () => {
           <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
             <div>
               <h3 className="font-bold text-slate-900">Organigrama</h3>
-              <p className="mt-1 text-xs text-slate-500">Los cargos se ordenan por nivel jerarquico.</p>
+              <p className="mt-1 text-xs text-slate-500">Tablero visual ordenado por nivel jerarquico.</p>
             </div>
             <Button variant="primary" icon={Plus} onClick={addOrgRow}>Agregar cargo</Button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 text-left">
-                  {['Nivel', 'Usuario', 'Nombre', 'Cargo', 'Acciones'].map(head => (
-                    <th key={head} className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">{head}</th>
+          <div className="overflow-x-auto bg-slate-50/70">
+            <div className="min-w-[980px] px-8 py-8">
+              {orgLevelEntries.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-slate-400 italic">Sin cargos registrados.</div>
+              ) : (
+                <div className="space-y-8">
+                  {orgLevelEntries.map(([nivel, items], levelIndex) => (
+                    <div key={nivel} className="relative">
+                      {levelIndex > 0 && <div className="absolute -top-8 left-1/2 h-8 w-px bg-slate-300" />}
+                      <div className="mb-3 flex justify-center">
+                        <span className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-wider text-slate-500">Nivel {nivel}</span>
+                      </div>
+                      {items.length > 1 && <div className="absolute left-[12%] right-[12%] top-9 h-px bg-slate-300" />}
+                      <div className="relative flex min-h-72 items-start justify-center gap-5">
+                        {items.map(item => (
+                          <div key={item.id} className="relative w-48 shrink-0">
+                            {items.length > 1 && <div className="absolute -top-6 left-1/2 h-6 w-px bg-slate-300" />}
+                            <div className="rounded-lg border border-slate-200 bg-white shadow-sm transition hover:border-blue-200 hover:shadow-md">
+                              <div className="flex justify-end px-2 pt-2">
+                                <button onClick={() => removeOrgRow(item.id)} className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500" title="Eliminar cargo">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                              <div className="px-3 pb-4 text-center">
+                                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-sm font-black text-blue-700 ring-4 ring-blue-50">
+                                  {orgInitials(item.nombre || item.cargo)}
+                                </div>
+                                <input value={item.nombre || ''} onChange={e => updateOrgRow(item.id, 'nombre', e.target.value)} className="mt-3 w-full rounded-md border border-transparent px-2 py-1 text-center text-xs font-bold text-slate-900 hover:border-slate-200 focus:border-blue-500 focus:outline-none" placeholder="Nombre" />
+                                <input value={item.cargo || ''} onChange={e => updateOrgRow(item.id, 'cargo', e.target.value)} className="mt-1 w-full rounded-md border border-transparent px-2 py-1 text-center text-[11px] font-semibold text-slate-600 hover:border-slate-200 focus:border-blue-500 focus:outline-none" placeholder="Cargo" />
+                                <div className="mt-3 grid grid-cols-[58px_1fr] gap-2 text-left">
+                                  <label className="self-center text-[9px] font-bold uppercase text-slate-400">Nivel</label>
+                                  <input type="number" min="1" value={item.nivel || 1} onChange={e => updateOrgRow(item.id, 'nivel', e.target.value)} className={compactOrgFieldClass} />
+                                  <label className="self-center text-[9px] font-bold uppercase text-slate-400">Usuario</label>
+                                  <select value={item.usuarioId || ''} onChange={e => applyUserToOrgRow(item.id, e.target.value)} className={compactOrgFieldClass}>
+                                    <option value="">Sin usuario</option>
+                                    {usuariosEmpresa.map(user => <option key={user.id || user.usuario} value={user.id || ''}>{user.nombre || user.usuario}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {sortedOrgRows.length === 0 ? (
-                  <tr><td colSpan="5" className="px-6 py-10 text-center text-slate-400 italic">Sin cargos registrados.</td></tr>
-                ) : sortedOrgRows.map(item => (
-                  <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="p-3 w-28"><input type="number" min="1" value={item.nivel || 1} onChange={e => updateOrgRow(item.id, 'nivel', e.target.value)} className={fieldClass} /></td>
-                    <td className="p-3 min-w-56">
-                      <select value={item.usuarioId || ''} onChange={e => applyUserToOrgRow(item.id, e.target.value)} className={fieldClass}>
-                        <option value="">Sin usuario asignado</option>
-                        {usuariosEmpresa.map(user => <option key={user.id || user.usuario} value={user.id || ''}>{user.nombre || user.usuario}</option>)}
-                      </select>
-                    </td>
-                    <td className="p-3 min-w-56"><input value={item.nombre || ''} onChange={e => updateOrgRow(item.id, 'nombre', e.target.value)} className={fieldClass} placeholder="Nombre" /></td>
-                    <td className="p-3 min-w-64"><input value={item.cargo || ''} onChange={e => updateOrgRow(item.id, 'cargo', e.target.value)} className={fieldClass} placeholder="Cargo" /></td>
-                    <td className="p-3 text-right"><button onClick={() => removeOrgRow(item.id)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar"><Trash2 size={15} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
