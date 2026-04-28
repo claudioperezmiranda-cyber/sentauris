@@ -13851,6 +13851,19 @@ const emptyDocumentoControlado = () => ({
   elaboradoPor: '',
   revisadoPor: '',
   validadoPor: '',
+  estado: '',
+  revision: {
+    resultado: 'Pendiente',
+    usuarioId: '',
+    fecha: '',
+    notas: '',
+  },
+  validacion: {
+    resultado: 'Pendiente',
+    usuarioId: '',
+    fecha: '',
+    notas: '',
+  },
 });
 
 const emptyDocumentoNoControlado = () => ({
@@ -13865,11 +13878,12 @@ const emptyDocumentoNoControlado = () => ({
 });
 
 const CalidadBiblioteca = () => {
-  const { currentEmpresa, activeEmpresaId, usuarios } = useContext(ERPContext);
+  const { currentEmpresa, activeEmpresaId, usuarios, currentUser, setPlanningNotifications } = useContext(ERPContext);
   const tabs = ['Documentos Controlados', 'Documentos No Controlados', 'Configuraciones'];
   const [activeTab, setActiveTab] = useState(tabs[0]);
   const [showForm, setShowForm] = useState(false);
   const [showNoControlDocForm, setShowNoControlDocForm] = useState(false);
+  const [reviewModal, setReviewModal] = useState(null);
   const [documentos, setDocumentos] = useState(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -13912,14 +13926,51 @@ const CalidadBiblioteca = () => {
     return Array.isArray(permisos[activeEmpresaId]) && permisos[activeEmpresaId].length > 0;
   });
   const userLabel = (user) => user.nombre || user.name || user.usuario || user.email || 'Usuario';
+  const userValue = (user) => user.id || user.usuario || user.email || userLabel(user);
+  const userNameById = (userId) => usuarios.find(user => String(userValue(user)) === String(userId || '')) ? userLabel(usuarios.find(user => String(userValue(user)) === String(userId || ''))) : '-';
   const tiempoConservacionOptions = ['N/A', ...Array.from({ length: 10 }, (_, index) => `${index + 1} año${index === 0 ? '' : 's'}`)];
   const descargaOptions = ['Descarga permitida', 'Descarga y visualizacion permitida', 'No permitida', 'Solo visualizacion online'];
+  const documentStatus = (doc) => {
+    if (!doc?.requiereRevision) return 'Sin revision requerida';
+    if (doc?.validacion?.resultado === 'Validado') return 'Validado';
+    if (doc?.revision?.resultado === 'No validado' || doc?.validacion?.resultado === 'No validado') return 'No validado';
+    if (doc?.revision?.resultado === 'Validado') return 'Pendiente de Validacion';
+    return 'Pendiente de Revision y Validacion';
+  };
+  const notifyDocumentUsers = (doc) => {
+    if (!doc.requiereRevision) return;
+    const assigned = [doc.elaboradoPor, doc.revisadoPor, doc.validadoPor].filter(Boolean);
+    if (assigned.length === 0) return;
+    const uniqueAssigned = [...new Set(assigned.map(value => String(value)))];
+    setPlanningNotifications(prev => [
+      ...uniqueAssigned.map(userId => ({
+        id: `doc-review-${doc.id}-${userId}-${Date.now()}`,
+        userId,
+        type: 'document-review',
+        module: 'calidad-biblioteca',
+        documentId: doc.id,
+        title: 'Documento pendiente de validacion',
+        body: `Debes revisar o validar el documento ${doc.nombre || doc.codigo || 'sin nombre'}.`,
+        createdAt: new Date().toISOString(),
+        read: false,
+      })),
+      ...(Array.isArray(prev) ? prev : []),
+    ]);
+  };
   const saveDocumento = () => {
-    const next = [{ ...form, id: form.id || `doc-${Date.now()}` }, ...documentos];
+    const payload = {
+      ...form,
+      id: form.id || `doc-${Date.now()}`,
+      estado: form.requiereRevision ? 'Pendiente de Revision y Validacion' : '',
+      revision: { ...(form.revision || {}), resultado: 'Pendiente', usuarioId: form.revisadoPor || '', fecha: '', notas: '' },
+      validacion: { ...(form.validacion || {}), resultado: 'Pendiente', usuarioId: form.validadoPor || '', fecha: '', notas: '' },
+    };
+    const next = [payload, ...documentos];
     setDocumentos(next);
     if (typeof window !== 'undefined') {
       localStorage.setItem('sentauris_calidad_documentos_controlados', JSON.stringify(next));
     }
+    notifyDocumentUsers(payload);
     setForm(emptyDocumentoControlado());
     setShowForm(false);
   };
@@ -13932,6 +13983,53 @@ const CalidadBiblioteca = () => {
     setDocumentoNoControladoForm(emptyDocumentoNoControlado());
     setShowNoControlDocForm(false);
   };
+  const persistDocumentos = (next) => {
+    setDocumentos(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sentauris_calidad_documentos_controlados', JSON.stringify(next));
+    }
+  };
+  const openReviewModal = (doc) => {
+    setReviewModal({ doc, notas: '' });
+  };
+  const resolveReviewStep = (doc) => {
+    if (doc?.revision?.resultado !== 'Validado') return 'revision';
+    if (doc?.validacion?.resultado !== 'Validado') return 'validacion';
+    return 'completado';
+  };
+  const currentUserCanAct = (doc, step) => {
+    const userId = String(currentUser?.id || '');
+    if (step === 'revision') return userId && String(doc.revisadoPor || '') === userId;
+    if (step === 'validacion') return userId && String(doc.validadoPor || '') === userId && doc?.revision?.resultado === 'Validado';
+    return false;
+  };
+  const updateDocumentReview = (docId, approved) => {
+    const doc = documentos.find(item => item.id === docId);
+    if (!doc) return;
+    const step = resolveReviewStep(doc);
+    if (step === 'completado') return;
+    if (!currentUserCanAct(doc, step)) {
+      alert(step === 'validacion' ? 'Solo el usuario validador puede validar, y antes debe estar aprobada la revision.' : 'Solo el usuario revisor asignado puede revisar este documento.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const next = documentos.map(item => {
+      if (item.id !== docId) return item;
+      const nextItem = { ...item };
+      if (step === 'revision') {
+        nextItem.revision = { ...(item.revision || {}), resultado: approved ? 'Validado' : 'No validado', usuarioId: currentUser.id, fecha: now, notas: reviewModal?.notas || '' };
+        nextItem.estado = approved ? 'Pendiente de Validacion' : 'No validado';
+      } else {
+        nextItem.validacion = { ...(item.validacion || {}), resultado: approved ? 'Validado' : 'No validado', usuarioId: currentUser.id, fecha: now, notas: reviewModal?.notas || '' };
+        nextItem.estado = approved ? 'Validado' : 'No validado';
+      }
+      return nextItem;
+    });
+    persistDocumentos(next);
+    setReviewModal(null);
+  };
+  const activeReviewDoc = reviewModal?.doc?.id ? (documentos.find(item => item.id === reviewModal.doc.id) || reviewModal.doc) : null;
+  const activeReviewStep = activeReviewDoc ? resolveReviewStep(activeReviewDoc) : '';
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
@@ -14020,7 +14118,7 @@ const CalidadBiblioteca = () => {
                         <select value={form[field] || ''} onChange={e => updateField(field, e.target.value)} className={fieldClass}>
                           <option value="">Seleccionar usuario...</option>
                           {usuariosEmpresa.map(user => {
-                            const value = user.id || user.usuario || user.email || userLabel(user);
+                            const value = userValue(user);
                             return <option key={value} value={value}>{userLabel(user)}</option>;
                           })}
                         </select>
@@ -14047,22 +14145,33 @@ const CalidadBiblioteca = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-left">
-                    {['Nombre', 'Carpeta', 'Codigo', 'Version', 'Norma/s', 'Archivo'].map(head => (
+                    {['Nombre', 'Carpeta', 'Codigo', 'Version', 'Estado', 'Archivo', 'Acciones'].map(head => (
                       <th key={head} className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">{head}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {documentos.length === 0 ? (
-                    <tr><td colSpan="6" className="px-6 py-10 text-center text-slate-400 italic">Sin documentos controlados registrados.</td></tr>
+                    <tr><td colSpan="7" className="px-6 py-10 text-center text-slate-400 italic">Sin documentos controlados registrados.</td></tr>
                   ) : documentos.map(doc => (
                     <tr key={doc.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-semibold text-slate-800">{doc.nombre || '-'}</td>
                       <td className="px-4 py-3 text-slate-600">{doc.carpeta || '-'}</td>
                       <td className="px-4 py-3 text-slate-600">{doc.codigo || '-'}</td>
                       <td className="px-4 py-3 text-slate-600">{doc.version || '-'}</td>
-                      <td className="px-4 py-3 text-slate-600">{doc.normas || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${documentStatus(doc) === 'Validado' ? 'bg-emerald-50 text-emerald-700' : documentStatus(doc) === 'No validado' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                          {doc.estado || documentStatus(doc)}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-slate-600">{doc.archivoNombre || '-'}</td>
+                      <td className="px-4 py-3 text-right">
+                        {doc.requiereRevision ? (
+                          <button type="button" onClick={() => openReviewModal(doc)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Revisar y validar">
+                            <CheckCircle2 size={16} />
+                          </button>
+                        ) : <span className="text-slate-300">-</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -14138,6 +14247,74 @@ const CalidadBiblioteca = () => {
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
           Modulo preparado para comenzar a cargar informacion de {activeTab.toLowerCase()}.
         </div>
+      )}
+
+      {activeReviewDoc && (
+        <Modal title="Revision del documento" onClose={() => setReviewModal(null)} wide>
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1fr]">
+            <div>
+              <h3 className="border-b border-blue-700 pb-2 text-lg font-black text-blue-700">Revision del documento:</h3>
+              <table className="mt-3 w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-300 text-left text-blue-700">
+                    {['Puesto', 'Resultado', 'Revisado por', 'Revisado el'].map(head => <th key={head} className="py-2 font-bold">{head}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['Revisor', activeReviewDoc.revision, activeReviewDoc.revisadoPor],
+                    ['Validador', activeReviewDoc.validacion, activeReviewDoc.validadoPor],
+                  ].map(([puesto, result, assignedUser]) => (
+                    <tr key={puesto} className="border-b border-slate-200">
+                      <td className="py-2 text-slate-700">{puesto}</td>
+                      <td className="py-2 font-bold text-slate-700">{result?.resultado === 'Pendiente' ? '?' : result?.resultado || '?'}</td>
+                      <td className="py-2 text-slate-700">{result?.usuarioId ? userNameById(result.usuarioId) : userNameById(assignedUser)}</td>
+                      <td className="py-2 text-slate-700">{result?.fecha ? new Date(result.fecha).toLocaleString('es-CL') : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="mt-8 space-y-3 text-sm">
+                <p><span className="font-bold text-blue-700">Usuario:</span> <span className="ml-5 text-slate-700">{userLabel(currentUser || {})}</span></p>
+                <p><span className="font-bold text-blue-700">Puesto:</span> <span className="ml-7 text-slate-700">{activeReviewStep === 'revision' ? 'Revisor' : activeReviewStep === 'validacion' ? 'Validador' : '-'}</span></p>
+                <label className="block">
+                  <span className="font-bold text-blue-700">Notas:</span>
+                  <textarea value={reviewModal.notas || ''} onChange={e => setReviewModal(prev => ({ ...prev, notas: e.target.value }))} rows={2} className="ml-8 mt-1 w-[calc(100%-2rem)] rounded border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                </label>
+              </div>
+
+              <div className="mt-6 flex flex-wrap justify-center gap-20">
+                <button
+                  type="button"
+                  onClick={() => updateDocumentReview(activeReviewDoc.id, true)}
+                  disabled={activeReviewStep === 'completado' || !currentUserCanAct(activeReviewDoc, activeReviewStep)}
+                  className="min-w-28 rounded border border-emerald-500 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CheckCircle2 size={16} className="mx-auto mb-1" />
+                  Validar revision
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateDocumentReview(activeReviewDoc.id, false)}
+                  disabled={activeReviewStep === 'completado' || !currentUserCanAct(activeReviewDoc, activeReviewStep)}
+                  className="min-w-28 rounded border border-red-500 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <X size={16} className="mx-auto mb-1" />
+                  No validar revision
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-blue-500 p-8 text-white">
+              <h3 className="text-2xl font-black">{activeReviewStep === 'completado' ? 'Documento validado' : activeReviewStep === 'validacion' ? 'Validacion pendiente' : 'Revision pendiente'}</h3>
+              <div className="my-6 border-t border-white/60" />
+              <p className="font-bold">1 confirmacion necesaria.</p>
+              {activeReviewStep === 'validacion' && <p className="mt-3 text-sm text-blue-50">La revision ya fue aprobada. Ahora corresponde validar el documento.</p>}
+              {activeReviewStep === 'revision' && <p className="mt-3 text-sm text-blue-50">Primero debe aprobar el usuario asignado en Revisado por.</p>}
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -16432,12 +16609,17 @@ const Header = () => {
   };
   const allowedEmpresaIds = getAccessibleEmpresaIds();
   const accessibleEmpresas = empresas.filter(e => allowedEmpresaIds.includes(e.id));
-  const userNotifications = (planningNotifications || []).filter(item => item.userId === currentUser.id);
+  const userNotifications = (planningNotifications || []).filter(item => String(item.userId || '') === String(currentUser.id || ''));
   const unreadNotifications = userNotifications.filter(item => !item.read);
   const markNotificationRead = (notificationId) => setPlanningNotifications(prev => prev.map(item => item.id === notificationId ? { ...item, read: true } : item));
-  const markAllNotificationsRead = () => setPlanningNotifications(prev => prev.map(item => item.userId === currentUser.id ? { ...item, read: true } : item));
+  const markAllNotificationsRead = () => setPlanningNotifications(prev => prev.map(item => String(item.userId || '') === String(currentUser.id || '') ? { ...item, read: true } : item));
   const openNotification = (notification) => {
     markNotificationRead(notification.id);
+    if (notification.type === 'document-review' || notification.module === 'calidad-biblioteca') {
+      setActiveModule('calidad-biblioteca');
+      setNotificationsOpen(false);
+      return;
+    }
     setPlanningOpenTarget({
       empresaId: planningCompanyKey(activeEmpresaId),
       workspaceId: notification.workspaceId,
