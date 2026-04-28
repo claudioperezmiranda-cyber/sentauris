@@ -163,6 +163,7 @@ const looksLikeEmail = (value) => String(value || '').includes('@');
 const looksLikeTimestamp = (value) => /^\d{4}-\d{2}-\d{2}/.test(String(value || ''));
 const normalizeKey = (value) => String(value || '').toLowerCase().replace(/[\s.]/g, '').trim();
 const normalizeRutKey = (value) => normalizeKey(value).replace(/[^0-9k]/g, '');
+const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
 const isClienteTipoC = (cliente = {}) => normalizeKey(cliente.tipoCliente ?? cliente.tipo_cliente ?? cliente['Tipo Cliente']) === 'c';
 const filterClientesTipoC = (clientes = []) => clientes.filter(isClienteTipoC);
 const isNetworkFetchError = (err) => /failed to fetch|fetch failed|networkerror|econn|etimedout/i.test(String(err?.message || err || ''));
@@ -7221,11 +7222,13 @@ const MantenedoresClientesProveedores = () => {
       setClientes(nextClientes);
       await persistClientesExtended(nextClientes);
     } else {
-      let { error } = await supabase.from('clientes').update(extPayload).eq('id_RUT', data.id);
-      if (error && isColError(error.message)) {
-        ({ error } = await supabase.from('clientes').update(basePayload).eq('id_RUT', data.id));
+      if (isUuid(data.id)) {
+        let { error } = await supabase.from('clientes').update(extPayload).eq('id_RUT', data.id);
+        if (error && isColError(error.message)) {
+          ({ error } = await supabase.from('clientes').update(basePayload).eq('id_RUT', data.id));
+        }
+        if (error) { alert('Error al guardar: ' + error.message); return; }
       }
-      if (error) { alert('Error al guardar: ' + error.message); return; }
       const nextClientes = clientes.map(c => c.id === data.id ? { ...c, ...normalizeCliente({ ...c, ...data }) } : c);
       setClientes(nextClientes);
       await persistClientesExtended(nextClientes);
@@ -7235,8 +7238,10 @@ const MantenedoresClientesProveedores = () => {
 
   const deleteRecord = async (record) => {
     if (!window.confirm(`Eliminar "${record.razonSocial || record.name}"?`)) return;
-    const { error } = await supabase.from('clientes').delete().eq('id', record.id);
-    if (error) { alert('Error al eliminar: ' + error.message); return; }
+    if (isUuid(record.id)) {
+      const { error } = await supabase.from('clientes').delete().eq('id', record.id);
+      if (error) { alert('Error al eliminar: ' + error.message); return; }
+    }
     const nextClientes = clientes.filter(c => c.id !== record.id);
     setClientes(nextClientes);
     await persistClientesExtended(nextClientes);
