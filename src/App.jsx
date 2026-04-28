@@ -1703,13 +1703,34 @@ const emptyParteInteresadaEmpresa = () => ({
   seguimiento: '',
 });
 
+const emptyProcesoEmpresa = () => ({
+  id: `proc-${Date.now()}-${Math.random()}`,
+  proceso: '',
+  tipo: 'Estrategico',
+  descripcion: '',
+  archivoNombre: '',
+  subprocesos: [],
+});
+
+const emptySubprocesoEmpresa = () => ({
+  id: `subproc-${Date.now()}-${Math.random()}`,
+  subproceso: '',
+  descripcion: '',
+});
+
 const MiEmpresa = () => {
   const { currentEmpresa, activeEmpresaId, empresas, setEmpresas, usuarios } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('empresa');
+  const [showProcesoForm, setShowProcesoForm] = useState(false);
+  const [procesoForm, setProcesoForm] = useState(emptyProcesoEmpresa());
+  const [editingProcesoId, setEditingProcesoId] = useState('');
+  const [subprocesoTargetId, setSubprocesoTargetId] = useState('');
+  const [subprocesoForm, setSubprocesoForm] = useState(emptySubprocesoEmpresa());
   const empresa = currentEmpresa || {};
   const empresaId = activeEmpresaId || empresa.id || '';
   const certificaciones = Array.isArray(empresa.certificaciones) ? empresa.certificaciones : [];
   const organigrama = Array.isArray(empresa.organigrama) ? empresa.organigrama : [];
+  const procesos = Array.isArray(empresa.procesos) ? empresa.procesos : [];
   const objetivosContexto = empresa.objetivosContexto && typeof empresa.objetivosContexto === 'object'
     ? empresa.objetivosContexto
     : { objetivos: '', contexto: '', partesInteresadas: [], politicaCalidad: '', alcanceSgc: '' };
@@ -1798,6 +1819,54 @@ const MiEmpresa = () => {
       },
     });
   };
+  const resetProcesoForm = () => {
+    setProcesoForm(emptyProcesoEmpresa());
+    setEditingProcesoId('');
+    setShowProcesoForm(false);
+  };
+  const openNewProcesoForm = () => {
+    setProcesoForm(emptyProcesoEmpresa());
+    setEditingProcesoId('');
+    setShowProcesoForm(true);
+  };
+  const editProceso = (proceso) => {
+    setProcesoForm({ ...emptyProcesoEmpresa(), ...proceso, subprocesos: Array.isArray(proceso.subprocesos) ? proceso.subprocesos : [] });
+    setEditingProcesoId(proceso.id);
+    setShowProcesoForm(true);
+  };
+  const saveProceso = () => {
+    const payload = {
+      ...procesoForm,
+      id: editingProcesoId || procesoForm.id || `proc-${Date.now()}-${Math.random()}`,
+      subprocesos: Array.isArray(procesoForm.subprocesos) ? procesoForm.subprocesos : [],
+    };
+    saveEmpresaPatch({
+      procesos: editingProcesoId
+        ? procesos.map(item => item.id === editingProcesoId ? payload : item)
+        : [payload, ...procesos],
+    });
+    resetProcesoForm();
+  };
+  const removeProceso = (id) => {
+    if (!window.confirm('Eliminar proceso?')) return;
+    saveEmpresaPatch({ procesos: procesos.filter(item => item.id !== id) });
+  };
+  const openSubprocesoForm = (procesoId) => {
+    setSubprocesoTargetId(procesoId);
+    setSubprocesoForm(emptySubprocesoEmpresa());
+  };
+  const saveSubproceso = () => {
+    if (!subprocesoTargetId) return;
+    saveEmpresaPatch({
+      procesos: procesos.map(item => {
+        if (item.id !== subprocesoTargetId) return item;
+        const currentSubprocesos = Array.isArray(item.subprocesos) ? item.subprocesos : [];
+        return { ...item, subprocesos: [...currentSubprocesos, { ...subprocesoForm, id: subprocesoForm.id || `subproc-${Date.now()}-${Math.random()}` }] };
+      }),
+    });
+    setSubprocesoTargetId('');
+    setSubprocesoForm(emptySubprocesoEmpresa());
+  };
 
   if (!empresaId) {
     return (
@@ -1811,7 +1880,7 @@ const MiEmpresa = () => {
     <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Dashboard</p>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad</p>
           <h2 className="text-2xl font-bold text-slate-900">Mi Empresa</h2>
           <p className="text-sm text-slate-500 mt-1">Empresa activa: {empresaNombre}</p>
         </div>
@@ -1830,6 +1899,9 @@ const MiEmpresa = () => {
           </button>
           <button onClick={() => setActiveTab('partes-interesadas')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'partes-interesadas' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
             Partes interesadas
+          </button>
+          <button onClick={() => setActiveTab('procesos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'procesos' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            Procesos
           </button>
           <button onClick={() => setActiveTab('politica-calidad')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'politica-calidad' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
             Política de Calidad
@@ -1958,6 +2030,102 @@ const MiEmpresa = () => {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      ) : activeTab === 'procesos' ? (
+        <div className="space-y-6">
+          <div className="flex justify-end">
+            <Button variant="primary" icon={Plus} onClick={openNewProcesoForm}>Nuevo Proceso</Button>
+          </div>
+
+          {showProcesoForm && (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-semibold text-slate-700">Procesos</span>
+                  <input value={procesoForm.proceso || ''} onChange={e => setProcesoForm(prev => ({ ...prev, proceso: e.target.value }))} className={fieldClass} placeholder="Nombre del proceso" />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-semibold text-slate-700">Tipo de Proceso</span>
+                  <select value={procesoForm.tipo || 'Estrategico'} onChange={e => setProcesoForm(prev => ({ ...prev, tipo: e.target.value }))} className={fieldClass}>
+                    {['Estrategico', 'Misional', 'Soporte'].map(value => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 md:col-span-2">
+                  <span className="text-sm font-semibold text-slate-700">Descripcion</span>
+                  <textarea value={procesoForm.descripcion || ''} onChange={e => setProcesoForm(prev => ({ ...prev, descripcion: e.target.value }))} rows={4} className={fieldClass} placeholder="Describe el objetivo, alcance y responsables del proceso..." />
+                </label>
+                <label className="flex flex-col gap-1.5 md:col-span-2">
+                  <span className="text-sm font-semibold text-slate-700">Adjuntar archivos</span>
+                  <input
+                    type="file"
+                    onChange={e => setProcesoForm(prev => ({ ...prev, archivoNombre: e.target.files?.[0]?.name || '' }))}
+                    className="block w-full rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white hover:border-blue-400"
+                  />
+                  {procesoForm.archivoNombre && <span className="text-xs font-semibold text-slate-500">{procesoForm.archivoNombre}</span>}
+                </label>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <Button variant="secondary" onClick={resetProcesoForm}>Cancelar</Button>
+                <Button variant="accent" icon={CheckCircle} onClick={saveProceso}>{editingProcesoId ? 'Guardar cambios' : 'Guardar proceso'}</Button>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {procesos.length === 0 ? (
+              <div className="lg:col-span-2 rounded-xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-slate-400 italic">Sin procesos registrados.</div>
+            ) : procesos.map(proceso => {
+              const subprocesos = Array.isArray(proceso.subprocesos) ? proceso.subprocesos : [];
+              return (
+                <div key={proceso.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <span className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-700">{proceso.tipo || 'Estrategico'}</span>
+                      <h3 className="mt-3 text-lg font-black text-slate-900">{proceso.proceso || 'Proceso sin nombre'}</h3>
+                      <p className="mt-2 text-sm text-slate-500">{proceso.descripcion || 'Sin descripcion.'}</p>
+                      {proceso.archivoNombre && <p className="mt-3 text-xs font-semibold text-slate-500">Archivo: {proceso.archivoNombre}</p>}
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <button onClick={() => editProceso(proceso)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Editar proceso"><Pencil size={16} /></button>
+                      <button onClick={() => removeProceso(proceso.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar proceso"><Trash2 size={16} /></button>
+                      <button onClick={() => openSubprocesoForm(proceso.id)} className="rounded-lg p-2 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600" title="Agregar subproceso"><Plus size={16} /></button>
+                    </div>
+                  </div>
+
+                  {subprocesoTargetId === proceso.id && (
+                    <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="grid grid-cols-1 gap-3">
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-sm font-semibold text-slate-700">Subproceso</span>
+                          <input value={subprocesoForm.subproceso || ''} onChange={e => setSubprocesoForm(prev => ({ ...prev, subproceso: e.target.value }))} className={fieldClass} placeholder="Nombre del subproceso" />
+                        </label>
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-sm font-semibold text-slate-700">Descripcion</span>
+                          <textarea value={subprocesoForm.descripcion || ''} onChange={e => setSubprocesoForm(prev => ({ ...prev, descripcion: e.target.value }))} rows={3} className={fieldClass} />
+                        </label>
+                      </div>
+                      <div className="mt-4 flex justify-end gap-3">
+                        <Button variant="secondary" onClick={() => setSubprocesoTargetId('')}>Cancelar</Button>
+                        <Button variant="accent" icon={CheckCircle} onClick={saveSubproceso}>Guardar subproceso</Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-5 space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Subprocesos</p>
+                    {subprocesos.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-slate-200 px-4 py-3 text-sm text-slate-400">Sin subprocesos registrados.</p>
+                    ) : subprocesos.map(subproceso => (
+                      <div key={subproceso.id} className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                        <p className="text-sm font-bold text-slate-800">{subproceso.subproceso || 'Subproceso sin nombre'}</p>
+                        <p className="mt-1 text-xs text-slate-500">{subproceso.descripcion || 'Sin descripcion.'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : activeTab === 'politica-calidad' ? (
