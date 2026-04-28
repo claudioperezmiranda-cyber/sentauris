@@ -13853,11 +13853,36 @@ const emptyDocumentoControlado = () => ({
   validadoPor: '',
 });
 
+const emptyCarpetaNoControlada = () => ({
+  id: '',
+  nombre: '',
+  subcarpeta: '',
+  permisos: {
+    lectura: '',
+    edicion: '',
+    revision: '',
+    aprobacion: '',
+  },
+});
+
+const emptyDocumentoNoControlado = () => ({
+  id: '',
+  denominacion: '',
+  carpeta: '',
+  codigo: '',
+  version: '',
+  archivoNombre: '',
+  descripcion: '',
+  permiteDescarga: '',
+});
+
 const CalidadBiblioteca = () => {
   const { currentEmpresa, activeEmpresaId, usuarios } = useContext(ERPContext);
   const tabs = ['Documentos Controlados', 'Documentos No Controlados', 'Configuraciones'];
   const [activeTab, setActiveTab] = useState(tabs[0]);
   const [showForm, setShowForm] = useState(false);
+  const [showNoControlFolderForm, setShowNoControlFolderForm] = useState(false);
+  const [showNoControlDocForm, setShowNoControlDocForm] = useState(false);
   const [documentos, setDocumentos] = useState(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -13868,7 +13893,31 @@ const CalidadBiblioteca = () => {
     }
   });
   const [form, setForm] = useState(emptyDocumentoControlado());
+  const [carpetaNoControladaForm, setCarpetaNoControladaForm] = useState(emptyCarpetaNoControlada());
+  const [documentoNoControladoForm, setDocumentoNoControladoForm] = useState(emptyDocumentoNoControlado());
+  const [carpetasNoControladas, setCarpetasNoControladas] = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = JSON.parse(localStorage.getItem('sentauris_calidad_carpetas_no_controladas') || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const [documentosNoControlados, setDocumentosNoControlados] = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = JSON.parse(localStorage.getItem('sentauris_calidad_documentos_no_controlados') || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
   const updateField = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const updateNoControlDocField = (field, value) => setDocumentoNoControladoForm(prev => ({ ...prev, [field]: value }));
+  const updateNoControlPermission = (field, value) => {
+    setCarpetaNoControladaForm(prev => ({ ...prev, permisos: { ...(prev.permisos || {}), [field]: value } }));
+  };
   const fieldClass = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
   const labelClass = "text-sm font-semibold text-slate-700";
   const procesosEmpresa = Array.isArray(currentEmpresa?.procesos) ? currentEmpresa.procesos : [];
@@ -13891,6 +13940,10 @@ const CalidadBiblioteca = () => {
   const userLabel = (user) => user.nombre || user.name || user.usuario || user.email || 'Usuario';
   const tiempoConservacionOptions = ['N/A', ...Array.from({ length: 10 }, (_, index) => `${index + 1} año${index === 0 ? '' : 's'}`)];
   const descargaOptions = ['Descarga permitida', 'Descarga y visualizacion permitida', 'No permitida', 'Solo visualizacion online'];
+  const carpetaNoControladaOptions = carpetasNoControladas.map(carpeta => {
+    const nombre = carpeta.nombre || 'Carpeta sin nombre';
+    return carpeta.subcarpeta ? `${nombre} / ${carpeta.subcarpeta}` : nombre;
+  });
   const saveDocumento = () => {
     const next = [{ ...form, id: form.id || `doc-${Date.now()}` }, ...documentos];
     setDocumentos(next);
@@ -13899,6 +13952,24 @@ const CalidadBiblioteca = () => {
     }
     setForm(emptyDocumentoControlado());
     setShowForm(false);
+  };
+  const saveCarpetaNoControlada = () => {
+    const next = [{ ...carpetaNoControladaForm, id: carpetaNoControladaForm.id || `carpeta-nc-${Date.now()}` }, ...carpetasNoControladas];
+    setCarpetasNoControladas(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sentauris_calidad_carpetas_no_controladas', JSON.stringify(next));
+    }
+    setCarpetaNoControladaForm(emptyCarpetaNoControlada());
+    setShowNoControlFolderForm(false);
+  };
+  const saveDocumentoNoControlado = () => {
+    const next = [{ ...documentoNoControladoForm, id: documentoNoControladoForm.id || `doc-nc-${Date.now()}` }, ...documentosNoControlados];
+    setDocumentosNoControlados(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sentauris_calidad_documentos_no_controlados', JSON.stringify(next));
+    }
+    setDocumentoNoControladoForm(emptyDocumentoNoControlado());
+    setShowNoControlDocForm(false);
   };
 
   return (
@@ -14035,6 +14106,121 @@ const CalidadBiblioteca = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === 'Documentos No Controlados' ? (
+        <div className="space-y-6">
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button variant="secondary" icon={Plus} onClick={() => setShowNoControlFolderForm(true)}>Agregar Carpeta</Button>
+            <Button variant="primary" icon={Plus} onClick={() => setShowNoControlDocForm(true)}>Agregar Documento</Button>
+          </div>
+
+          {showNoControlFolderForm && (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Input label="Nombre de la Carpeta" value={carpetaNoControladaForm.nombre} onChange={e => setCarpetaNoControladaForm(prev => ({ ...prev, nombre: e.target.value }))} />
+                <Input label="Subcarpeta" value={carpetaNoControladaForm.subcarpeta} onChange={e => setCarpetaNoControladaForm(prev => ({ ...prev, subcarpeta: e.target.value }))} />
+                <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-4">
+                  {[
+                    ['Lectura', 'lectura'],
+                    ['Edicion', 'edicion'],
+                    ['Revision', 'revision'],
+                    ['Aprobacion', 'aprobacion'],
+                  ].map(([label, field]) => (
+                    <label key={field} className="flex flex-col gap-1.5">
+                      <span className={labelClass}>Permiso de {label}</span>
+                      <select value={carpetaNoControladaForm.permisos?.[field] || ''} onChange={e => updateNoControlPermission(field, e.target.value)} className={fieldClass}>
+                        <option value="">Seleccionar usuario...</option>
+                        {usuariosEmpresa.map(user => {
+                          const value = user.id || user.usuario || user.email || userLabel(user);
+                          return <option key={`${field}-${value}`} value={value}>{userLabel(user)}</option>;
+                        })}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <Button variant="secondary" onClick={() => { setShowNoControlFolderForm(false); setCarpetaNoControladaForm(emptyCarpetaNoControlada()); }}>Cancelar</Button>
+                <Button variant="accent" icon={CheckCircle} onClick={saveCarpetaNoControlada}>Guardar Carpeta</Button>
+              </div>
+            </div>
+          )}
+
+          {showNoControlDocForm && (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Input label="Denominacion" value={documentoNoControladoForm.denominacion} onChange={e => updateNoControlDocField('denominacion', e.target.value)} />
+                <label className="flex flex-col gap-1.5">
+                  <span className={labelClass}>Carpeta</span>
+                  <select value={documentoNoControladoForm.carpeta} onChange={e => updateNoControlDocField('carpeta', e.target.value)} className={fieldClass}>
+                    <option value="">Seleccionar carpeta o subcarpeta...</option>
+                    {carpetaNoControladaOptions.map(value => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+                <Input label="Codigo" value={documentoNoControladoForm.codigo} onChange={e => updateNoControlDocField('codigo', e.target.value)} />
+                <Input label="Version" value={documentoNoControladoForm.version} onChange={e => updateNoControlDocField('version', e.target.value)} />
+                <label className="flex flex-col gap-1.5 md:col-span-2">
+                  <span className={labelClass}>Archivo</span>
+                  <input
+                    type="file"
+                    onChange={e => updateNoControlDocField('archivoNombre', e.target.files?.[0]?.name || '')}
+                    className="block w-full rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white hover:border-blue-400"
+                  />
+                  {documentoNoControladoForm.archivoNombre && <span className="text-xs font-semibold text-slate-500">{documentoNoControladoForm.archivoNombre}</span>}
+                </label>
+                <label className="flex flex-col gap-1.5 md:col-span-2">
+                  <span className={labelClass}>Descripcion</span>
+                  <textarea value={documentoNoControladoForm.descripcion} onChange={e => updateNoControlDocField('descripcion', e.target.value)} rows={4} className={fieldClass} />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className={labelClass}>Permitir la descarga del documento</span>
+                  <select value={documentoNoControladoForm.permiteDescarga} onChange={e => updateNoControlDocField('permiteDescarga', e.target.value)} className={fieldClass}>
+                    <option value="">Seleccionar...</option>
+                    {descargaOptions.map(value => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <Button variant="secondary" onClick={() => { setShowNoControlDocForm(false); setDocumentoNoControladoForm(emptyDocumentoNoControlado()); }}>Cancelar</Button>
+                <Button variant="accent" icon={CheckCircle} onClick={saveDocumentoNoControlado}>Guardar Documento</Button>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="border-b border-slate-100 px-6 py-4">
+                <h3 className="font-bold text-slate-900">Carpetas</h3>
+              </div>
+              <div className="divide-y divide-slate-50">
+                {carpetasNoControladas.length === 0 ? (
+                  <p className="px-6 py-10 text-center text-sm italic text-slate-400">Sin carpetas registradas.</p>
+                ) : carpetasNoControladas.map(carpeta => (
+                  <div key={carpeta.id} className="px-6 py-4">
+                    <p className="font-bold text-slate-900">{carpeta.nombre || 'Carpeta sin nombre'}</p>
+                    <p className="mt-1 text-sm text-slate-500">{carpeta.subcarpeta || 'Sin subcarpeta'}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="border-b border-slate-100 px-6 py-4">
+                <h3 className="font-bold text-slate-900">Documentos No Controlados</h3>
+              </div>
+              <div className="divide-y divide-slate-50">
+                {documentosNoControlados.length === 0 ? (
+                  <p className="px-6 py-10 text-center text-sm italic text-slate-400">Sin documentos no controlados registrados.</p>
+                ) : documentosNoControlados.map(doc => (
+                  <div key={doc.id} className="px-6 py-4">
+                    <p className="font-bold text-slate-900">{doc.denominacion || 'Documento sin denominacion'}</p>
+                    <p className="mt-1 text-sm text-slate-500">{doc.carpeta || 'Sin carpeta'} · {doc.codigo || 'Sin codigo'} · {doc.version || 'Sin version'}</p>
+                    {doc.archivoNombre && <p className="mt-2 text-xs font-semibold text-slate-500">Archivo: {doc.archivoNombre}</p>}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
