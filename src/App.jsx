@@ -14199,6 +14199,155 @@ const CalidadProveedoresTabla = () => {
   );
 };
 
+const CalidadDocumentosProveedores = () => {
+  const { clientes, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
+  const parametrosStorageKey = 'sentauris_calidad_proveedores_parametros';
+  const documentosStorageKey = 'sentauris_calidad_proveedores_documentos';
+  const parametros = (() => {
+    if (typeof window === 'undefined') return DEFAULT_PROVEEDOR_PARAMETROS;
+    try {
+      return normalizeProveedorParametros(JSON.parse(localStorage.getItem(parametrosStorageKey) || 'null'));
+    } catch {
+      return DEFAULT_PROVEEDOR_PARAMETROS;
+    }
+  })();
+  const [documentos, setDocumentos] = useState(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(documentosStorageKey) || '{}');
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    } catch {
+      return {};
+    }
+  });
+  const [openProveedorId, setOpenProveedorId] = useState('');
+  const proveedores = clientes
+    .filter(cliente => (!activeEmpresaId || String(cliente.empresaId || cliente.empresa_id || '') === String(activeEmpresaId)))
+    .filter(isProveedorCalidad)
+    .sort((a, b) => String(a.razonSocial || a.name || '').localeCompare(String(b.razonSocial || b.name || ''), 'es'));
+  const parametroItems = parametros.flatMap(criterio => criterio.items.map(item => ({
+    ...item,
+    criterioId: criterio.id,
+    criterio: criterio.criterio,
+    porcentaje: criterio.porcentaje,
+    folderKey: `${criterio.id}__${item.id}`,
+  })));
+  const persistDocumentos = (next) => {
+    setDocumentos(next);
+    if (typeof window !== 'undefined') localStorage.setItem(documentosStorageKey, JSON.stringify(next));
+  };
+  const folderFiles = (proveedor, folderKey) => documentos[proveedorCalidadKey(proveedor)]?.[folderKey] || [];
+  const uploadFiles = async (proveedor, folderKey, files) => {
+    if (!files?.length) return;
+    const uploaded = await readFilesAsDataUrl(files);
+    const proveedorId = proveedorCalidadKey(proveedor);
+    const currentProveedorDocs = documentos[proveedorId] || {};
+    const currentFolderDocs = currentProveedorDocs[folderKey] || [];
+    persistDocumentos({
+      ...documentos,
+      [proveedorId]: {
+        ...currentProveedorDocs,
+        [folderKey]: [...currentFolderDocs, ...uploaded.map(file => ({ ...file, uploadedAt: new Date().toISOString() }))],
+      },
+    });
+  };
+  const removeFile = (proveedor, folderKey, fileId) => {
+    const proveedorId = proveedorCalidadKey(proveedor);
+    const currentProveedorDocs = documentos[proveedorId] || {};
+    persistDocumentos({
+      ...documentos,
+      [proveedorId]: {
+        ...currentProveedorDocs,
+        [folderKey]: (currentProveedorDocs[folderKey] || []).filter(file => file.id !== fileId),
+      },
+    });
+  };
+  const fileCountForProveedor = (proveedor) => Object.values(documentos[proveedorCalidadKey(proveedor)] || {}).reduce((sum, files) => sum + (Array.isArray(files) ? files.length : 0), 0);
+  const fileSizeLabel = (size = 0) => {
+    const kb = Number(size || 0) / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-col gap-2 border-b border-slate-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h3 className="font-black text-slate-900">Documentos Proveedores</h3>
+          <p className="mt-1 text-xs text-slate-500">Empresa activa: {currentEmpresa?.razonSocial || 'Todas'} · carpeta por proveedor y subcarpeta por item de parametros</p>
+        </div>
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{proveedores.length} carpeta(s)</span>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {proveedores.length === 0 ? (
+          <div className="px-6 py-12 text-center text-sm text-slate-400 italic">No hay proveedores con Tipo Proveedor P o E y Cliente/Proveedor Critico Si para generar repositorio.</div>
+        ) : proveedores.map(proveedor => {
+          const proveedorId = proveedorCalidadKey(proveedor);
+          const isOpen = openProveedorId === proveedorId;
+          return (
+            <div key={proveedorId}>
+              <button type="button" onClick={() => setOpenProveedorId(isOpen ? '' : proveedorId)} className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left hover:bg-slate-50">
+                <div>
+                  <p className="font-black text-slate-900">{proveedor.razonSocial || proveedor.name || 'Proveedor'}</p>
+                  <p className="mt-1 text-xs text-slate-500">RUT {proveedor.rut || '-'} · Tipo {proveedorTipoLabel(proveedor.tipoProveedor || proveedor.tipo_proveedor)} · Critico Si</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{fileCountForProveedor(proveedor)} archivo(s)</span>
+                  {isOpen ? <ChevronLeft className="-rotate-90 text-slate-400" size={18} /> : <ChevronRight className="text-slate-400" size={18} />}
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="bg-slate-50/70 px-4 py-4 md:px-6">
+                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    {parametroItems.map(item => {
+                      const files = folderFiles(proveedor, item.folderKey);
+                      return (
+                        <div key={item.folderKey} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{item.criterio} ({item.porcentaje}%)</p>
+                              <h4 className="mt-1 text-sm font-black text-slate-900">{item.item}</h4>
+                              <p className="mt-1 text-xs text-slate-500">Puntaje {item.puntaje} · {files.length} archivo(s)</p>
+                            </div>
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">
+                              <Upload size={14} />
+                              Cargar
+                              <input type="file" multiple className="hidden" onChange={e => { uploadFiles(proveedor, item.folderKey, e.target.files); e.target.value = ''; }} />
+                            </label>
+                          </div>
+
+                          <div className="mt-4 space-y-2">
+                            {files.length === 0 ? (
+                              <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">Subcarpeta sin respaldos.</p>
+                            ) : files.map(file => (
+                              <div key={file.id} className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                <FileText size={15} className="shrink-0 text-slate-400" />
+                                <div className="min-w-0 flex-1">
+                                  <a href={file.url} download={file.name} className="block truncate text-xs font-bold text-slate-700 hover:text-blue-700">{file.name}</a>
+                                  <p className="text-[10px] text-slate-400">{fileSizeLabel(file.size)} · {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString('es-CL') : '-'}</p>
+                                </div>
+                                <button type="button" onClick={() => removeFile(proveedor, item.folderKey, file.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar respaldo">
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
   const normalizedTabs = tabs.length > 0 ? tabs : ['Registros'];
   const [activeTab, setActiveTab] = useState(normalizedTabs[0]);
@@ -14233,6 +14382,8 @@ const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
       </div>
       {titulo === 'Gestion de Proveedores' && (activeTab === 'Gestion de Proveedores' || activeTab === 'Proveedores') ? (
         <CalidadProveedoresTabla />
+      ) : titulo === 'Gestion de Proveedores' && activeTab === 'Documentos Proveedores' ? (
+        <CalidadDocumentosProveedores />
       ) : titulo === 'Gestion de Proveedores' && activeTab === 'Parametros' ? (
         <CalidadProveedorParametros />
       ) : (
