@@ -14225,13 +14225,6 @@ const CalidadDocumentosProveedores = () => {
     .filter(cliente => (!activeEmpresaId || String(cliente.empresaId || cliente.empresa_id || '') === String(activeEmpresaId)))
     .filter(isProveedorCalidad)
     .sort((a, b) => String(a.razonSocial || a.name || '').localeCompare(String(b.razonSocial || b.name || ''), 'es'));
-  const parametroItems = parametros.flatMap(criterio => criterio.items.map(item => ({
-    ...item,
-    criterioId: criterio.id,
-    criterio: criterio.criterio,
-    porcentaje: criterio.porcentaje,
-    folderKey: `${criterio.id}__${item.id}`,
-  })));
   const persistDocumentos = (next) => {
     setDocumentos(next);
     if (typeof window !== 'undefined') localStorage.setItem(documentosStorageKey, JSON.stringify(next));
@@ -14274,7 +14267,7 @@ const CalidadDocumentosProveedores = () => {
       <div className="flex flex-col gap-2 border-b border-slate-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h3 className="font-black text-slate-900">Documentos Proveedores</h3>
-          <p className="mt-1 text-xs text-slate-500">Empresa activa: {currentEmpresa?.razonSocial || 'Todas'} · carpeta por proveedor y subcarpeta por item de parametros</p>
+          <p className="mt-1 text-xs text-slate-500">Empresa activa: {currentEmpresa?.razonSocial || 'Todas'} · carpeta por proveedor y subcarpeta por criterio de parametros</p>
         </div>
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{proveedores.length} carpeta(s)</span>
       </div>
@@ -14301,20 +14294,20 @@ const CalidadDocumentosProveedores = () => {
               {isOpen && (
                 <div className="bg-slate-50/70 px-4 py-4 md:px-6">
                   <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                    {parametroItems.map(item => {
-                      const files = folderFiles(proveedor, item.folderKey);
+                    {parametros.map(criterio => {
+                      const files = folderFiles(proveedor, criterio.id);
                       return (
-                        <div key={item.folderKey} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                        <div key={criterio.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{item.criterio} ({item.porcentaje}%)</p>
-                              <h4 className="mt-1 text-sm font-black text-slate-900">{item.item}</h4>
-                              <p className="mt-1 text-xs text-slate-500">Puntaje {item.puntaje} · {files.length} archivo(s)</p>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Criterio ({criterio.porcentaje}%)</p>
+                              <h4 className="mt-1 text-sm font-black text-slate-900">{criterio.criterio}</h4>
+                              <p className="mt-1 text-xs text-slate-500">{criterio.items.length} item(s) configurado(s) · {files.length} archivo(s)</p>
                             </div>
                             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">
                               <Upload size={14} />
                               Cargar
-                              <input type="file" multiple className="hidden" onChange={e => { uploadFiles(proveedor, item.folderKey, e.target.files); e.target.value = ''; }} />
+                              <input type="file" multiple className="hidden" onChange={e => { uploadFiles(proveedor, criterio.id, e.target.files); e.target.value = ''; }} />
                             </label>
                           </div>
 
@@ -14328,7 +14321,7 @@ const CalidadDocumentosProveedores = () => {
                                   <a href={file.url} download={file.name} className="block truncate text-xs font-bold text-slate-700 hover:text-blue-700">{file.name}</a>
                                   <p className="text-[10px] text-slate-400">{fileSizeLabel(file.size)} · {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString('es-CL') : '-'}</p>
                                 </div>
-                                <button type="button" onClick={() => removeFile(proveedor, item.folderKey, file.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar respaldo">
+                                <button type="button" onClick={() => removeFile(proveedor, criterio.id, file.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar respaldo">
                                   <Trash2 size={14} />
                                 </button>
                               </div>
