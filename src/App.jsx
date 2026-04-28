@@ -14024,7 +14024,7 @@ const proveedorContactoCorreo = (proveedor = {}) => (
 );
 
 const CalidadProveedoresTabla = () => {
-  const { clientes, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
+  const { clientes, activeEmpresaId, currentEmpresa, effectiveSidebarOpen } = useContext(ERPContext);
   const parametrosStorageKey = 'sentauris_calidad_proveedores_parametros';
   const evaluacionesStorageKey = 'sentauris_calidad_proveedores_evaluaciones';
   const parametros = (() => {
@@ -14101,7 +14101,7 @@ const CalidadProveedoresTabla = () => {
   return (
     <>
       {modalProveedor && (
-        <Modal title="Modificar evaluacion de proveedor" onClose={() => setModalProveedor(null)} workspaceFull>
+        <Modal title="Modificar evaluacion de proveedor" onClose={() => setModalProveedor(null)} workspaceFull sidebarOpen={effectiveSidebarOpen}>
           <div className="space-y-5">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <h3 className="text-lg font-black text-slate-900">{modalProveedor.proveedor.razonSocial || modalProveedor.proveedor.name || 'Proveedor'}</h3>
