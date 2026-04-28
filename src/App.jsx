@@ -8926,7 +8926,6 @@ const MantenedoresMonedasIndicadores = () => {
 const MODULES_TREE = [
   { id: 'dashboard', label: 'Dashboard', sub: [
     { id: 'dashboard-planning', label: 'Planning' },
-    { id: 'dashboard-mi-empresa', label: 'Mi Empresa' },
   ] },
   {
     id: 'operaciones', label: 'Operaciones', sub: [
@@ -8962,6 +8961,7 @@ const MODULES_TREE = [
   {
     id: 'calidad', label: 'Calidad', sub: [
       { id: 'calidad-equipamiento', label: 'Equipamiento' },
+      { id: 'calidad-mi-empresa', label: 'Mi Empresa' },
       { id: 'calidad-biblioteca', label: 'Biblioteca' },
       { id: 'calidad-riesgos', label: 'Gestion de Riesgos y Oportunidades' },
       { id: 'calidad-no-conformidades', label: 'Gestion de No Conformidades' },
@@ -15770,6 +15770,7 @@ const Sidebar = () => {
   }[label] || 'mantenedores-clientes');
   const calidadSubId = (label) => ({
     'Equipamiento': 'calidad-equipamiento',
+    'Mi Empresa': 'calidad-mi-empresa',
     'Biblioteca': 'calidad-biblioteca',
     'Gestion de Riesgos y Oportunidades': 'calidad-riesgos',
     'Gestion de No Conformidades': 'calidad-no-conformidades',
@@ -15783,7 +15784,6 @@ const Sidebar = () => {
     if (item.id === 'dashboard') {
       return {
         'Planning': 'dashboard-planning',
-        'Mi Empresa': 'dashboard-mi-empresa',
       }[label] || 'dashboard';
     }
     if (item.id.startsWith('operaciones'))     return opSubId(label);
@@ -15808,12 +15808,12 @@ const Sidebar = () => {
     item.sub ? visibleSubs(item).length > 0 : canAccess(item.id);
 
   const menuTop = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, sub: ['Planning', 'Mi Empresa'] },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, sub: ['Planning'] },
     { id: 'operaciones-registro', label: 'Operaciones', icon: ClipboardList, sub: ['Nuevo Registro', 'Planificacion', 'Historial Preventivo', 'Historial Correctivo', 'Cotizaciones', 'Historial Cotizaciones', 'OC Recibidas', 'Rendiciones', 'Historial Rendiciones'] },
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
     { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Activos Fijos', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
-    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Equipamiento', 'Biblioteca', 'Gestion de Riesgos y Oportunidades', 'Gestion de No Conformidades', 'Auditorias', 'Gestion de Proveedores', 'Gestion de Clientes', 'Reportes e Indicadores'] },
+    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Equipamiento', 'Mi Empresa', 'Biblioteca', 'Gestion de Riesgos y Oportunidades', 'Gestion de No Conformidades', 'Auditorias', 'Gestion de Proveedores', 'Gestion de Clientes', 'Reportes e Indicadores'] },
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
   const menuBottom = [
@@ -15911,7 +15911,7 @@ const Header = () => {
   const titleMap = {
     'dashboard': 'Dashboard Principal',
     'dashboard-planning': 'Dashboard / Planning',
-    'dashboard-mi-empresa': 'Dashboard / Mi Empresa',
+    'calidad-mi-empresa': 'Calidad / Mi Empresa',
     'operaciones-registro': 'Nueva Operación',
     'operaciones-preventiva': 'Mantención Preventiva',
     'operaciones-correctiva': 'Mantención Correctiva',
@@ -16308,7 +16308,7 @@ const ContentManager = () => {
   // Sub-pages accessible if parent module is accessible
   const MODULE_PARENT = {
     'dashboard-planning': 'dashboard',
-    'dashboard-mi-empresa': 'dashboard',
+    'calidad-mi-empresa': 'calidad',
     'operaciones-preventiva': 'operaciones-registro',
     'operaciones-correctiva': 'operaciones-registro',
     'abastecimiento-documentos': 'abastecimiento',
@@ -16347,7 +16347,7 @@ const ContentManager = () => {
     switch (activeModule) {
       case 'dashboard': return <Dashboard />;
       case 'dashboard-planning': return <DashboardPlanning />;
-      case 'dashboard-mi-empresa': return <MiEmpresa />;
+      case 'calidad-mi-empresa': return <MiEmpresa />;
       case 'operaciones-planificacion': return <Planificacion />;
       case 'operaciones-registro': return <NuevoRegistro />;
       case 'operaciones-preventiva': return <MantencionPreventiva />;
