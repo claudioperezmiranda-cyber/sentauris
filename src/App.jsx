@@ -8963,7 +8963,7 @@ const MODULES_TREE = [
     id: 'calidad', label: 'Calidad', sub: [
       { id: 'calidad-equipamiento', label: 'Equipamiento' },
       { id: 'calidad-biblioteca', label: 'Biblioteca' },
-      { id: 'calidad-riesgos', label: 'Riesgos' },
+      { id: 'calidad-riesgos', label: 'Gestion de Riesgos y Oportunidades' },
       { id: 'calidad-no-conformidades', label: 'Gestion de No Conformidades' },
       { id: 'calidad-auditorias', label: 'Auditorias' },
       { id: 'calidad-proveedores', label: 'Gestion de Proveedores' },
@@ -13628,26 +13628,44 @@ const CalidadMantenimientosCalibraciones = () => {
   );
 };
 
-const CalidadSubmoduloBase = ({ titulo }) => (
-  <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
-    <div>
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad</p>
-      <h2 className="text-2xl font-black text-slate-900">{titulo}</h2>
-      <p className="mt-2 text-sm text-slate-500">Espacio de trabajo del sistema de gestion de calidad para registrar, revisar y mantener la informacion asociada.</p>
+const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
+  const normalizedTabs = tabs.length > 0 ? tabs : ['Registros'];
+  const [activeTab, setActiveTab] = useState(normalizedTabs[0]);
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad</p>
+        <h2 className="text-2xl font-black text-slate-900">{titulo}</h2>
+        <p className="mt-2 text-sm text-slate-500">Espacio de trabajo del sistema de gestion de calidad para registrar, revisar y mantener la informacion asociada.</p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {['Registros', 'Pendientes', 'Indicadores'].map((label, index) => (
+          <Card key={label} className="p-5">
+            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+            <p className={`mt-2 text-3xl font-black ${index === 0 ? 'text-slate-900' : index === 1 ? 'text-amber-600' : 'text-blue-600'}`}>0</p>
+          </Card>
+        ))}
+      </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {normalizedTabs.map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${activeTab === tab ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
+        Modulo preparado para comenzar a cargar informacion de {activeTab.toLowerCase()}.
+      </div>
     </div>
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-      {['Registros', 'Pendientes', 'Indicadores'].map((label, index) => (
-        <Card key={label} className="p-5">
-          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{label}</p>
-          <p className={`mt-2 text-3xl font-black ${index === 0 ? 'text-slate-900' : index === 1 ? 'text-amber-600' : 'text-blue-600'}`}>0</p>
-        </Card>
-      ))}
-    </div>
-    <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
-      Modulo preparado para comenzar a cargar informacion de {titulo.toLowerCase()}.
-    </div>
-  </div>
-);
+  );
+};
 
 const EstadosFinancieros = () => {
   const { comprobantes } = useContext(ERPContext);
@@ -15753,7 +15771,7 @@ const Sidebar = () => {
   const calidadSubId = (label) => ({
     'Equipamiento': 'calidad-equipamiento',
     'Biblioteca': 'calidad-biblioteca',
-    'Riesgos': 'calidad-riesgos',
+    'Gestion de Riesgos y Oportunidades': 'calidad-riesgos',
     'Gestion de No Conformidades': 'calidad-no-conformidades',
     'Auditorias': 'calidad-auditorias',
     'Gestion de Proveedores': 'calidad-proveedores',
@@ -15795,7 +15813,7 @@ const Sidebar = () => {
     { id: 'comercial', label: 'Comercial', icon: TrendingUp },
     { id: 'abastecimiento-documentos', label: 'Abastecimiento', icon: Upload, sub: ['Documentos', 'Internacion', 'Informe de Compras', 'Registro de Compras'] },
     { id: 'contabilidad', label: 'Contabilidad', icon: FileText, sub: ['Comprobantes', 'Activos Fijos', 'Informes Tributarios', 'Analiticos', 'Estados Financieros'] },
-    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Equipamiento', 'Biblioteca', 'Riesgos', 'Gestion de No Conformidades', 'Auditorias', 'Gestion de Proveedores', 'Gestion de Clientes', 'Reportes e Indicadores'] },
+    { id: 'calidad', label: 'Calidad', icon: CheckCircle2, sub: ['Equipamiento', 'Biblioteca', 'Gestion de Riesgos y Oportunidades', 'Gestion de No Conformidades', 'Auditorias', 'Gestion de Proveedores', 'Gestion de Clientes', 'Reportes e Indicadores'] },
     { id: 'personas', label: 'Gestión de Personas', icon: Users },
   ];
   const menuBottom = [
@@ -15915,7 +15933,7 @@ const Header = () => {
     'contabilidad-estados-financieros': 'Contabilidad / Estados Financieros',
     'calidad-equipamiento': 'Calidad / Equipamiento',
     'calidad-biblioteca': 'Calidad / Biblioteca',
-    'calidad-riesgos': 'Calidad / Riesgos',
+    'calidad-riesgos': 'Calidad / Gestion de Riesgos y Oportunidades',
     'calidad-no-conformidades': 'Calidad / Gestion de No Conformidades',
     'calidad-auditorias': 'Calidad / Auditorias',
     'calidad-proveedores': 'Calidad / Gestion de Proveedores',
@@ -16351,12 +16369,12 @@ const ContentManager = () => {
       case 'contabilidad-analiticos': return <AnaliticosContables />;
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
       case 'calidad-equipamiento': return <CalidadMantenimientosCalibraciones />;
-      case 'calidad-biblioteca': return <CalidadSubmoduloBase titulo="Biblioteca" />;
-      case 'calidad-riesgos': return <CalidadSubmoduloBase titulo="Riesgos" />;
-      case 'calidad-no-conformidades': return <CalidadSubmoduloBase titulo="Gestion de No Conformidades" />;
-      case 'calidad-auditorias': return <CalidadSubmoduloBase titulo="Auditorias" />;
-      case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" />;
-      case 'calidad-clientes': return <CalidadSubmoduloBase titulo="Gestion de Clientes" />;
+      case 'calidad-biblioteca': return <CalidadSubmoduloBase titulo="Biblioteca" tabs={['Documentos Controlados', 'Documentos No Controlados']} />;
+      case 'calidad-riesgos': return <CalidadSubmoduloBase titulo="Gestion de Riesgos y Oportunidades" tabs={['Matriz de Riesgos', 'Planes de seguimientos', 'Biblioteca de Controles', 'Configuracion de riesgos', 'Gestion de Oportunidades']} />;
+      case 'calidad-no-conformidades': return <CalidadSubmoduloBase titulo="Gestion de No Conformidades" tabs={['No Conformidades', 'Acciones Correctivas', 'Configuraciones']} />;
+      case 'calidad-auditorias': return <CalidadSubmoduloBase titulo="Auditorias" tabs={['Planificacion de Auditorias', 'Configuracion de Auditorias']} />;
+      case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" tabs={['Proveedores', 'Documentos Proveedores', 'Compras/Licitaciones', 'Contratos']} />;
+      case 'calidad-clientes': return <CalidadSubmoduloBase titulo="Gestion de Clientes" tabs={['Clientes', 'Documentos Clientes', 'Contratos', 'Evaluaciones']} />;
       case 'calidad-reportes-indicadores': return <CalidadSubmoduloBase titulo="Reportes e Indicadores" />;
       case 'mantenedores-clientes': return <MantenedoresClientesProveedores />;
       case 'mantenedores-licitaciones': return <MantenedoresLicitaciones />;
