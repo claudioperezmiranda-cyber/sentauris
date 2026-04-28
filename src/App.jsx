@@ -13667,6 +13667,155 @@ const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
   );
 };
 
+const emptyDocumentoControlado = () => ({
+  id: '',
+  nombre: '',
+  carpeta: '',
+  codigo: '',
+  version: '',
+  tiempoConservacion: '',
+  normas: '',
+  archivoNombre: '',
+  descripcion: '',
+  permiteDescarga: false,
+  registrosAsociados: '',
+  requiereRevision: false,
+});
+
+const CalidadBiblioteca = () => {
+  const tabs = ['Documentos Controlados', 'Documentos No Controlados', 'Configuraciones'];
+  const [activeTab, setActiveTab] = useState(tabs[0]);
+  const [showForm, setShowForm] = useState(false);
+  const [documentos, setDocumentos] = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = JSON.parse(localStorage.getItem('sentauris_calidad_documentos_controlados') || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const [form, setForm] = useState(emptyDocumentoControlado());
+  const updateField = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const fieldClass = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const labelClass = "text-sm font-semibold text-slate-700";
+  const saveDocumento = () => {
+    const next = [{ ...form, id: form.id || `doc-${Date.now()}` }, ...documentos];
+    setDocumentos(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sentauris_calidad_documentos_controlados', JSON.stringify(next));
+    }
+    setForm(emptyDocumentoControlado());
+    setShowForm(false);
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad</p>
+        <h2 className="text-2xl font-black text-slate-900">Biblioteca</h2>
+        <p className="mt-2 text-sm text-slate-500">Repositorio documental del sistema de gestion de calidad.</p>
+      </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {tabs.map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${activeTab === tab ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeTab === 'Documentos Controlados' ? (
+        <div className="space-y-6">
+          <div className="flex justify-end">
+            <Button variant="primary" icon={Plus} onClick={() => setShowForm(true)}>Agregar Nuevo Documento</Button>
+          </div>
+          {showForm && (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Input label="Nombre" value={form.nombre} onChange={e => updateField('nombre', e.target.value)} />
+                <Input label="Carpeta" value={form.carpeta} onChange={e => updateField('carpeta', e.target.value)} />
+                <Input label="Codigo" value={form.codigo} onChange={e => updateField('codigo', e.target.value)} />
+                <Input label="Version" value={form.version} onChange={e => updateField('version', e.target.value)} />
+                <Input label="Tiempo de Conservacion" value={form.tiempoConservacion} onChange={e => updateField('tiempoConservacion', e.target.value)} />
+                <Input label="Norma/s" value={form.normas} onChange={e => updateField('normas', e.target.value)} />
+                <label className="flex flex-col gap-1.5 md:col-span-2">
+                  <span className={labelClass}>Archivo</span>
+                  <input
+                    type="file"
+                    onChange={e => updateField('archivoNombre', e.target.files?.[0]?.name || '')}
+                    className="block w-full rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white hover:border-blue-400"
+                  />
+                  {form.archivoNombre && <span className="text-xs font-semibold text-slate-500">{form.archivoNombre}</span>}
+                </label>
+                <label className="flex flex-col gap-1.5 md:col-span-2">
+                  <span className={labelClass}>Descripcion</span>
+                  <textarea value={form.descripcion} onChange={e => updateField('descripcion', e.target.value)} rows={4} className={fieldClass} />
+                </label>
+                <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={form.permiteDescarga} onChange={e => updateField('permiteDescarga', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  Permitir la descarga del documento
+                </label>
+                <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={form.requiereRevision} onChange={e => updateField('requiereRevision', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  Documento Controlado / Requiere Revision
+                </label>
+                <label className="flex flex-col gap-1.5 md:col-span-2">
+                  <span className={labelClass}>Registros Asociados</span>
+                  <textarea value={form.registrosAsociados} onChange={e => updateField('registrosAsociados', e.target.value)} rows={3} className={fieldClass} />
+                </label>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <Button variant="secondary" onClick={() => { setShowForm(false); setForm(emptyDocumentoControlado()); }}>Cancelar</Button>
+                <Button variant="accent" icon={CheckCircle} onClick={saveDocumento}>Guardar Documento</Button>
+              </div>
+            </div>
+          )}
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <h3 className="font-bold text-slate-900">Documentos Controlados</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left">
+                    {['Nombre', 'Carpeta', 'Codigo', 'Version', 'Norma/s', 'Archivo'].map(head => (
+                      <th key={head} className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {documentos.length === 0 ? (
+                    <tr><td colSpan="6" className="px-6 py-10 text-center text-slate-400 italic">Sin documentos controlados registrados.</td></tr>
+                  ) : documentos.map(doc => (
+                    <tr key={doc.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-semibold text-slate-800">{doc.nombre || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{doc.carpeta || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{doc.codigo || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{doc.version || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{doc.normas || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{doc.archivoNombre || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
+          Modulo preparado para comenzar a cargar informacion de {activeTab.toLowerCase()}.
+        </div>
+      )}
+    </div>
+  );
+};
+
 const EstadosFinancieros = () => {
   const { comprobantes } = useContext(ERPContext);
   const [activeTab, setActiveTab] = useState('Balance');
@@ -16369,7 +16518,7 @@ const ContentManager = () => {
       case 'contabilidad-analiticos': return <AnaliticosContables />;
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
       case 'calidad-equipamiento': return <CalidadMantenimientosCalibraciones />;
-      case 'calidad-biblioteca': return <CalidadSubmoduloBase titulo="Biblioteca" tabs={['Documentos Controlados', 'Documentos No Controlados']} />;
+      case 'calidad-biblioteca': return <CalidadBiblioteca />;
       case 'calidad-riesgos': return <CalidadSubmoduloBase titulo="Gestion de Riesgos y Oportunidades" tabs={['Matriz de Riesgos', 'Planes de seguimientos', 'Biblioteca de Controles', 'Configuracion de riesgos', 'Gestion de Oportunidades']} />;
       case 'calidad-no-conformidades': return <CalidadSubmoduloBase titulo="Gestion de No Conformidades" tabs={['No Conformidades', 'Acciones Correctivas', 'Configuraciones']} />;
       case 'calidad-auditorias': return <CalidadSubmoduloBase titulo="Auditorias" tabs={['Planificacion de Auditorias', 'Configuracion de Auditorias']} />;
