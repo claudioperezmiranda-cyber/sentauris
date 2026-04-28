@@ -13835,6 +13835,146 @@ const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
   );
 };
 
+const RISK_MATRIX_FIELDS = [
+  ['area', 'Area'],
+  ['proceso', 'Proceso'],
+  ['riesgo', 'Riesgo'],
+  ['fuenteRiesgo', 'Fuente Riesgo'],
+  ['categoriaRiesgo', 'Categoria Riesgo'],
+  ['tipoRiesgo', 'Tipo Riesgo'],
+  ['causaRiesgo', 'Causa Riesgo'],
+  ['consecuenciaRiesgo', 'Consecuencia Riesgo'],
+  ['normasRelacionadas', 'Normas Relacionadas'],
+  ['probabilidad', 'Probab.'],
+  ['impacto', 'Impacto'],
+  ['riesgoInherente', 'Riesgo Inherente'],
+  ['controles', 'Controles'],
+  ['gradoProteccion', 'Grado Proteccion'],
+  ['riesgoResidual', 'Riesgo Residual'],
+];
+
+const emptyRiskMatrixRecord = () => RISK_MATRIX_FIELDS.reduce((acc, [key]) => ({ ...acc, [key]: '' }), { id: '' });
+
+const CalidadRiesgosOportunidades = () => {
+  const tabs = ['Matriz de Riesgos', 'Planes de seguimientos', 'Biblioteca de Controles', 'Configuracion de riesgos', 'Gestion de Oportunidades'];
+  const [activeTab, setActiveTab] = useState(tabs[0]);
+  const [showRiskForm, setShowRiskForm] = useState(false);
+  const [riskForm, setRiskForm] = useState(emptyRiskMatrixRecord());
+  const [riskRows, setRiskRows] = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = JSON.parse(localStorage.getItem('sentauris_calidad_matriz_riesgos') || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const fieldClass = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const labelClass = "text-sm font-semibold text-slate-700";
+  const updateRiskField = (field, value) => setRiskForm(prev => ({ ...prev, [field]: value }));
+  const saveRiskRecord = () => {
+    const next = [{ ...riskForm, id: riskForm.id || `risk-${Date.now()}` }, ...riskRows];
+    setRiskRows(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sentauris_calidad_matriz_riesgos', JSON.stringify(next));
+    }
+    setRiskForm(emptyRiskMatrixRecord());
+    setShowRiskForm(false);
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Calidad</p>
+        <h2 className="text-2xl font-black text-slate-900">Gestion de Riesgos y Oportunidades</h2>
+        <p className="mt-2 text-sm text-slate-500">Registro y seguimiento de riesgos, controles y oportunidades del sistema de gestion.</p>
+      </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {tabs.map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${activeTab === tab ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeTab === 'Matriz de Riesgos' ? (
+        <div className="space-y-6">
+          <div className="flex justify-end">
+            <Button variant="primary" icon={Plus} onClick={() => setShowRiskForm(true)}>Agregar Riesgo</Button>
+          </div>
+
+          {showRiskForm && (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {RISK_MATRIX_FIELDS.map(([key, label]) => {
+                  const large = ['riesgo', 'causaRiesgo', 'consecuenciaRiesgo', 'controles'].includes(key);
+                  return (
+                    <label key={key} className={`flex flex-col gap-1.5 ${large ? 'md:col-span-2 xl:col-span-3' : ''}`}>
+                      <span className={labelClass}>{label}</span>
+                      {large ? (
+                        <textarea value={riskForm[key] || ''} onChange={e => updateRiskField(key, e.target.value)} rows={3} className={fieldClass} />
+                      ) : (
+                        <input value={riskForm[key] || ''} onChange={e => updateRiskField(key, e.target.value)} className={fieldClass} />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <Button variant="secondary" onClick={() => { setShowRiskForm(false); setRiskForm(emptyRiskMatrixRecord()); }}>Cancelar</Button>
+                <Button variant="accent" icon={CheckCircle} onClick={saveRiskRecord}>Guardar Riesgo</Button>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <h3 className="font-bold text-slate-900">Matriz de Riesgos</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1100px] text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left">
+                    {['Area', 'Proceso', 'Riesgo', 'Probab.', 'Impacto', 'Riesgo Inherente', 'Grado Proteccion', 'Riesgo Residual'].map(head => (
+                      <th key={head} className="px-4 py-3 text-[10px] font-bold uppercase text-slate-400">{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {riskRows.length === 0 ? (
+                    <tr><td colSpan="8" className="px-6 py-10 text-center text-slate-400 italic">Sin riesgos registrados.</td></tr>
+                  ) : riskRows.map(row => (
+                    <tr key={row.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 text-slate-600">{row.area || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.proceso || '-'}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{row.riesgo || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.probabilidad || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.impacto || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.riesgoInherente || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.gradoProteccion || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.riesgoResidual || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
+          Modulo preparado para comenzar a cargar informacion de {activeTab.toLowerCase()}.
+        </div>
+      )}
+    </div>
+  );
+};
+
 const emptyDocumentoControlado = () => ({
   id: '',
   nombre: '',
@@ -17159,7 +17299,7 @@ const ContentManager = () => {
       case 'contabilidad-estados-financieros': return <EstadosFinancieros />;
       case 'calidad-equipamiento': return <CalidadMantenimientosCalibraciones />;
       case 'calidad-biblioteca': return <CalidadBiblioteca />;
-      case 'calidad-riesgos': return <CalidadSubmoduloBase titulo="Gestion de Riesgos y Oportunidades" tabs={['Matriz de Riesgos', 'Planes de seguimientos', 'Biblioteca de Controles', 'Configuracion de riesgos', 'Gestion de Oportunidades']} />;
+      case 'calidad-riesgos': return <CalidadRiesgosOportunidades />;
       case 'calidad-no-conformidades': return <CalidadSubmoduloBase titulo="Gestion de No Conformidades" tabs={['No Conformidades', 'Acciones Correctivas', 'Configuraciones']} />;
       case 'calidad-auditorias': return <CalidadSubmoduloBase titulo="Auditorias" tabs={['Planificacion de Auditorias', 'Configuracion de Auditorias']} />;
       case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" tabs={['Proveedores', 'Documentos Proveedores', 'Compras/Licitaciones', 'Contratos']} />;
