@@ -13864,6 +13864,9 @@ const emptyDocumentoControlado = () => ({
     fecha: '',
     notas: '',
   },
+  uploadedBy: '',
+  uploadedAt: '',
+  visualizaciones: [],
 });
 
 const emptyDocumentoNoControlado = () => ({
@@ -13884,6 +13887,7 @@ const CalidadBiblioteca = () => {
   const [showForm, setShowForm] = useState(false);
   const [showNoControlDocForm, setShowNoControlDocForm] = useState(false);
   const [reviewModal, setReviewModal] = useState(null);
+  const [logModal, setLogModal] = useState(null);
   const [documentos, setDocumentos] = useState(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -13928,6 +13932,13 @@ const CalidadBiblioteca = () => {
   const userLabel = (user) => user.nombre || user.name || user.usuario || user.email || 'Usuario';
   const userValue = (user) => user.id || user.usuario || user.email || userLabel(user);
   const userNameById = (userId) => usuarios.find(user => String(userValue(user)) === String(userId || '')) ? userLabel(usuarios.find(user => String(userValue(user)) === String(userId || ''))) : '-';
+  const userCargoById = (userId) => usuarios.find(user => String(userValue(user)) === String(userId || ''))?.cargo || '-';
+  const formatDocDate = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString('es-CL');
+  };
   const tiempoConservacionOptions = ['N/A', ...Array.from({ length: 10 }, (_, index) => `${index + 1} año${index === 0 ? '' : 's'}`)];
   const descargaOptions = ['Descarga permitida', 'Descarga y visualizacion permitida', 'No permitida', 'Solo visualizacion online'];
   const documentStatus = (doc) => {
@@ -13964,6 +13975,9 @@ const CalidadBiblioteca = () => {
       estado: form.requiereRevision ? 'Pendiente de Revision y Validacion' : '',
       revision: { ...(form.revision || {}), resultado: 'Pendiente', usuarioId: form.revisadoPor || '', fecha: '', notas: '' },
       validacion: { ...(form.validacion || {}), resultado: 'Pendiente', usuarioId: form.validadoPor || '', fecha: '', notas: '' },
+      uploadedBy: currentUser?.id || '',
+      uploadedAt: new Date().toISOString(),
+      visualizaciones: [],
     };
     const next = [payload, ...documentos];
     setDocumentos(next);
@@ -13991,6 +14005,47 @@ const CalidadBiblioteca = () => {
   };
   const openReviewModal = (doc) => {
     setReviewModal({ doc, notas: '' });
+  };
+  const registerDocumentDownload = (doc) => {
+    const now = new Date().toISOString();
+    const userId = currentUser?.id || 'usuario';
+    const currentViews = Array.isArray(doc.visualizaciones) ? doc.visualizaciones : [];
+    const existing = currentViews.find(item => String(item.userId || '') === String(userId));
+    const nextView = existing
+      ? { ...existing, fechaUltimaVisualizacion: now, vecesDescargado: (Number(existing.vecesDescargado) || 0) + 1 }
+      : {
+          userId,
+          nombre: userLabel(currentUser || {}),
+          puesto: currentUser?.position || currentUser?.cargo || '-',
+          fechaPrimeraVisualizacion: now,
+          fechaUltimaVisualizacion: now,
+          vecesDescargado: 1,
+        };
+    const next = documentos.map(item => item.id === doc.id ? {
+      ...item,
+      visualizaciones: existing
+        ? currentViews.map(view => String(view.userId || '') === String(userId) ? nextView : view)
+        : [nextView, ...currentViews],
+    } : item);
+    persistDocumentos(next);
+
+    const fileName = doc.archivoNombre || `${doc.codigo || doc.nombre || 'documento'}.txt`;
+    const content = [
+      `Documento: ${doc.nombre || '-'}`,
+      `Codigo: ${doc.codigo || '-'}`,
+      `Version: ${doc.version || '-'}`,
+      `Proceso: ${doc.carpeta || '-'}`,
+      `Archivo registrado: ${doc.archivoNombre || '-'}`,
+    ].join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
   const resolveReviewStep = (doc) => {
     if (doc?.revision?.resultado !== 'Validado') return 'revision';
@@ -14166,11 +14221,19 @@ const CalidadBiblioteca = () => {
                       </td>
                       <td className="px-4 py-3 text-slate-600">{doc.archivoNombre || '-'}</td>
                       <td className="px-4 py-3 text-right">
-                        {doc.requiereRevision ? (
-                          <button type="button" onClick={() => openReviewModal(doc)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Revisar y validar">
-                            <CheckCircle2 size={16} />
+                        <div className="flex items-center justify-end gap-1">
+                          <button type="button" onClick={() => registerDocumentDownload(doc)} className="rounded-lg p-2 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600" title="Descargar">
+                            <Download size={16} />
                           </button>
-                        ) : <span className="text-slate-300">-</span>}
+                          <button type="button" onClick={() => setLogModal(doc)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Ver log del documento">
+                            <Info size={16} />
+                          </button>
+                          {doc.requiereRevision && (
+                            <button type="button" onClick={() => openReviewModal(doc)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Revisar y validar">
+                              <CheckCircle2 size={16} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -14312,6 +14375,74 @@ const CalidadBiblioteca = () => {
               <p className="font-bold">1 confirmacion necesaria.</p>
               {activeReviewStep === 'validacion' && <p className="mt-3 text-sm text-blue-50">La revision ya fue aprobada. Ahora corresponde validar el documento.</p>}
               {activeReviewStep === 'revision' && <p className="mt-3 text-sm text-blue-50">Primero debe aprobar el usuario asignado en Revisado por.</p>}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {logModal && (
+        <Modal title="Log del documento" onClose={() => setLogModal(null)} wide>
+          <div className="space-y-6">
+            <button type="button" onClick={() => setLogModal(null)} className="inline-flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700">
+              <ChevronLeft size={16} />
+              Volver a la Biblioteca documental
+            </button>
+
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_270px]">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+                {[
+                  ['Denominacion', logModal.nombre || '-'],
+                  ['Proceso', logModal.carpeta || '-'],
+                  ['Codigo', logModal.codigo || '-'],
+                  ['Version', logModal.version || '-'],
+                  ['Norma', logModal.normas || '-'],
+                  ['Tiempo de conservacion', logModal.tiempoConservacion || '-'],
+                  ['Archivo', logModal.archivoNombre || '-'],
+                  ['Usuario que realizo la subida del documento', userNameById(logModal.uploadedBy) || userLabel(currentUser || {})],
+                  ['Fecha de la subida del documento', formatDocDate(logModal.uploadedAt)],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <div className="border-b border-blue-700 bg-slate-200 px-3 py-2 text-base font-black text-blue-700">{label}</div>
+                    <div className="min-h-10 px-3 py-2 text-sm text-slate-700">{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-blue-500 p-4 text-center">
+                <p className="text-sm font-bold text-blue-700">Estadisticas de visualizacion</p>
+                <div className="mx-auto mt-6 h-28 w-28 rounded-full" style={{ background: 'conic-gradient(#ef4444 0 75%, #0f8f8a 75% 100%)' }} />
+              </div>
+            </div>
+
+            <div>
+              <div className="border-b border-blue-700 bg-slate-200 px-3 py-2 text-base font-black text-blue-700">Visualizaciones</div>
+              <div className="overflow-x-auto">
+                <table className="mt-3 w-full min-w-[840px] text-sm">
+                  <thead>
+                    <tr className="bg-cyan-950 text-left text-white">
+                      {['Nombre', 'Puesto', 'Fecha primera visualizacion', 'Fecha ultima visualizacion', 'Veces descargado'].map(head => (
+                        <th key={head} className="border-4 border-white px-3 py-2">{head}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(Array.isArray(logModal.visualizaciones) && logModal.visualizaciones.length > 0 ? logModal.visualizaciones : []).map(view => (
+                      <tr key={view.userId || view.nombre} className="bg-teal-200">
+                        <td className="border-4 border-white px-3 py-2">{view.nombre || userNameById(view.userId)}</td>
+                        <td className="border-4 border-white px-3 py-2">{view.puesto || userCargoById(view.userId)}</td>
+                        <td className="border-4 border-white px-3 py-2">{formatDocDate(view.fechaPrimeraVisualizacion)}</td>
+                        <td className="border-4 border-white px-3 py-2">{formatDocDate(view.fechaUltimaVisualizacion)}</td>
+                        <td className="border-4 border-white px-3 py-2">{view.vecesDescargado || 0}</td>
+                      </tr>
+                    ))}
+                    {(!Array.isArray(logModal.visualizaciones) || logModal.visualizaciones.length === 0) && (
+                      <tr className="bg-pink-200">
+                        <td colSpan="5" className="border-4 border-white px-3 py-8 text-center text-slate-700">Sin visualizaciones registradas.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </Modal>
