@@ -13848,9 +13848,13 @@ const emptyDocumentoControlado = () => ({
   permiteDescarga: false,
   registrosAsociados: '',
   requiereRevision: false,
+  elaboradoPor: '',
+  revisadoPor: '',
+  validadoPor: '',
 });
 
 const CalidadBiblioteca = () => {
+  const { currentEmpresa, activeEmpresaId, usuarios } = useContext(ERPContext);
   const tabs = ['Documentos Controlados', 'Documentos No Controlados', 'Configuraciones'];
   const [activeTab, setActiveTab] = useState(tabs[0]);
   const [showForm, setShowForm] = useState(false);
@@ -13867,6 +13871,25 @@ const CalidadBiblioteca = () => {
   const updateField = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
   const fieldClass = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
   const labelClass = "text-sm font-semibold text-slate-700";
+  const procesosEmpresa = Array.isArray(currentEmpresa?.procesos) ? currentEmpresa.procesos : [];
+  const carpetaOptions = procesosEmpresa.flatMap(proceso => {
+    const procesoNombre = proceso.proceso || 'Proceso sin nombre';
+    const subprocesos = Array.isArray(proceso.subprocesos) ? proceso.subprocesos : [];
+    return [
+      { id: `proc-${proceso.id}`, label: procesoNombre },
+      ...subprocesos.map(subproceso => ({
+        id: `subproc-${proceso.id}-${subproceso.id}`,
+        label: `${procesoNombre} / ${subproceso.subproceso || 'Subproceso sin nombre'}`,
+      })),
+    ];
+  });
+  const usuariosEmpresa = usuarios.filter(usuario => {
+    const permisos = usuario.permisosEmpresas || usuario.permisos_empresas || {};
+    if (!activeEmpresaId || Object.keys(permisos).length === 0) return true;
+    return Array.isArray(permisos[activeEmpresaId]) && permisos[activeEmpresaId].length > 0;
+  });
+  const userLabel = (user) => user.nombre || user.name || user.usuario || user.email || 'Usuario';
+  const tiempoConservacionOptions = ['N/A', ...Array.from({ length: 10 }, (_, index) => `${index + 1} año${index === 0 ? '' : 's'}`)];
   const saveDocumento = () => {
     const next = [{ ...form, id: form.id || `doc-${Date.now()}` }, ...documentos];
     setDocumentos(next);
@@ -13907,10 +13930,22 @@ const CalidadBiblioteca = () => {
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input label="Nombre" value={form.nombre} onChange={e => updateField('nombre', e.target.value)} />
-                <Input label="Carpeta" value={form.carpeta} onChange={e => updateField('carpeta', e.target.value)} />
+                <label className="flex flex-col gap-1.5">
+                  <span className={labelClass}>Carpeta</span>
+                  <select value={form.carpeta} onChange={e => updateField('carpeta', e.target.value)} className={fieldClass}>
+                    <option value="">Seleccionar proceso o subproceso...</option>
+                    {carpetaOptions.map(option => <option key={option.id} value={option.label}>{option.label}</option>)}
+                  </select>
+                </label>
                 <Input label="Codigo" value={form.codigo} onChange={e => updateField('codigo', e.target.value)} />
                 <Input label="Version" value={form.version} onChange={e => updateField('version', e.target.value)} />
-                <Input label="Tiempo de Conservacion" value={form.tiempoConservacion} onChange={e => updateField('tiempoConservacion', e.target.value)} />
+                <label className="flex flex-col gap-1.5">
+                  <span className={labelClass}>Tiempo de Conservacion</span>
+                  <select value={form.tiempoConservacion} onChange={e => updateField('tiempoConservacion', e.target.value)} className={fieldClass}>
+                    <option value="">Seleccionar...</option>
+                    {tiempoConservacionOptions.map(value => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
                 <Input label="Norma/s" value={form.normas} onChange={e => updateField('normas', e.target.value)} />
                 <label className="flex flex-col gap-1.5 md:col-span-2">
                   <span className={labelClass}>Archivo</span>
@@ -13933,6 +13968,26 @@ const CalidadBiblioteca = () => {
                   <input type="checkbox" checked={form.requiereRevision} onChange={e => updateField('requiereRevision', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                   Documento Controlado / Requiere Revision
                 </label>
+                {form.requiereRevision && (
+                  <div className="grid grid-cols-1 gap-4 md:col-span-2 md:grid-cols-3">
+                    {[
+                      ['Elaborado Por:', 'elaboradoPor'],
+                      ['Revisado por:', 'revisadoPor'],
+                      ['Validado por:', 'validadoPor'],
+                    ].map(([label, field]) => (
+                      <label key={field} className="flex flex-col gap-1.5">
+                        <span className={labelClass}>{label}</span>
+                        <select value={form[field] || ''} onChange={e => updateField(field, e.target.value)} className={fieldClass}>
+                          <option value="">Seleccionar usuario...</option>
+                          {usuariosEmpresa.map(user => {
+                            const value = user.id || user.usuario || user.email || userLabel(user);
+                            return <option key={value} value={value}>{userLabel(user)}</option>;
+                          })}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <label className="flex flex-col gap-1.5 md:col-span-2">
                   <span className={labelClass}>Registros Asociados</span>
                   <textarea value={form.registrosAsociados} onChange={e => updateField('registrosAsociados', e.target.value)} rows={3} className={fieldClass} />
