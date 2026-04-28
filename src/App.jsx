@@ -13993,7 +13993,12 @@ const CalidadProveedorParametros = () => {
 const proveedorCalidadKey = (proveedor = {}) => String(proveedor.id || proveedor.id_RUT || normalizeRutKey(proveedor.rut) || '');
 const isProveedorCalidad = (cliente = {}) => {
   const tipo = normalizeKey(cliente.tipoProveedor ?? cliente.tipo_proveedor);
-  return tipo === 'p' || tipo === 'e';
+  const critico = String(cliente.clienteProveedorCritico ?? cliente.cliente_proveedor_critico ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+  return (tipo === 'p' || tipo === 'e') && critico === 'si';
 };
 const proveedorTipoLabel = (value) => {
   const tipo = String(value || '').trim();
@@ -14039,7 +14044,9 @@ const CalidadProveedoresTabla = () => {
       return {};
     }
   });
-  const fieldClass = "w-full min-w-36 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const [modalProveedor, setModalProveedor] = useState(null);
+  const fieldClass = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const labelClass = "text-xs font-bold uppercase tracking-wide text-slate-500";
   const proveedores = clientes
     .filter(cliente => (!activeEmpresaId || String(cliente.empresaId || cliente.empresa_id || '') === String(activeEmpresaId)))
     .filter(isProveedorCalidad)
@@ -14060,78 +14067,135 @@ const CalidadProveedoresTabla = () => {
     updateEvaluacion(proveedor, 'criterios', { ...(previous.criterios || {}), [criterio.id]: value });
   };
   const puntajeCriterio = (criterio, itemId) => Number(criterio.items.find(item => item.id === itemId)?.puntaje || 0);
-  const evaluacionTotal = (proveedor) => parametros.reduce((total, criterio) => {
-    const selected = criterioValue(proveedor, criterio);
+  const evaluacionTotal = (proveedor, draft = null) => parametros.reduce((total, criterio) => {
+    const selected = draft?.criterios?.[criterio.id] ?? criterioValue(proveedor, criterio);
     return total + (puntajeCriterio(criterio, selected) * Number(criterio.porcentaje || 0) / 100);
   }, 0);
   const formatEvaluation = (value) => Number(value || 0).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const openModify = (proveedor) => {
+    const id = proveedorCalidadKey(proveedor);
+    const current = evaluaciones[id] || {};
+    setModalProveedor({
+      proveedor,
+      data: {
+        fechaEvaluacion: current.fechaEvaluacion || '',
+        criterios: { ...(current.criterios || {}) },
+        nivelRiesgo: current.nivelRiesgo || 'Bajo',
+        estado: current.estado || 'Activo',
+      },
+    });
+  };
+  const setModalField = (key, value) => setModalProveedor(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
+  const setModalCriterio = (criterioId, value) => setModalProveedor(prev => ({
+    ...prev,
+    data: { ...prev.data, criterios: { ...(prev.data.criterios || {}), [criterioId]: value } },
+  }));
+  const saveModalProveedor = () => {
+    const proveedor = modalProveedor?.proveedor;
+    if (!proveedor) return;
+    const id = proveedorCalidadKey(proveedor);
+    persistEvaluaciones({ ...evaluaciones, [id]: modalProveedor.data });
+    setModalProveedor(null);
+  };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex flex-col gap-2 border-b border-slate-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h3 className="font-black text-slate-900">Proveedores evaluados</h3>
-          <p className="mt-1 text-xs text-slate-500">Empresa activa: {currentEmpresa?.razonSocial || 'Todas'} · filtro Tipo Proveedor P/E</p>
-        </div>
-        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{proveedores.length} proveedor(es)</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1900px] text-xs">
-          <thead className="bg-slate-50 text-left text-[10px] uppercase text-slate-400">
-            <tr>
-              {['Razon Social', 'RUT', 'Nombre del contacto', 'Correo de contacto', 'Tipo de Proveedor', 'Direccion', 'Comuna', 'Region', 'Fecha de la Evaluacion'].map(head => (
-                <th key={head} className="px-3 py-3 font-black">{head}</th>
+    <>
+      {modalProveedor && (
+        <Modal title="Modificar evaluacion de proveedor" onClose={() => setModalProveedor(null)} workspaceFull>
+          <div className="space-y-5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-lg font-black text-slate-900">{modalProveedor.proveedor.razonSocial || modalProveedor.proveedor.name || 'Proveedor'}</h3>
+              <div className="mt-2 grid grid-cols-1 gap-2 text-sm text-slate-600 md:grid-cols-3">
+                <span><strong>RUT:</strong> {modalProveedor.proveedor.rut || '-'}</span>
+                <span><strong>Tipo:</strong> {proveedorTipoLabel(modalProveedor.proveedor.tipoProveedor || modalProveedor.proveedor.tipo_proveedor)}</span>
+                <span><strong>Critico:</strong> Si</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-1.5">
+                <span className={labelClass}>Fecha de la Evaluacion</span>
+                <input type="date" value={modalProveedor.data.fechaEvaluacion || ''} onChange={e => setModalField('fechaEvaluacion', e.target.value)} className={fieldClass} />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className={labelClass}>Nivel de Riesgo</span>
+                <select value={modalProveedor.data.nivelRiesgo || 'Bajo'} onChange={e => setModalField('nivelRiesgo', e.target.value)} className={fieldClass}>
+                  {['Bajo', 'Medio', 'Alto', 'Critico'].map(value => <option key={value}>{value}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className={labelClass}>Activo/Inactivo</span>
+                <select value={modalProveedor.data.estado || 'Activo'} onChange={e => setModalField('estado', e.target.value)} className={fieldClass}>
+                  {['Activo', 'Inactivo'].map(value => <option key={value}>{value}</option>)}
+                </select>
+              </label>
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                <p className={labelClass}>Evaluacion</p>
+                <p className="mt-1 text-2xl font-black text-blue-700">{formatEvaluation(evaluacionTotal(modalProveedor.proveedor, modalProveedor.data))}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {parametros.map(criterio => (
+                <label key={criterio.id} className="flex flex-col gap-1.5">
+                  <span className={labelClass}>{criterio.criterio} ({criterio.porcentaje}%)</span>
+                  <select value={modalProveedor.data.criterios?.[criterio.id] || ''} onChange={e => setModalCriterio(criterio.id, e.target.value)} className={fieldClass}>
+                    <option value="">Seleccionar</option>
+                    {criterio.items.map(item => <option key={item.id} value={item.id}>{item.item} ({item.puntaje})</option>)}
+                  </select>
+                </label>
               ))}
-              {parametros.map(criterio => <th key={criterio.id} className="px-3 py-3 font-black">{criterio.criterio}</th>)}
-              <th className="px-3 py-3 text-right font-black">Evaluacion</th>
-              <th className="px-3 py-3 font-black">Nivel de Riesgo</th>
-              <th className="px-3 py-3 font-black">Activo/Inactivo</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {proveedores.length === 0 ? (
-              <tr><td colSpan={14 + parametros.length} className="px-6 py-12 text-center text-slate-400 italic">No hay proveedores con Tipo Proveedor P o E para la empresa activa.</td></tr>
-            ) : proveedores.map(proveedor => {
-              const id = proveedorCalidadKey(proveedor);
-              const row = evaluaciones[id] || {};
-              const total = evaluacionTotal(proveedor);
-              return (
-                <tr key={id} className="align-top hover:bg-slate-50">
-                  <td className="px-3 py-3 min-w-56 font-semibold text-slate-800">{proveedor.razonSocial || proveedor.name || '-'}</td>
-                  <td className="px-3 py-3 min-w-32 font-mono">{proveedor.rut || '-'}</td>
-                  <td className="px-3 py-3 min-w-44">{proveedorContactoNombre(proveedor) || '-'}</td>
-                  <td className="px-3 py-3 min-w-52">{proveedorContactoCorreo(proveedor) || '-'}</td>
-                  <td className="px-3 py-3 min-w-32 font-bold">{proveedorTipoLabel(proveedor.tipoProveedor || proveedor.tipo_proveedor)}</td>
-                  <td className="px-3 py-3 min-w-56">{proveedor.direccionPrincipal || proveedor.direccion_principal || '-'}</td>
-                  <td className="px-3 py-3 min-w-32">{proveedor.comuna || '-'}</td>
-                  <td className="px-3 py-3 min-w-32">{proveedor.region || '-'}</td>
-                  <td className="px-3 py-3 min-w-40"><input type="date" value={row.fechaEvaluacion || ''} onChange={e => updateEvaluacion(proveedor, 'fechaEvaluacion', e.target.value)} className={fieldClass} /></td>
-                  {parametros.map(criterio => (
-                    <td key={criterio.id} className="px-3 py-3 min-w-56">
-                      <select value={criterioValue(proveedor, criterio)} onChange={e => updateCriterio(proveedor, criterio, e.target.value)} className={fieldClass}>
-                        <option value="">Seleccionar</option>
-                        {criterio.items.map(item => <option key={item.id} value={item.id}>{item.item} ({item.puntaje})</option>)}
-                      </select>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <Button variant="secondary" onClick={() => setModalProveedor(null)}>Cancelar</Button>
+              <Button variant="accent" icon={CheckCircle} onClick={saveModalProveedor}>Guardar</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="font-black text-slate-900">Gestion de Proveedores</h3>
+            <p className="mt-1 text-xs text-slate-500">Empresa activa: {currentEmpresa?.razonSocial || 'Todas'} · filtro Tipo Proveedor P/E y Cliente/Proveedor Critico Si</p>
+          </div>
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{proveedores.length} proveedor(es)</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1100px] text-sm">
+            <thead className="bg-slate-50 text-left text-[10px] uppercase text-slate-400">
+              <tr>
+                {['Razon Social', 'RUT', 'Tipo de Proveedor', 'Nivel de Riesgo', 'Activo/Inactivo', 'Acciones'].map(head => (
+                  <th key={head} className={`px-4 py-3 font-black ${head === 'Acciones' ? 'text-right' : ''}`}>{head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {proveedores.length === 0 ? (
+                <tr><td colSpan="6" className="px-6 py-12 text-center text-slate-400 italic">No hay proveedores con Tipo Proveedor P o E y Cliente/Proveedor Critico Si para la empresa activa.</td></tr>
+              ) : proveedores.map(proveedor => {
+                const id = proveedorCalidadKey(proveedor);
+                const row = evaluaciones[id] || {};
+                return (
+                  <tr key={id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-semibold text-slate-800">{proveedor.razonSocial || proveedor.name || '-'}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{proveedor.rut || '-'}</td>
+                    <td className="px-4 py-3 font-bold">{proveedorTipoLabel(proveedor.tipoProveedor || proveedor.tipo_proveedor)}</td>
+                    <td className="px-4 py-3">{row.nivelRiesgo || 'Bajo'}</td>
+                    <td className="px-4 py-3">{row.estado || 'Activo'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Button variant="secondary" icon={Pencil} onClick={() => openModify(proveedor)}>Modificar</Button>
                     </td>
-                  ))}
-                  <td className="px-3 py-3 min-w-28 text-right font-mono font-black text-slate-800">{formatEvaluation(total)}</td>
-                  <td className="px-3 py-3 min-w-40">
-                    <select value={row.nivelRiesgo || 'Bajo'} onChange={e => updateEvaluacion(proveedor, 'nivelRiesgo', e.target.value)} className={fieldClass}>
-                      {['Bajo', 'Medio', 'Alto', 'Critico'].map(value => <option key={value}>{value}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-3 py-3 min-w-40">
-                    <select value={row.estado || 'Activo'} onChange={e => updateEvaluacion(proveedor, 'estado', e.target.value)} className={fieldClass}>
-                      {['Activo', 'Inactivo'].map(value => <option key={value}>{value}</option>)}
-                    </select>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
@@ -14167,7 +14231,7 @@ const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
           ))}
         </div>
       </div>
-      {titulo === 'Gestion de Proveedores' && activeTab === 'Proveedores' ? (
+      {titulo === 'Gestion de Proveedores' && (activeTab === 'Gestion de Proveedores' || activeTab === 'Proveedores') ? (
         <CalidadProveedoresTabla />
       ) : titulo === 'Gestion de Proveedores' && activeTab === 'Parametros' ? (
         <CalidadProveedorParametros />
@@ -17647,7 +17711,7 @@ const ContentManager = () => {
       case 'calidad-riesgos': return <CalidadRiesgosOportunidades />;
       case 'calidad-no-conformidades': return <CalidadSubmoduloBase titulo="Gestion de No Conformidades" tabs={['No Conformidades', 'Acciones Correctivas', 'Configuraciones']} />;
       case 'calidad-auditorias': return <CalidadSubmoduloBase titulo="Auditorias" tabs={['Planificacion de Auditorias', 'Configuracion de Auditorias']} />;
-      case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" tabs={['Proveedores', 'Documentos Proveedores', 'Parametros']} />;
+      case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" tabs={['Gestion de Proveedores', 'Documentos Proveedores', 'Parametros']} />;
       case 'calidad-clientes': return <CalidadSubmoduloBase titulo="Gestion de Clientes" tabs={['Clientes', 'Documentos Clientes', 'Contratos', 'Evaluaciones']} />;
       case 'calidad-reportes-indicadores': return <CalidadSubmoduloBase titulo="Reportes e Indicadores" />;
       case 'mantenedores-clientes': return <MantenedoresClientesProveedores />;
