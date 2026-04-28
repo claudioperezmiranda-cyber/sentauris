@@ -209,6 +209,7 @@ const normalizeCliente = (cliente) => cliente ? ({
   nombreFantasia: cliente.nombreFantasia || cliente.nombre_fantasia || '',
   tipoCliente: cliente.tipoCliente || cliente.tipo_cliente || cliente['Tipo Cliente'] || 'No',
   tipoProveedor: cliente.tipoProveedor || cliente.tipo_proveedor || 'No',
+  clienteProveedorCritico: cliente.clienteProveedorCritico || cliente.cliente_proveedor_critico || 'No',
   correoSii: cliente.correoSii || cliente.correo_sii || '',
   correoComercial: cliente.correoComercial || cliente.correo_comercial || '',
   plazoPago: cliente.plazoPago || cliente.plazo_pago || '',
@@ -235,6 +236,7 @@ const clienteFullPayload = (data) => ({
   nombre_fantasia:        data.nombreFantasia     || data.nombre_fantasia || null,
   tipo_cliente:           data.tipoCliente        || null,
   tipo_proveedor:         data.tipoProveedor      || null,
+  cliente_proveedor_critico: data.clienteProveedorCritico || 'No',
   correo_sii:             data.correoSii          || null,
   correo_comercial:       data.correoComercial    || null,
   plazo_pago:             data.plazoPago          || null,
@@ -263,6 +265,7 @@ const clienteExtendedSnapshot = (data = {}) => ({
   nombreFantasia: data.nombreFantasia || data.nombre_fantasia || '',
   tipoCliente: data.tipoCliente || data.tipo_cliente || data['Tipo Cliente'] || 'No',
   tipoProveedor: data.tipoProveedor || data.tipo_proveedor || 'No',
+  clienteProveedorCritico: data.clienteProveedorCritico || data.cliente_proveedor_critico || 'No',
   correoSii: data.correoSii || data.correo_sii || '',
   correoComercial: data.correoComercial || data.correo_comercial || '',
   plazoPago: data.plazoPago || data.plazo_pago || '',
@@ -7100,6 +7103,7 @@ const emptyClienteProveedor = (empresaId = '') => ({
   correoComercial: '',
   tipoCliente: 'No',
   tipoProveedor: 'No',
+  clienteProveedorCritico: 'No',
   direccionPrincipal: '',
   ciudad: '',
   comuna: '',
@@ -7126,6 +7130,7 @@ const CLIENTE_PROVEEDOR_COLUMNS = [
   ['correoComercial', 'Correo Electronico Comercial'],
   ['tipoCliente', 'Tipo Cliente'],
   ['tipoProveedor', 'Tipo Proveedor'],
+  ['clienteProveedorCritico', 'Cliente/Proveedor Critico'],
   ['direccionPrincipal', 'Direccion Principal'],
   ['ciudad', 'Ciudad'],
   ['comuna', 'Comuna'],
@@ -7159,6 +7164,7 @@ const MantenedoresClientesProveedores = () => {
     { id: 'nombreFantasia', label: 'Nombre Fantasía' },
     { id: 'tipoCliente', label: 'Tipo Cliente' },
     { id: 'tipoProveedor', label: 'Tipo Proveedor' },
+    { id: 'clienteProveedorCritico', label: 'Cliente/Proveedor Critico' },
     { id: 'correoComercial', label: 'Correo Comercial' },
     { id: 'telefono', label: 'Teléfono' },
   ];
@@ -7169,7 +7175,7 @@ const MantenedoresClientesProveedores = () => {
   const compactSelectClass = `${compactFieldClass} bg-white`;
 
   const empresaClientes = clientes.filter(c => c.empresaId === activeEmpresaId);
-  const filtered = empresaClientes.filter(c => [c.rut, c.razonSocial, c.name, c.nombreFantasia, c.giro, c.tipoCliente, c.tipoProveedor].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const filtered = empresaClientes.filter(c => [c.rut, c.razonSocial, c.name, c.nombreFantasia, c.giro, c.tipoCliente, c.tipoProveedor, c.clienteProveedorCritico].join(' ').toLowerCase().includes(search.toLowerCase()));
   const normalizeHeader = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
   const valueFromRow = (row, label) => {
     const wanted = normalizeHeader(label);
@@ -7239,7 +7245,7 @@ const MantenedoresClientesProveedores = () => {
   const exportTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
       CLIENTE_PROVEEDOR_COLUMNS.map(([, label]) => label),
-      ['76.123.456-K', 'Proveedor Ejemplo SPA', 'Proveedor Ejemplo', 'Servicios medicos', '', 'sii@proveedor.cl', 'ventas@proveedor.cl', 'Nacional', 'Nacional', 'Av. Principal 123', 'Santiago', 'Santiago', 'Metropolitana', 'Chile', '+56912345678', '30', 'No', '123456789', 'Banco Estado', 'Cuenta Corriente', 'Casa Matriz', 'Av. Principal 123', 'Santiago', 'Santiago', 'Metropolitana', 'Chile'],
+      ['76.123.456-K', 'Proveedor Ejemplo SPA', 'Proveedor Ejemplo', 'Servicios medicos', '', 'sii@proveedor.cl', 'ventas@proveedor.cl', 'Nacional', 'Nacional', 'Si', 'Av. Principal 123', 'Santiago', 'Santiago', 'Metropolitana', 'Chile', '+56912345678', '30', 'No', '123456789', 'Banco Estado', 'Cuenta Corriente', 'Casa Matriz', 'Av. Principal 123', 'Santiago', 'Santiago', 'Metropolitana', 'Chile'],
     ]);
     ws['!cols'] = CLIENTE_PROVEEDOR_COLUMNS.map(() => ({ wch: 24 }));
     const wb = XLSX.utils.book_new();
@@ -7315,6 +7321,7 @@ const MantenedoresClientesProveedores = () => {
     nombreFantasia: cliente.nombreFantasia || '-',
     tipoCliente: cliente.tipoCliente || 'No',
     tipoProveedor: cliente.tipoProveedor || 'No',
+    clienteProveedorCritico: cliente.clienteProveedorCritico || 'No',
     correoComercial: cliente.correoComercial || cliente.email || '-',
     telefono: cliente.telefono || '-',
   }[columnId] || '-');
@@ -7335,6 +7342,7 @@ const MantenedoresClientesProveedores = () => {
               ))}
               <div><label className={compactLabelClass}>Tipo de Cliente</label><select value={modal.data.tipoCliente} onChange={e => setField('tipoCliente', e.target.value)} className={compactSelectClass}>{CLIENTE_TIPOS.map(t => <option key={t}>{t}</option>)}</select></div>
               <div><label className={compactLabelClass}>Tipo Proveedor</label><select value={modal.data.tipoProveedor} onChange={e => setField('tipoProveedor', e.target.value)} className={compactSelectClass}>{PROVEEDOR_TIPOS.map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><label className={compactLabelClass}>Cliente/Proveedor Critico</label><select value={modal.data.clienteProveedorCritico || 'No'} onChange={e => setField('clienteProveedorCritico', e.target.value)} className={compactSelectClass}><option>Si</option><option>No</option></select></div>
               <div><label className={compactLabelClass}>Empresa relacionada</label><select value={modal.data.empresaRelacionada} onChange={e => setField('empresaRelacionada', e.target.value)} className={compactSelectClass}><option>No</option><option>Si</option></select></div>
               <div><label className={compactLabelClass}>Tipo de cuenta</label><select value={modal.data.tipoCuenta} onChange={e => setField('tipoCuenta', e.target.value)} className={compactSelectClass}>{TIPOS_CUENTA_BANCO.map(t => <option key={t}>{t}</option>)}</select></div>
             </div>
@@ -7384,7 +7392,7 @@ const MantenedoresClientesProveedores = () => {
             <button onClick={clearPreview} className="text-slate-400 hover:text-slate-700"><X size={18}/></button>
           </div>
           {previewErrors.length > 0 && <div className="px-6 py-3 bg-red-50 text-xs text-red-600">{previewErrors.map(e => <p key={e}>{e}</p>)}</div>}
-          <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50"><tr>{['RUT','Razón Social','Tipo Cliente','Tipo Proveedor','Correo Comercial','Sucursal'].map(h => <th key={h} className="p-3 text-left uppercase text-slate-400">{h}</th>)}</tr></thead><tbody>{preview.map(r => <tr key={r.id} className="border-t"><td className="p-3">{r.rut}</td><td className="p-3">{r.razonSocial}</td><td className="p-3">{r.tipoCliente}</td><td className="p-3">{r.tipoProveedor}</td><td className="p-3">{r.correoComercial}</td><td className="p-3">{r.sucursales?.[0]?.sucursal || '-'}</td></tr>)}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50"><tr>{['RUT','Razón Social','Tipo Cliente','Tipo Proveedor','Critico','Correo Comercial','Sucursal'].map(h => <th key={h} className="p-3 text-left uppercase text-slate-400">{h}</th>)}</tr></thead><tbody>{preview.map(r => <tr key={r.id} className="border-t"><td className="p-3">{r.rut}</td><td className="p-3">{r.razonSocial}</td><td className="p-3">{r.tipoCliente}</td><td className="p-3">{r.tipoProveedor}</td><td className="p-3">{r.clienteProveedorCritico || 'No'}</td><td className="p-3">{r.correoComercial}</td><td className="p-3">{r.sucursales?.[0]?.sucursal || '-'}</td></tr>)}</tbody></table></div>
           <div className="flex justify-end gap-3 px-6 py-4 border-t"><Button variant="secondary" onClick={clearPreview}>Cancelar</Button><Button variant="accent" onClick={confirmImport} disabled={previewErrors.length > 0}>Confirmar importación</Button></div>
         </div>
       )}
@@ -13796,6 +13804,187 @@ const CalidadMantenimientosCalibraciones = () => {
   );
 };
 
+const DEFAULT_PROVEEDOR_PARAMETROS = [
+  {
+    id: 'referencias-clientes',
+    criterio: 'Referencias y clientes',
+    porcentaje: 20,
+    descripcion: 'Este criterio califica la reputacion del Proveedor y su relacion con respecto a lo que ofrece a sus clientes.',
+    items: [
+      { id: 'ref-1', item: 'Mala referencias de clientes', puntaje: 1 },
+      { id: 'ref-3', item: 'Buena referencia de clientes', puntaje: 3 },
+      { id: 'ref-5', item: 'Excelentes referencias de clientes', puntaje: 5 },
+    ],
+  },
+  {
+    id: 'condiciones-pago',
+    criterio: 'Condiciones de pago',
+    porcentaje: 30,
+    descripcion: 'Este criterio califica los tipos de condiciones de pago, esto es, el como, pueden ser: pago al contado, pago anticipado, pago parcial o aplazado.',
+    items: [
+      { id: 'pago-1', item: 'Pago anticipado', puntaje: 1 },
+      { id: 'pago-3', item: 'Pago contado', puntaje: 3 },
+      { id: 'pago-5', item: 'Pago aplazado', puntaje: 5 },
+    ],
+  },
+  {
+    id: 'antiguedad-mercado',
+    criterio: 'Antiguedad en el Mercado',
+    porcentaje: 15,
+    descripcion: 'Este criterio califica la experiencia y el tiempo de permanencia del proveedor en el mercado. Si el proveedor conoce su mercado y las necesidades de sus clientes, se adapta rapidamente a los cambios y busca la mejora continua, puede permanecer por mas tiempo en este.',
+    items: [
+      { id: 'ant-1', item: 'Entre 0 <= 1 años en el mercado', puntaje: 1 },
+      { id: 'ant-3', item: 'Entre 2 <= 3 años en el mercado', puntaje: 3 },
+      { id: 'ant-5', item: 'Entre 3 <= 5 años en el mercado', puntaje: 5 },
+    ],
+  },
+  {
+    id: 'calidad',
+    criterio: 'Calidad',
+    porcentaje: 20,
+    descripcion: 'Este criterio califica la tenencia de un Sistema de Gestion de Calidad (SGC) sobre el servicio que el proveedor ofrece y es objeto de evaluacion. Este sistema puede asegurar que las cosas funcionan bien y que el proveedor puede responder rapidamente a los problemas que surjan. Un SGC plenamente establecido, puede garantizar confianza, beneficio mutuo y eficiencia a la hora de prestar un servicio.',
+    items: [
+      { id: 'cal-1', item: 'No cuenta con un SGC o de aseguramiento del producto', puntaje: 1 },
+      { id: 'cal-3', item: 'En proceso', puntaje: 3 },
+      { id: 'cal-5', item: 'Certificado', puntaje: 5 },
+    ],
+  },
+  {
+    id: 'servicio-post-venta',
+    criterio: 'Servicio post venta',
+    porcentaje: 15,
+    descripcion: 'Este criterio califica el servicio post-venta, la asesoria y la garantia que ofrece el proveedor a la hora de suministrar un bien o servicio. Estos son servicios complementarios que agregan valor al producto o servicio adquirido.',
+    items: [
+      { id: 'spv-1', item: 'No cuenta con un SGC o de aseguramiento del producto', puntaje: 1 },
+      { id: 'spv-3', item: 'En proceso', puntaje: 3 },
+      { id: 'spv-5', item: 'Certificado', puntaje: 5 },
+    ],
+  },
+];
+
+const normalizeProveedorParametros = (value) => {
+  const source = Array.isArray(value) && value.length > 0 ? value : DEFAULT_PROVEEDOR_PARAMETROS;
+  return source.map((criterio, index) => ({
+    id: criterio.id || `criterio-${index}-${Date.now()}`,
+    criterio: criterio.criterio || `Criterio ${index + 1}`,
+    porcentaje: Number(criterio.porcentaje) || 0,
+    descripcion: criterio.descripcion || '',
+    items: Array.isArray(criterio.items) && criterio.items.length > 0
+      ? criterio.items.map((item, itemIndex) => ({
+          id: item.id || `item-${index}-${itemIndex}-${Date.now()}`,
+          item: item.item || '',
+          puntaje: Number(item.puntaje) || 0,
+        }))
+      : [],
+  }));
+};
+
+const CalidadProveedorParametros = () => {
+  const storageKey = 'sentauris_calidad_proveedores_parametros';
+  const [parametros, setParametros] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_PROVEEDOR_PARAMETROS;
+    try {
+      return normalizeProveedorParametros(JSON.parse(localStorage.getItem(storageKey) || 'null'));
+    } catch {
+      return DEFAULT_PROVEEDOR_PARAMETROS;
+    }
+  });
+  const fieldClass = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const totalPorcentaje = parametros.reduce((sum, criterio) => sum + Number(criterio.porcentaje || 0), 0);
+  const updateParametros = (next) => {
+    const normalized = normalizeProveedorParametros(next);
+    setParametros(normalized);
+    if (typeof window !== 'undefined') localStorage.setItem(storageKey, JSON.stringify(normalized));
+  };
+  const updateCriterio = (id, key, value) => updateParametros(parametros.map(criterio => criterio.id === id ? { ...criterio, [key]: key === 'porcentaje' ? Number(value) : value } : criterio));
+  const updateItem = (criterioId, itemId, key, value) => updateParametros(parametros.map(criterio => criterio.id === criterioId ? {
+    ...criterio,
+    items: criterio.items.map(item => item.id === itemId ? { ...item, [key]: key === 'puntaje' ? Number(value) : value } : item),
+  } : criterio));
+  const addItem = (criterioId) => updateParametros(parametros.map(criterio => criterio.id === criterioId ? {
+    ...criterio,
+    items: [...criterio.items, { id: `item-${Date.now()}`, item: '', puntaje: 0 }],
+  } : criterio));
+  const removeItem = (criterioId, itemId) => updateParametros(parametros.map(criterio => criterio.id === criterioId ? {
+    ...criterio,
+    items: criterio.items.filter(item => item.id !== itemId),
+  } : criterio));
+  const resetParametros = () => updateParametros(DEFAULT_PROVEEDOR_PARAMETROS);
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 className="text-lg font-black text-slate-900">Seleccion de proveedores</h3>
+            <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
+              La seleccion de los proveedores la realiza el Gerente General/Gerente Comercial/lideres de area segun el area que corresponda, con base en los criterios establecidos previamente. Si cumple con todos los requisitos y pasa la calificacion, ingresa al listado de proveedores homologados.
+            </p>
+          </div>
+          <Button variant="secondary" icon={Settings} onClick={resetParametros}>Restaurar</Button>
+        </div>
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-[10px] uppercase text-slate-400">
+              <tr><th className="p-3 text-left">Criterio</th><th className="p-3 text-right">Porcentaje</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {parametros.map(criterio => (
+                <tr key={criterio.id}>
+                  <td className="p-3 font-semibold text-slate-800">{criterio.criterio}</td>
+                  <td className="p-3 text-right font-mono">{criterio.porcentaje}%</td>
+                </tr>
+              ))}
+              <tr className={totalPorcentaje === 100 ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}>
+                <td className="p-3 font-black">Total</td>
+                <td className="p-3 text-right font-black font-mono">{totalPorcentaje}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        {parametros.map(criterio => (
+          <div key={criterio.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-red-700 bg-red-700 px-5 py-3 text-white">
+              <div className="grid gap-3 md:grid-cols-[1fr_120px]">
+                <input value={criterio.criterio} onChange={e => updateCriterio(criterio.id, 'criterio', e.target.value)} className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-black placeholder:text-white/70 focus:outline-none focus:ring-2 focus:ring-white/40" />
+                <input type="number" min="0" max="100" value={criterio.porcentaje} onChange={e => updateCriterio(criterio.id, 'porcentaje', e.target.value)} className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-black focus:outline-none focus:ring-2 focus:ring-white/40" />
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              <textarea value={criterio.descripcion} onChange={e => updateCriterio(criterio.id, 'descripcion', e.target.value)} rows={2} className={fieldClass} />
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
+                    <tr><th className="p-3 text-left">Items</th><th className="w-28 p-3 text-center">Puntaje</th><th className="w-28 p-3 text-center">Total</th><th className="w-16 p-3 text-right"></th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {criterio.items.map(item => (
+                      <tr key={item.id}>
+                        <td className="p-2"><input value={item.item} onChange={e => updateItem(criterio.id, item.id, 'item', e.target.value)} className={fieldClass} /></td>
+                        <td className="p-2"><input type="number" value={item.puntaje} onChange={e => updateItem(criterio.id, item.id, 'puntaje', e.target.value)} className={`${fieldClass} text-center`} /></td>
+                        <td className="p-2 text-center font-mono text-slate-400"></td>
+                        <td className="p-2 text-right"><button onClick={() => removeItem(criterio.id, item.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Eliminar item"><Trash2 size={14} /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-end"><Button variant="secondary" icon={Plus} onClick={() => addItem(criterio.id)}>Agregar item</Button></div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600 shadow-sm">
+        Una vez calculada la puntuacion de cada criterio, se procede al calculo total de la evaluacion. Este se obtiene de la sumatoria de los puntajes totales de cada criterio. Solo se aceptaran aquellos que hayan obtenido un puntaje igual o superior a tres (3), o que no siendo asi, la Gerencia General lo considere.
+      </div>
+    </div>
+  );
+};
+
 const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
   const normalizedTabs = tabs.length > 0 ? tabs : ['Registros'];
   const [activeTab, setActiveTab] = useState(normalizedTabs[0]);
@@ -13828,9 +14017,13 @@ const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
           ))}
         </div>
       </div>
-      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
-        Modulo preparado para comenzar a cargar informacion de {activeTab.toLowerCase()}.
-      </div>
+      {titulo === 'Gestion de Proveedores' && activeTab === 'Parametros' ? (
+        <CalidadProveedorParametros />
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
+          Modulo preparado para comenzar a cargar informacion de {activeTab.toLowerCase()}.
+        </div>
+      )}
     </div>
   );
 };
@@ -17302,7 +17495,7 @@ const ContentManager = () => {
       case 'calidad-riesgos': return <CalidadRiesgosOportunidades />;
       case 'calidad-no-conformidades': return <CalidadSubmoduloBase titulo="Gestion de No Conformidades" tabs={['No Conformidades', 'Acciones Correctivas', 'Configuraciones']} />;
       case 'calidad-auditorias': return <CalidadSubmoduloBase titulo="Auditorias" tabs={['Planificacion de Auditorias', 'Configuracion de Auditorias']} />;
-      case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" tabs={['Proveedores', 'Documentos Proveedores', 'Compras/Licitaciones', 'Contratos']} />;
+      case 'calidad-proveedores': return <CalidadSubmoduloBase titulo="Gestion de Proveedores" tabs={['Proveedores', 'Documentos Proveedores', 'Parametros']} />;
       case 'calidad-clientes': return <CalidadSubmoduloBase titulo="Gestion de Clientes" tabs={['Clientes', 'Documentos Clientes', 'Contratos', 'Evaluaciones']} />;
       case 'calidad-reportes-indicadores': return <CalidadSubmoduloBase titulo="Reportes e Indicadores" />;
       case 'mantenedores-clientes': return <MantenedoresClientesProveedores />;

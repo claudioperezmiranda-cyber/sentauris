@@ -11,6 +11,7 @@ ALTER TABLE clientes ADD COLUMN IF NOT EXISTS giro               text;
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS nombre_fantasia    text;
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tipo_cliente       text DEFAULT 'No';
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tipo_proveedor     text DEFAULT 'No';
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cliente_proveedor_critico text DEFAULT 'No';
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_sii         text;
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_comercial   text;
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS plazo_pago         text;
