@@ -13990,6 +13990,151 @@ const CalidadProveedorParametros = () => {
   );
 };
 
+const proveedorCalidadKey = (proveedor = {}) => String(proveedor.id || proveedor.id_RUT || normalizeRutKey(proveedor.rut) || '');
+const isProveedorCalidad = (cliente = {}) => {
+  const tipo = normalizeKey(cliente.tipoProveedor ?? cliente.tipo_proveedor);
+  return tipo === 'p' || tipo === 'e';
+};
+const proveedorTipoLabel = (value) => {
+  const tipo = String(value || '').trim();
+  if (normalizeKey(tipo) === 'p') return 'P';
+  if (normalizeKey(tipo) === 'e') return 'E';
+  return tipo || '-';
+};
+const proveedorContactoNombre = (proveedor = {}) => (
+  proveedor.nombreContacto ||
+  proveedor.contacto ||
+  proveedor.encargado_contrato ||
+  proveedor.Encargado_Contrato ||
+  proveedor.nombreFantasia ||
+  ''
+);
+const proveedorContactoCorreo = (proveedor = {}) => (
+  proveedor.correoContacto ||
+  proveedor.email_contacto ||
+  proveedor.Email_contacto ||
+  proveedor.correoComercial ||
+  proveedor.email ||
+  ''
+);
+
+const CalidadProveedoresTabla = () => {
+  const { clientes, activeEmpresaId, currentEmpresa } = useContext(ERPContext);
+  const parametrosStorageKey = 'sentauris_calidad_proveedores_parametros';
+  const evaluacionesStorageKey = 'sentauris_calidad_proveedores_evaluaciones';
+  const parametros = (() => {
+    if (typeof window === 'undefined') return DEFAULT_PROVEEDOR_PARAMETROS;
+    try {
+      return normalizeProveedorParametros(JSON.parse(localStorage.getItem(parametrosStorageKey) || 'null'));
+    } catch {
+      return DEFAULT_PROVEEDOR_PARAMETROS;
+    }
+  })();
+  const [evaluaciones, setEvaluaciones] = useState(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(evaluacionesStorageKey) || '{}');
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    } catch {
+      return {};
+    }
+  });
+  const fieldClass = "w-full min-w-36 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+  const proveedores = clientes
+    .filter(cliente => (!activeEmpresaId || String(cliente.empresaId || cliente.empresa_id || '') === String(activeEmpresaId)))
+    .filter(isProveedorCalidad)
+    .sort((a, b) => String(a.razonSocial || a.name || '').localeCompare(String(b.razonSocial || b.name || ''), 'es'));
+  const persistEvaluaciones = (next) => {
+    setEvaluaciones(next);
+    if (typeof window !== 'undefined') localStorage.setItem(evaluacionesStorageKey, JSON.stringify(next));
+  };
+  const updateEvaluacion = (proveedor, key, value) => {
+    const id = proveedorCalidadKey(proveedor);
+    const previous = evaluaciones[id] || {};
+    persistEvaluaciones({ ...evaluaciones, [id]: { ...previous, [key]: value } });
+  };
+  const criterioValue = (proveedor, criterio) => evaluaciones[proveedorCalidadKey(proveedor)]?.criterios?.[criterio.id] || '';
+  const updateCriterio = (proveedor, criterio, value) => {
+    const id = proveedorCalidadKey(proveedor);
+    const previous = evaluaciones[id] || {};
+    updateEvaluacion(proveedor, 'criterios', { ...(previous.criterios || {}), [criterio.id]: value });
+  };
+  const puntajeCriterio = (criterio, itemId) => Number(criterio.items.find(item => item.id === itemId)?.puntaje || 0);
+  const evaluacionTotal = (proveedor) => parametros.reduce((total, criterio) => {
+    const selected = criterioValue(proveedor, criterio);
+    return total + (puntajeCriterio(criterio, selected) * Number(criterio.porcentaje || 0) / 100);
+  }, 0);
+  const formatEvaluation = (value) => Number(value || 0).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-col gap-2 border-b border-slate-100 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h3 className="font-black text-slate-900">Proveedores evaluados</h3>
+          <p className="mt-1 text-xs text-slate-500">Empresa activa: {currentEmpresa?.razonSocial || 'Todas'} · filtro Tipo Proveedor P/E</p>
+        </div>
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{proveedores.length} proveedor(es)</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1900px] text-xs">
+          <thead className="bg-slate-50 text-left text-[10px] uppercase text-slate-400">
+            <tr>
+              {['Razon Social', 'RUT', 'Nombre del contacto', 'Correo de contacto', 'Tipo de Proveedor', 'Direccion', 'Comuna', 'Region', 'Fecha de la Evaluacion'].map(head => (
+                <th key={head} className="px-3 py-3 font-black">{head}</th>
+              ))}
+              {parametros.map(criterio => <th key={criterio.id} className="px-3 py-3 font-black">{criterio.criterio}</th>)}
+              <th className="px-3 py-3 text-right font-black">Evaluacion</th>
+              <th className="px-3 py-3 font-black">Nivel de Riesgo</th>
+              <th className="px-3 py-3 font-black">Activo/Inactivo</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {proveedores.length === 0 ? (
+              <tr><td colSpan={14 + parametros.length} className="px-6 py-12 text-center text-slate-400 italic">No hay proveedores con Tipo Proveedor P o E para la empresa activa.</td></tr>
+            ) : proveedores.map(proveedor => {
+              const id = proveedorCalidadKey(proveedor);
+              const row = evaluaciones[id] || {};
+              const total = evaluacionTotal(proveedor);
+              return (
+                <tr key={id} className="align-top hover:bg-slate-50">
+                  <td className="px-3 py-3 min-w-56 font-semibold text-slate-800">{proveedor.razonSocial || proveedor.name || '-'}</td>
+                  <td className="px-3 py-3 min-w-32 font-mono">{proveedor.rut || '-'}</td>
+                  <td className="px-3 py-3 min-w-44">{proveedorContactoNombre(proveedor) || '-'}</td>
+                  <td className="px-3 py-3 min-w-52">{proveedorContactoCorreo(proveedor) || '-'}</td>
+                  <td className="px-3 py-3 min-w-32 font-bold">{proveedorTipoLabel(proveedor.tipoProveedor || proveedor.tipo_proveedor)}</td>
+                  <td className="px-3 py-3 min-w-56">{proveedor.direccionPrincipal || proveedor.direccion_principal || '-'}</td>
+                  <td className="px-3 py-3 min-w-32">{proveedor.comuna || '-'}</td>
+                  <td className="px-3 py-3 min-w-32">{proveedor.region || '-'}</td>
+                  <td className="px-3 py-3 min-w-40"><input type="date" value={row.fechaEvaluacion || ''} onChange={e => updateEvaluacion(proveedor, 'fechaEvaluacion', e.target.value)} className={fieldClass} /></td>
+                  {parametros.map(criterio => (
+                    <td key={criterio.id} className="px-3 py-3 min-w-56">
+                      <select value={criterioValue(proveedor, criterio)} onChange={e => updateCriterio(proveedor, criterio, e.target.value)} className={fieldClass}>
+                        <option value="">Seleccionar</option>
+                        {criterio.items.map(item => <option key={item.id} value={item.id}>{item.item} ({item.puntaje})</option>)}
+                      </select>
+                    </td>
+                  ))}
+                  <td className="px-3 py-3 min-w-28 text-right font-mono font-black text-slate-800">{formatEvaluation(total)}</td>
+                  <td className="px-3 py-3 min-w-40">
+                    <select value={row.nivelRiesgo || 'Bajo'} onChange={e => updateEvaluacion(proveedor, 'nivelRiesgo', e.target.value)} className={fieldClass}>
+                      {['Bajo', 'Medio', 'Alto', 'Critico'].map(value => <option key={value}>{value}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-3 py-3 min-w-40">
+                    <select value={row.estado || 'Activo'} onChange={e => updateEvaluacion(proveedor, 'estado', e.target.value)} className={fieldClass}>
+                      {['Activo', 'Inactivo'].map(value => <option key={value}>{value}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
   const normalizedTabs = tabs.length > 0 ? tabs : ['Registros'];
   const [activeTab, setActiveTab] = useState(normalizedTabs[0]);
@@ -14022,7 +14167,9 @@ const CalidadSubmoduloBase = ({ titulo, tabs = [] }) => {
           ))}
         </div>
       </div>
-      {titulo === 'Gestion de Proveedores' && activeTab === 'Parametros' ? (
+      {titulo === 'Gestion de Proveedores' && activeTab === 'Proveedores' ? (
+        <CalidadProveedoresTabla />
+      ) : titulo === 'Gestion de Proveedores' && activeTab === 'Parametros' ? (
         <CalidadProveedorParametros />
       ) : (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
