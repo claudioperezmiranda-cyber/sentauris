@@ -13845,7 +13845,7 @@ const emptyDocumentoControlado = () => ({
   normas: '',
   archivoNombre: '',
   descripcion: '',
-  permiteDescarga: false,
+  permiteDescarga: '',
   registrosAsociados: '',
   requiereRevision: false,
   elaboradoPor: '',
@@ -13890,6 +13890,7 @@ const CalidadBiblioteca = () => {
   });
   const userLabel = (user) => user.nombre || user.name || user.usuario || user.email || 'Usuario';
   const tiempoConservacionOptions = ['N/A', ...Array.from({ length: 10 }, (_, index) => `${index + 1} año${index === 0 ? '' : 's'}`)];
+  const descargaOptions = ['Descarga permitida', 'Descarga y visualizacion permitida', 'No permitida', 'Solo visualizacion online'];
   const saveDocumento = () => {
     const next = [{ ...form, id: form.id || `doc-${Date.now()}` }, ...documentos];
     setDocumentos(next);
@@ -13960,9 +13961,16 @@ const CalidadBiblioteca = () => {
                   <span className={labelClass}>Descripcion</span>
                   <textarea value={form.descripcion} onChange={e => updateField('descripcion', e.target.value)} rows={4} className={fieldClass} />
                 </label>
-                <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700">
-                  <input type="checkbox" checked={form.permiteDescarga} onChange={e => updateField('permiteDescarga', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                  Permitir la descarga del documento
+                <label className="flex flex-col gap-1.5">
+                  <span className={labelClass}>Permite la Descarga del documento</span>
+                  <select
+                    value={typeof form.permiteDescarga === 'boolean' ? (form.permiteDescarga ? 'Descarga permitida' : 'No permitida') : form.permiteDescarga}
+                    onChange={e => updateField('permiteDescarga', e.target.value)}
+                    className={fieldClass}
+                  >
+                    <option value="">Seleccionar...</option>
+                    {descargaOptions.map(value => <option key={value}>{value}</option>)}
+                  </select>
                 </label>
                 <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700">
                   <input type="checkbox" checked={form.requiereRevision} onChange={e => updateField('requiereRevision', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
