@@ -14072,20 +14072,42 @@ const CalidadProveedoresTabla = () => {
     return total + (puntajeCriterio(criterio, selected) * Number(criterio.porcentaje || 0) / 100);
   }, 0);
   const formatEvaluation = (value) => Number(value || 0).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const riesgoPorEvaluacion = (value) => {
+    const score = Number(value || 0);
+    if (score <= 1) return 'Alto';
+    if (score <= 3) return 'Medio';
+    return 'Bajo';
+  };
+  const addOneYearDate = (value) => {
+    if (!value) return '';
+    const date = new Date(`${value}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return '';
+    date.setFullYear(date.getFullYear() + 1);
+    return date.toISOString().slice(0, 10);
+  };
   const openModify = (proveedor) => {
     const id = proveedorCalidadKey(proveedor);
     const current = evaluaciones[id] || {};
+    const fechaEvaluacion = current.fechaEvaluacion || '';
     setModalProveedor({
       proveedor,
       data: {
-        fechaEvaluacion: current.fechaEvaluacion || '',
+        fechaEvaluacion,
+        fechaProximaEvaluacion: current.fechaProximaEvaluacion || addOneYearDate(fechaEvaluacion),
         criterios: { ...(current.criterios || {}) },
-        nivelRiesgo: current.nivelRiesgo || 'Bajo',
         estado: current.estado || 'Activo',
       },
     });
   };
   const setModalField = (key, value) => setModalProveedor(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
+  const setEvaluationDate = (value) => setModalProveedor(prev => ({
+    ...prev,
+    data: {
+      ...prev.data,
+      fechaEvaluacion: value,
+      fechaProximaEvaluacion: addOneYearDate(value),
+    },
+  }));
   const setModalCriterio = (criterioId, value) => setModalProveedor(prev => ({
     ...prev,
     data: { ...prev.data, criterios: { ...(prev.data.criterios || {}), [criterioId]: value } },
@@ -14094,7 +14116,8 @@ const CalidadProveedoresTabla = () => {
     const proveedor = modalProveedor?.proveedor;
     if (!proveedor) return;
     const id = proveedorCalidadKey(proveedor);
-    persistEvaluaciones({ ...evaluaciones, [id]: modalProveedor.data });
+    const total = evaluacionTotal(proveedor, modalProveedor.data);
+    persistEvaluaciones({ ...evaluaciones, [id]: { ...modalProveedor.data, nivelRiesgo: riesgoPorEvaluacion(total), evaluacion: total } });
     setModalProveedor(null);
   };
 
@@ -14115,13 +14138,11 @@ const CalidadProveedoresTabla = () => {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="flex flex-col gap-1.5">
                 <span className={labelClass}>Fecha de la Evaluacion</span>
-                <input type="date" value={modalProveedor.data.fechaEvaluacion || ''} onChange={e => setModalField('fechaEvaluacion', e.target.value)} className={fieldClass} />
+                <input type="date" value={modalProveedor.data.fechaEvaluacion || ''} onChange={e => setEvaluationDate(e.target.value)} className={fieldClass} />
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className={labelClass}>Nivel de Riesgo</span>
-                <select value={modalProveedor.data.nivelRiesgo || 'Bajo'} onChange={e => setModalField('nivelRiesgo', e.target.value)} className={fieldClass}>
-                  {['Bajo', 'Medio', 'Alto', 'Critico'].map(value => <option key={value}>{value}</option>)}
-                </select>
+                <span className={labelClass}>Fecha de Proxima Evaluacion</span>
+                <input type="date" value={modalProveedor.data.fechaProximaEvaluacion || ''} onChange={e => setModalField('fechaProximaEvaluacion', e.target.value)} className={fieldClass} />
               </label>
               <label className="flex flex-col gap-1.5">
                 <span className={labelClass}>Activo/Inactivo</span>
@@ -14129,6 +14150,10 @@ const CalidadProveedoresTabla = () => {
                   {['Activo', 'Inactivo'].map(value => <option key={value}>{value}</option>)}
                 </select>
               </label>
+              <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
+                <p className={labelClass}>Nivel de Riesgo</p>
+                <p className="mt-1 text-2xl font-black text-amber-700">{riesgoPorEvaluacion(evaluacionTotal(modalProveedor.proveedor, modalProveedor.data))}</p>
+              </div>
               <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
                 <p className={labelClass}>Evaluacion</p>
                 <p className="mt-1 text-2xl font-black text-blue-700">{formatEvaluation(evaluacionTotal(modalProveedor.proveedor, modalProveedor.data))}</p>
@@ -14183,7 +14208,7 @@ const CalidadProveedoresTabla = () => {
                     <td className="px-4 py-3 font-semibold text-slate-800">{proveedor.razonSocial || proveedor.name || '-'}</td>
                     <td className="px-4 py-3 font-mono text-xs">{proveedor.rut || '-'}</td>
                     <td className="px-4 py-3 font-bold">{proveedorTipoLabel(proveedor.tipoProveedor || proveedor.tipo_proveedor)}</td>
-                    <td className="px-4 py-3">{row.nivelRiesgo || 'Bajo'}</td>
+                    <td className="px-4 py-3">{row.nivelRiesgo || riesgoPorEvaluacion(evaluacionTotal(proveedor))}</td>
                     <td className="px-4 py-3">{row.estado || 'Activo'}</td>
                     <td className="px-4 py-3 text-right">
                       <Button variant="secondary" icon={Pencil} onClick={() => openModify(proveedor)}>Modificar</Button>
